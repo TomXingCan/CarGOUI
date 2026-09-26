@@ -6,14 +6,13 @@ function addon:CreateDisplay()
     self.reminderFrames = self.reminderFrames or {}
 end
 
-function addon:ApplyFontSettings(text)
-    local db = self.db
-    if not text:SetFont(db.font.face, db.font.size, db.font.outline) then
+function addon:ApplyFontSettings(text, style)
+    if not text:SetFont(style.font.face, style.font.size, style.font.outline) then
         -- Localized clients may need their standard font as a fallback.
-        text:SetFont(STANDARD_TEXT_FONT or self.defaults.font.face,
-            db.font.size, db.font.outline)
+        text:SetFont(STANDARD_TEXT_FONT or self.factoryReminderStyle.font.face,
+            style.font.size, style.font.outline)
     end
-    if db.shadow.enabled then
+    if style.shadow.enabled then
         text:SetShadowColor(0, 0, 0, 1)
         text:SetShadowOffset(1, -1)
     else
@@ -38,6 +37,7 @@ function addon:AcquireReminderFrame(entry, channel)
     frame:SetFrameLevel(10)
     frame:EnableMouse(false)
     frame.entryId = entry.id
+    frame.channel = channel
     frame.text = frame:CreateFontString(nil, "OVERLAY")
     frame.text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text:SetJustifyH("CENTER")
@@ -51,18 +51,21 @@ end
 -- Proc output is only a timer. Labels/textures/crosshairs belong to Test Mode.
 function addon:LayoutReminder(frame, entry)
     local db = self.db
+    local style = self:GetReminderStyle(frame.styleKey or entry)
+    frame.reminderEntry = entry
     local setting = db.reminders and db.reminders[entry.id]
     local position = setting and setting.position or { x = 0, y = 0 }
     local x = entry.anchor.x + db.position.x + position.x
     local y = entry.anchor.y + db.position.y + position.y
-    frame:SetScale(db.scale)
+    frame:SetScale(style.scale)
     frame:ClearAllPoints()
-    frame:SetPoint("CENTER", UIParent, "CENTER", x / db.scale, y / db.scale)
+    frame:SetPoint("CENTER", UIParent, "CENTER", x / style.scale, y / style.scale)
 
-    self:ApplyFontSettings(frame.text)
+    self:ApplyFontSettings(frame.text, style)
 end
 
 function addon:RenderReminder(frame, entry, content, testMode)
+    frame.styleKey = self:GetReminderStyleKey(entry)
     self:LayoutReminder(frame, entry)
     local db = self.db
     local text = content.timer or ""
@@ -78,6 +81,28 @@ function addon:RenderReminder(frame, entry, content, testMode)
     frame:SetShown(db.enabled and text ~= "")
 end
 
+-- Styling never re-queries combat state or rebinds its DurationObject/alpha.
+-- Only frames belonging to this exact appearance entry are touched.
+function addon:RefreshReminderStyle(key)
+    for _, pool in pairs(self.reminderFrames or {}) do
+        for _, frame in pairs(pool) do
+            if frame.styleKey == key and frame.reminderEntry then
+                self:LayoutReminder(frame, frame.reminderEntry)
+                if frame.mobilityOwned then
+                    local size = self:GetReminderStyle(key).font.size
+                    frame:SetSize(size * 16, size * 3)
+                    frame.text:SetSize(size * 16, size * 3)
+                elseif frame.channel == "preview" then
+                    -- Only sample strings enter the ordinary measurement path.
+                    frame:SetSize(math.max(1, frame.text:GetStringWidth()) + 8,
+                        math.max(1, frame.text:GetStringHeight()) + 8)
+                    self:UpdatePreviewGuidance(frame, frame.reminderEntry, frame:IsShown())
+                end
+            end
+        end
+    end
+end
+
 function addon:ApplySettings()
     if not self.db then return end
     if self.ConfigureMobility then self:ConfigureMobility() end
@@ -86,11 +111,12 @@ end
 
 -- Live durations never enter RenderReminder's Lua string/measurement path.
 -- The native binding owns all time sampling, formatting and expiration text.
-function addon:RenderLiveMobility(entry, spellName, duration, visibility)
+function addon:RenderLiveMobility(entry, spellName, duration, visibility, spellID)
     local frame = self:AcquireReminderFrame(entry, "live")
     frame.mobilityOwned = true
+    frame.styleKey = self:GetReminderStyleKey(entry, spellID)
     self:LayoutReminder(frame, entry)
-    local size = self.db.font.size
+    local size = self:GetReminderStyle(frame.styleKey).font.size
     frame:SetSize(size * 16, size * 3)
     frame.text:SetSize(size * 16, size * 3)
     if not frame.durationBinding then

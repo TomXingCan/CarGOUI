@@ -1,5 +1,7 @@
 # Phase 2A combat fix — 游戏内验收
 
+> **后续反馈：用户已实测确认 alpha.6 Blink / Shimmer 正常。** 下文保留当时的开发/验收记录与接口边界；alpha.7 仅增加独立样式和自动主题，见 [当前说明与验收](ENTRY_STYLES.md)。用户反馈未提供完整 build/场景矩阵，不扩写为所有边界均已通过。
+
 目标包为 `0.1.0-alpha.6`。**开发环境没有真实 WoW 客户端，下列项目均为待执行的验收步骤，不是测试通过记录。** API 签名/数据核查与离线结果分别见 [API 核查](Mobility-Combat-API-Audit.md) 和随 ZIP 交付的测试输出。
 
 ## 安装和记录

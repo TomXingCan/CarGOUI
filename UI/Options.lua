@@ -212,6 +212,77 @@ local function SetSlider(slider, value)
     end
 end
 
+local function EligibleAppearance(kind)
+    local allowed = {}
+    if kind == "mobility" then
+        allowed.mobility_blink, allowed.mobility_shimmer = true, true
+    else
+        for _, entry in ipairs(addon:GetPreviewEntries()) do
+            if entry.kind == "proc" then allowed[entry.id] = true end
+        end
+    end
+    return allowed
+end
+
+local function FirstAppearance(allowed)
+    for _, entry in ipairs(addon.appearanceEntries) do
+        if allowed[entry.key] then return entry.key end
+    end
+end
+
+local function RefreshAppearanceControls(panel)
+    local controls = panel.controls
+    local allowed = EligibleAppearance(panel.appearanceKind or "mobility")
+    if not allowed[panel.selectedAppearanceKey] then
+        panel.selectedAppearanceKey = FirstAppearance(allowed)
+        -- Never carry a draft from one entry/spec to another.
+        controls.appearanceFontSize.editBox.dirty = false
+        controls.appearanceScale.editBox.dirty = false
+        controls.appearanceFontSize.editBox:ClearFocus()
+        controls.appearanceScale.editBox:ClearFocus()
+    end
+    local key = panel.selectedAppearanceKey
+    controls.appearanceEntry:FilterChoices(allowed)
+    controls.appearanceEntry:SelectValue(key)
+    for _, name in ipairs({ "appearanceFont", "appearanceFontSize", "appearanceOutline",
+        "appearanceShadow", "appearanceScale", "appearanceReset" }) do
+        controls[name]:SetEnabled(key ~= nil)
+    end
+    controls.appearanceFontSize.editBox:SetEnabled(key ~= nil)
+    controls.appearanceScale.editBox:SetEnabled(key ~= nil)
+    controls.appearancePreview:SetEnabled(key ~= nil and not InCombatLockdown()
+        and (panel.appearanceKind == "proc" or addon:GetMobilityEntry() ~= nil))
+    if key then
+        local style = addon:GetReminderStyle(key)
+        controls.appearanceFont:SelectValue(style.font.face)
+        controls.appearanceOutline:SelectValue(style.font.outline)
+        controls.appearanceShadow:SetChecked(style.shadow.enabled)
+        SetSlider(controls.appearanceFontSize, style.font.size)
+        SetSlider(controls.appearanceScale, style.scale)
+    end
+    panel.appearanceHint:SetText(panel.appearanceKind == "proc"
+        and "Preview only: real Proc / Buff monitoring is not implemented. Each region has its own appearance."
+        or "Blink and Shimmer have separate styles. Live uses the detected skill; positions remain shared within each spec.")
+end
+
+function addon:OpenAppearance(kind, key)
+    local panel = self.optionsFrame
+    if not panel then return end
+    panel.appearanceKind = kind == "proc" and "proc" or "mobility"
+    local allowed = EligibleAppearance(panel.appearanceKind)
+    panel.selectedAppearanceKey = allowed[key] and key or FirstAppearance(allowed)
+    self:SelectOptionsCategory("appearance")
+end
+
+function addon:RefreshOptionsThemeLabels(info)
+    local panel = self.optionsFrame
+    if not panel or not panel.themeIdentity then return end
+    panel.themeIdentity:SetText("Theme: Automatic\nFaction: " .. info.faction
+        .. "\nClass: " .. info.class .. "\nSpecialization: " .. info.specialization
+        .. "\nPalette: " .. info.palette)
+    panel.themeFallback:SetText(info.fallback or "")
+end
+
 local function InCombat()
     return InCombatLockdown and InCombatLockdown() or false
 end
@@ -338,11 +409,16 @@ function addon:RefreshOptions()
         controls.x:SetText(string.format("%g", db.position.x))
         controls.y:SetText(string.format("%g", db.position.y))
     end
-    controls.font:SelectValue(db.font.face)
-    controls.outline:SelectValue(db.font.outline)
-    controls.shadow:SetChecked(db.shadow.enabled)
-    SetSlider(controls.fontSize, db.font.size)
-    SetSlider(controls.scale, db.scale)
+    RefreshAppearanceControls(panel)
+    local procAllowed = EligibleAppearance("proc")
+    if not procAllowed[panel.selectedProcEntry] then
+        panel.selectedProcEntry = FirstAppearance(procAllowed)
+    end
+    controls.procEntry:FilterChoices(procAllowed)
+    controls.procEntry:SelectValue(panel.selectedProcEntry)
+    controls.procAppearance:SetEnabled(panel.selectedProcEntry ~= nil)
+    controls.procPreview:SetEnabled(panel.selectedProcEntry ~= nil and not InCombatLockdown())
+    controls.procStop:SetEnabled(self.previewState.mode ~= "off")
     panel.refreshing = false
     self:ApplyOptionsPosition()
     self:RefreshTitleAnimation()
@@ -406,7 +482,9 @@ function addon:SelectOptionsCategory(key)
     end
     for _, button in ipairs(panel.categories) do
         if panel.pages[button.key] then
-            button:SetText((button.key == key and "> " or "") .. L[button.key])
+            local selected = button.key == key or (key == "appearance" and button.key == panel.appearanceKind)
+            button:SetText((selected and "> " or "") .. L[button.key])
+            self:ApplyOptionsCategoryTheme(button, selected)
         end
     end
     Feedback(panel, L.immediate)
@@ -414,6 +492,7 @@ function addon:SelectOptionsCategory(key)
 end
 
 local function OnOptionsSpecializationChanged(self, _, unit)
+    if issecretvalue and issecretvalue(unit) then return end
     if unit and unit ~= "player" then return end
     CloseMenus(self.optionsFrame)
     self:RefreshOptions()
@@ -421,6 +500,13 @@ end
 
 local function OnOptionsCombatChanged(self)
     self:RefreshMobilityOptions()
+    local panel = self.optionsFrame
+    if panel and panel:IsShown() then
+        panel.refreshing = true
+        RefreshAppearanceControls(panel)
+        panel.controls.procPreview:SetEnabled(panel.selectedProcEntry ~= nil and not InCombatLockdown())
+        panel.refreshing = false
+    end
 end
 
 function addon:CreateOptions()
@@ -450,8 +536,9 @@ function addon:CreateOptions()
     divider:SetColorTexture(0.22, 0.30, 0.34, 1)
     divider:SetPoint("TOPLEFT", panel, "TOPLEFT", 192, -82)
     divider:SetSize(1, 380)
+    panel.themeDivider = divider
 
-    for _, key in ipairs({ "general", "typography", "preview", "mobility" }) do
+    for _, key in ipairs({ "general", "appearance", "preview", "mobility", "proc", "themes" }) do
         local page = CreateFrame("Frame", nil, panel)
         page:SetPoint("TOPLEFT", panel, "TOPLEFT", 216, -88)
         page:SetSize(480, 374)
@@ -459,7 +546,7 @@ function addon:CreateOptions()
         panel.pages[key] = page
         Label(page, L[key], 0, 0, 470, 24, "GameFontNormalLarge")
     end
-    for index, key in ipairs({ "general", "typography", "preview", "mobility", "proc", "themes", "importExport" }) do
+    for index, key in ipairs({ "general", "preview", "mobility", "proc", "themes", "importExport" }) do
         local category = key
         local button = Button(panel, L[key], 16, -88 - (index - 1) * 40, 162, function()
             addon:SelectOptionsCategory(category)
@@ -473,6 +560,7 @@ function addon:CreateOptions()
         end
         panel.categories[#panel.categories + 1] = button
     end
+    self:CreateOptionsTheme(panel)
     Label(panel, L.future, 20, -382, 156, 72)
     panel.feedback = Label(panel, "", 24, -476, 672, 32)
     panel.controls.reset = Button(panel, L.reset, 24, -516, 170, function()
@@ -521,27 +609,68 @@ function addon:CreateOptions()
         Submit(panel, { position = { x = 0, y = 0 } })
     end)
     Label(general, L.positionHint, 0, -174, 470, 36)
-    panel.controls.scale = Slider(panel, general, L.scale, -250, addon.limits.scale, 0.05,
-        function(value) return { scale = value or false } end, L.invalidScale)
+    Label(general, "Font and scale are saved independently for each Mobility skill and Proc region. Open its Appearance settings.", 0, -266, 470, 48)
     panel.controls.animatedTitle = CheckBox(panel, general, L.animatedTitle, 0, -332,
         function(value) return { options = { animatedTitle = value } } end)
     panel.controls.centerOptions = Button(general, L.centerOptions, 316, -332, 158, function()
         Submit(panel, { options = { position = { x = 0, y = 0 } } })
     end)
 
-    local typography = panel.pages.typography
-    Label(typography, L.appearanceHint, 0, -32, 470, 32)
-    panel.controls.font = Dropdown(panel, typography, L.font, 0, -74, addon.fonts,
-        function(value) return { font = { face = value } } end)
-    panel.controls.fontSize = Slider(panel, typography, L.fontSize, -158, addon.limits.fontSize, 1,
-        function(value) return { font = { size = value or false } } end, L.invalidFontSize)
-    panel.controls.outline = Dropdown(panel, typography, L.outline, 0, -242, {
+    local appearance = panel.pages.appearance
+    local scroll = CreateFrame("ScrollFrame", nil, appearance, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", appearance, "TOPLEFT", 0, -32)
+    scroll:SetSize(448, 336)
+    local editor = CreateFrame("Frame", nil, scroll)
+    editor:SetSize(448, 654)
+    scroll:SetScrollChild(editor)
+    panel.appearanceScroll = scroll
+    local appearanceChoices = {}
+    for _, entry in ipairs(self.appearanceEntries) do
+        appearanceChoices[#appearanceChoices + 1] = { value = entry.key, label = entry.label }
+    end
+    panel.controls.appearanceEntry = Dropdown(panel, editor, "Reminder entry", 0, 0, appearanceChoices, nil, function(key)
+        ClearEdits(panel)
+        panel.selectedAppearanceKey = key
+        if panel.appearanceKind == "proc" then panel.selectedProcEntry = key end
+        if addon.previewState.mode == "single" then addon:StartAppearancePreview(key) end
+        addon:RefreshOptions()
+    end)
+    panel.appearanceHint = Label(editor, "", 0, -64, 438, 44)
+    local function StylePatch(patch)
+        local key = panel.selectedAppearanceKey
+        return key and { styles = { [key] = patch } } or { styles = false }
+    end
+    panel.controls.appearanceFont = Dropdown(panel, editor, L.font, 0, -122, addon.fonts,
+        function(value) return StylePatch({ font = { face = value } }) end)
+    panel.controls.appearanceFontSize = Slider(panel, editor, L.fontSize, -200, addon.limits.fontSize, 1,
+        function(value) return StylePatch({ font = { size = value or false } }) end, L.invalidFontSize)
+    panel.controls.appearanceOutline = Dropdown(panel, editor, L.outline, 0, -286, {
         { value = "", label = L.none }, { value = "OUTLINE", label = L.normal },
         { value = "THICKOUTLINE", label = L.thick },
-    }, function(value) return { font = { outline = value } } end)
-    panel.controls.shadow = CheckBox(panel, typography, L.shadow, 0, -316,
-        function(value) return { shadow = { enabled = value } } end)
-    Button(typography, L.openPreview, 316, -316, 158, function() addon:SelectOptionsCategory("preview") end)
+    }, function(value) return StylePatch({ font = { outline = value } }) end)
+    panel.controls.appearanceShadow = CheckBox(panel, editor, L.shadow, 0, -358,
+        function(value) return StylePatch({ shadow = { enabled = value } }) end)
+    panel.controls.appearanceScale = Slider(panel, editor, L.scale, -410, addon.limits.scale, 0.05,
+        function(value) return StylePatch({ scale = value or false }) end, L.invalidScale)
+    for _, slider in ipairs({ panel.controls.appearanceFontSize, panel.controls.appearanceScale }) do
+        slider:SetWidth(288)
+        slider.editBox:ClearAllPoints()
+        slider.editBox:SetPoint("TOPLEFT", editor, "TOPLEFT", 318, slider == panel.controls.appearanceFontSize and -224 or -434)
+    end
+    Label(editor, L.appearanceHint, 0, -490, 430, 40)
+    panel.controls.appearanceReset = Button(editor, "Reset this entry's style", 0, -540, 220, function()
+        ClearEdits(panel)
+        CancelReset(panel)
+        if addon:ResetReminderStyle(panel.selectedAppearanceKey) then Feedback(panel, L.saved) end
+    end)
+    panel.controls.appearancePreview = Button(editor, "Preview this entry", 232, -540, 198, function()
+        local ok, message = addon:StartAppearancePreview(panel.selectedAppearanceKey)
+        addon:RefreshOptions()
+        if not ok then Feedback(panel, message, true) end
+    end)
+    panel.controls.appearanceBack = Button(editor, "Back", 0, -592, 140, function()
+        addon:SelectOptionsCategory(panel.appearanceKind or "mobility")
+    end)
 
     local page = panel.pages.preview
     Label(page, L.previewHint, 0, -32, 470, 44)
@@ -598,6 +727,41 @@ function addon:CreateOptions()
     Label(page, L.entryHint, 0, -266, 470, 44)
     panel.previewStatus = Label(page, "", 0, -324, 470, 48)
 
+    local proc = panel.pages.proc
+    Label(proc, "Preview only — real Proc / Buff monitoring is not implemented. Styles and previews use only the already defined regions for your current specialization.", 0, -34, 470, 62)
+    local procChoices = {}
+    for _, entry in ipairs(self.appearanceEntries) do
+        if entry.kind == "proc" then procChoices[#procChoices + 1] = { value = entry.key, label = entry.label } end
+    end
+    panel.controls.procEntry = Dropdown(panel, proc, "Proc region (Preview only)", 0, -110, procChoices, nil, function(key)
+        ClearEdits(panel)
+        panel.selectedProcEntry = key
+        addon:RefreshOptions()
+    end)
+    panel.controls.procEntry:SetWidth(474)
+    panel.controls.procAppearance = Button(proc, "Appearance", 0, -194, 226, function()
+        addon:OpenAppearance("proc", panel.selectedProcEntry)
+    end)
+    panel.controls.procPreview = Button(proc, "Preview this region", 248, -194, 226, function()
+        local ok, message = addon:StartAppearancePreview(panel.selectedProcEntry)
+        addon:RefreshOptions()
+        if not ok then Feedback(panel, message, true) end
+    end)
+    panel.controls.procStop = Button(proc, L.previewStop, 0, -238, 226, function()
+        addon:StopPreview()
+        addon:RefreshOptions()
+    end)
+    Button(proc, "Region position / Test Mode", 248, -238, 226, function()
+        panel.selectedPreviewEntry = panel.selectedProcEntry
+        addon:SelectOptionsCategory("preview")
+    end)
+    Label(proc, "Each region stores its own font, size, outline, shadow and scale. Editing one region never changes another region or its coordinates.", 0, -298, 470, 60)
+
+    local themes = panel.pages.themes
+    Label(themes, "Automatic faction and specialization theme. No manual selection or custom colors are needed.", 0, -36, 470, 42)
+    panel.themeIdentity = Label(themes, "", 0, -98, 470, 150, "GameFontHighlight")
+    panel.themeFallback = Label(themes, "", 0, -260, 470, 76)
+
     local mobility = panel.pages.mobility
     panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,
         function(value) return { mobility = { enabled = value } } end)
@@ -627,7 +791,10 @@ function addon:CreateOptions()
     panel.controls.mobilityGeneral = Button(mobility, L.mobilityGeneral, 0, -242, 226,
         function() addon:SelectOptionsCategory("general") end)
     panel.controls.mobilityTypography = Button(mobility, L.mobilityTypography, 248, -242, 226,
-        function() addon:SelectOptionsCategory("typography") end)
+        function()
+            local status = addon:GetMobilityStatus()
+            addon:OpenAppearance("mobility", status.spellID == 1953 and "mobility_blink" or "mobility_shimmer")
+        end)
     panel.controls.mobilityPreview = Button(mobility, L.mobilityPreview, 0, -282, 226, function()
         local entry = addon.GetMobilityEntry and addon:GetMobilityEntry()
         local ok, message = false, L.mobilityNoSpell
@@ -650,12 +817,14 @@ function addon:CreateOptions()
         addon:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:RegisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
         addon:RegisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)
+        addon:RefreshOptionsTheme()
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
     panel:SetScript("OnHide", function()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
         addon:UnregisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)
+        addon:StopOptionsTheme()
         if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
         addon:StopPreview()
         addon:StopTitleAnimation()

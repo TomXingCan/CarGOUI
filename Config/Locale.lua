@@ -1,15 +1,15 @@
 local _, addon = ...
 
 local english = {
-    options = "Options", general = "General", typography = "Font & appearance",
+    options = "Options", general = "General", appearance = "Appearance",
     preview = "Test Mode", mobility = "Mobility", proc = "Proc", themes = "Themes",
     importExport = "Import / Export", unavailable = "Not implemented",
     future = "Disabled categories are reserved for future updates.",
-    generalHint = "Style live reminders and test samples. Drag only the title bar to move this window.",
+    generalHint = "Display and shared position settings. Individual appearance is in Mobility / Proc. Drag the title bar to move this window.",
     enabled = "Show reminders (live and test)", x = "Global X offset", y = "Global Y offset",
     apply = "Apply", center = "Center position", scale = "Scale",
     positionHint = "Press Enter in either box to save both axes (-10000 to 10000). Offsets shift every reminder from its defined anchor.",
-    appearanceHint = "Choose a built-in game font and adjust the text appearance.",
+    appearanceHint = "Only this entry changes. Reminder colors always use your Blizzard class color.",
     font = "Font", fontSize = "Font size", outline = "Outline", shadow = "Text shadow",
     none = "None", normal = "Outline", thick = "Thick outline", openPreview = "Test Mode",
     previewHint = "Simulated reminders appear in game space and are marked TEST. Combat stops Test Mode; live Mobility continues independently.",
@@ -25,7 +25,7 @@ local english = {
     previewRunning = "SIMULATED: %s. Fixed sample values; no live detection.",
     mobilityEnabled = "Enable Mobility", mobilitySpell = "Detected spell: %s",
     mobilityStatus = "Status: %s", mobilityPosition = "Current Mobility region: Enter saves both axes.",
-    mobilityGeneral = "Global position & scale", mobilityTypography = "Font & appearance",
+    mobilityGeneral = "Global position", mobilityTypography = "Appearance",
     mobilityPreview = "Test current spell", mobilityDiagnostics = "Copy diagnostics",
     mobilityNoSpell = "No supported spell detected", mobilityDisabled = "Live Mobility is hidden by General > Show reminders.",
     diagnosticsTitle = "Mobility diagnostics", diagnosticsHint = "Public state only. Select all, then Ctrl+C to copy this snapshot.",

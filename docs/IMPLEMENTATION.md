@@ -2,13 +2,13 @@
 
 This phase extends the existing standalone Options frame and `UpdateSettings` pipeline. All UI remains English, including zhCN clients. `/cui` is primary; `/cargoui` resolves to the same slash handler.
 
-Alpha.6 incrementally fixes the bounded Mage runtime described in [the combat API audit](Mobility-Combat-API-Audit.md). Public zero charges and public single-slot recovery feed native duration text. Multiple secret charges use an independent ordinary-cooldown total-duration curve for frame opacity, while the existing charge duration supplies the real number. Diagnostics report Native tracking; Lua never reads back the opacity. Unsupported metadata/API conditions still fail closed with a precise reason. Native selection semantics near recovery and under reductions have not been validated in a real client. [Current acceptance steps](Mobility-Combat-Acceptance.md) distinguish this from the user's confirmed alpha.5 out-of-combat success and combat failure.
+Alpha.7 preserves the user-confirmed Blink/Shimmer combat path and adds [independent appearance](ENTRY_STYLES.md) and [automatic Options themes](THEMES.md). `SpellState.lua` is unchanged; Runtime passes the already-known spell ID to the renderer so Blink/Shimmer styles remain distinct without changing their existing position IDs. This release's client appearance/regression acceptance is still pending.
 
 ## Interaction and persistence
 
 The X/Y pair is committed on Enter in either field. Validation runs on the complete patch before any database field is changed. Scale/font size sliders apply immediately; their text fields apply on Enter. Removing Apply buttons allowed wider position fields and sliders. Draft text stays in the controls, never in SavedVariables; close/category changes clear it.
 
-Schema 3 extends the same `CarGOUIDB` (the existing schema 2 fields are retained):
+Schema 4 extends the same `CarGOUIDB` (the existing schema 2 fields are retained):
 
 | Field | Purpose |
 | --- | --- |
@@ -17,6 +17,7 @@ Schema 3 extends the same `CarGOUIDB` (the existing schema 2 fields are retained
 | `options.position` | Options window offset from UIParent center |
 | `options.animatedTitle` | Native title animation preference, default true |
 | `mobility.enabled` | Mage live module preference, default true |
+| `styles[key]` | Independent font, shadow and scale per actual Mobility spell / defined Proc region |
 
 Missing/new fields are defaulted and malformed values normalized through the existing shared schema. Existing fonts, display offsets, appearance, and unknown saved keys are preserved. Reset all settings is explicit and confirmed in the GUI.
 
@@ -62,4 +63,10 @@ The alpha.4 baseline had 37 Lua 5.1 mock tests covering interaction, persistence
 
 The user has viewed the prior UI in-game and accepted its general appearance. This does not establish acceptance of the new live skill logic, native timer, combat restrictions, all visual scales or region alignment. This phase has no real-client testing environment.
 
-Real Proc/aura detection, other classes and spells, Evoker Free move, theme switching and import/export remain unimplemented. Multiple secret charges now have a native visibility path subject to documented API/metadata prerequisites and outstanding real-client semantic acceptance. No fixed countdown, cast ledger, secret arithmetic or native-display readback substitutes for actual state.
+Real Proc/aura detection, other classes and spells, Evoker Free move, manual theme switching and import/export remain unimplemented. Multiple secret charges now have a native visibility path subject to documented API/metadata prerequisites and outstanding real-client semantic acceptance. No fixed countdown, cast ledger, secret arithmetic or native-display readback substitutes for actual state.
+
+## Entry style and theme boundaries
+
+Schema 4 deep-copies validated legacy typography once into missing style fields, preserving existing independent values. After migration, factory defaults fill new/missing entries; renderers never multiply or inherit legacy global scale. Styles-only edits update matching cached frames without cooldown reads, duration rebinding or opacity changes. The native live frame and FontString dimensions derive from that entry's font size. Preview-only Proc settings use the existing catalog, with no new spell mappings.
+
+Options replaces the global typography/scale controls with a per-entry Appearance editor reached from Mobility or Proc. Draft numbers are cleared on selection changes. Themes is a readonly Automatic identity page; visible-only theme callbacks coexist with Mobility callbacks and use native static gradients. The branded wordmark, title animation switch and combat-stop behavior are retained.

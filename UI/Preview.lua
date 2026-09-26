@@ -48,7 +48,7 @@ function addon:UpdatePreviewGuidance(frame, entry, enabled)
     local guide = frame.guidance or CreateGuidance(frame, entry)
     guide.label:SetText("TEST: " .. entry.label)
     -- Typography scaling must not change the size of the stock region guide.
-    guide:SetScale(1 / self.db.scale)
+    guide:SetScale(1 / self:GetReminderStyle(frame.styleKey or entry).scale)
     guide:ClearAllPoints()
     if entry.kind == "proc" then
         -- Position edits move the timer relative to Blizzard's stationary shape.
@@ -67,6 +67,7 @@ local function FindEntry(entries, id)
 end
 
 local function OnSpecializationChanged(self, _, unit)
+    if issecretvalue and issecretvalue(unit) then return end
     if unit and unit ~= "player" then return end
     self:RefreshPreview()
     if self.RefreshOptions then self:RefreshOptions() end
@@ -83,6 +84,7 @@ end
 
 function addon:StopPreview()
     self.previewState.mode = "off"
+    self.previewState.styleKey = nil
     for _, frame in pairs(self.previewFrames) do
         frame:Hide()
         if frame.guidance then frame.guidance:Hide() end
@@ -103,7 +105,9 @@ function addon:RefreshPreview()
 
     local entries = self:GetPreviewEntries()
     if #entries == 0 then self:StopPreview(); return end
-    if not FindEntry(entries, state.entryId) then state.entryId = entries[1].id end
+    if not FindEntry(entries, state.entryId) then
+        state.entryId, state.styleKey = entries[1].id, nil
+    end
     for _, frame in pairs(self.previewFrames) do
         frame:Hide()
         if frame.guidance then frame.guidance:Hide() end
@@ -112,6 +116,17 @@ function addon:RefreshPreview()
     -- Samples are fixed values; no ticking timer, polling, or OnUpdate is needed.
     for _, entry in ipairs(entries) do
         if state.mode == "all" or state.entryId == entry.id then
+            if state.mode == "single" and state.styleKey and entry.kind == "mobility" then
+                -- An explicitly selected appearance sample is not skill learning
+                -- or live state. Only this TEST copy gets the alternate identity.
+                local appearance = self.appearanceByKey[state.styleKey]
+                local sample = {}
+                for key, value in pairs(entry) do sample[key] = value end
+                sample.styleKey = state.styleKey
+                sample.label = appearance.label .. " - appearance sample"
+                sample.sample = { message = "No " .. self.mobilitySpells[appearance.spellID], timer = "8.0" }
+                entry = sample
+            end
             local frame = self:AcquireReminderFrame(entry, "preview")
             self.previewFrames[entry.id] = frame
             self:RenderReminder(frame, entry, entry.sample, true)
@@ -120,7 +135,7 @@ function addon:RefreshPreview()
     if self.RenderMobilityState then self:RenderMobilityState() end
 end
 
-function addon:SetPreview(mode, entryId)
+function addon:SetPreview(mode, entryId, styleKey)
     if mode == "off" then self:StopPreview(); return true end
     if InCombatLockdown() then
         return false, "Test Mode is unavailable in combat. Live Mobility remains active."
@@ -136,9 +151,24 @@ function addon:SetPreview(mode, entryId)
     if not entry or (entryId and entry.id ~= entryId) then
         return false, "No defined sample for this specialization and entry."
     end
+    if styleKey then
+        local styleEntry = self.appearanceByKey[styleKey]
+        if mode ~= "single" or not styleEntry or styleEntry.kind ~= entry.kind
+            or (entry.kind == "proc" and styleEntry.entryId ~= entry.id) then
+            return false, "Choose an appearance for this sample entry."
+        end
+    end
     self.previewState.mode, self.previewState.entryId = mode, entry.id
+    self.previewState.styleKey = styleKey
     self:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnSpecializationChanged)
     self:RegisterEvent("PLAYER_REGEN_DISABLED", OnPreviewCombat)
     self:RefreshPreview()
     return true
+end
+
+function addon:StartAppearancePreview(key)
+    local appearance = self.appearanceByKey[key]
+    if not appearance then return false, "Choose an appearance entry." end
+    local entry = appearance.kind == "mobility" and self:GetMobilityEntry()
+    return self:SetPreview("single", entry and entry.id or appearance.entryId, key)
 end

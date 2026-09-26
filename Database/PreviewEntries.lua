@@ -57,11 +57,14 @@ addon.previewEntries[#addon.previewEntries + 1] = lowLevel
 
 function addon:GetPreviewEntries()
     local _, class = UnitClass("player")
+    if issecretvalue and issecretvalue(class) then return {} end
     local api = C_SpecializationInfo
     local getSpec = api and api.GetSpecialization or GetSpecialization
     local getInfo = api and api.GetSpecializationInfo or GetSpecializationInfo
     local index = getSpec and getSpec()
+    if issecretvalue and issecretvalue(index) then return {} end
     local specID = index and getInfo and getInfo(index)
+    if issecretvalue and issecretvalue(specID) then return {} end
     local result = {}
     for _, entry in ipairs(self.previewEntries) do
         if entry.class == class and entry.specID == specID then
@@ -72,6 +75,7 @@ function addon:GetPreviewEntries()
                 local sample = {}
                 for key, value in pairs(entry) do sample[key] = value end
                 sample.label = name .. " - mobility sample"
+                sample.styleKey = self:GetReminderStyleKey(entry, status and status.spellID or 212653)
                 sample.sample = { message = "No " .. name, timer = "8.0" }
                 result[#result + 1] = sample
             else

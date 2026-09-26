@@ -4,31 +4,15 @@ local function PrintHelp()
     addon:Print("/cui opens or closes Options. All display settings are available there. /cargoui remains an alias.")
     addon:Print("Optional commands: /cui help | status | show | hide | reset")
     addon:Print("/cui position <x> <y>  (-10000 to 10000; right/up are positive)")
-    addon:Print("/cui font <friz|arial|morpheus|skurri|default>")
-    addon:Print("/cui fontsize <8-72>")
-    addon:Print("/cui outline <none|outline|thickoutline>")
-    addon:Print("/cui scale <0.5-3> | shadow <on|off>")
+    addon:Print("Choose a reminder in Mobility or Proc to edit its independent Appearance.")
 end
 
 local function PrintStatus()
     local db = addon.db
-    local face = db.font.face
-    for _, font in ipairs(addon.fonts) do
-        if font.value == face then face = font.label; break end
-    end
-    addon:Print(string.format("%s | %s | CENTER (%g, %g) | %s %g | %s | scale %g | shadow %s",
+    addon:Print(string.format("%s | %s | CENTER (%g, %g) | independent reminder styles",
         addon.version, db.enabled and "shown" or "hidden",
-        db.position.x, db.position.y, face, db.font.size,
-        db.font.outline == "" and "no outline" or db.font.outline,
-        db.scale, db.shadow.enabled and "on" or "off"))
+        db.position.x, db.position.y))
 end
-
-local fontAliases = {
-    friz = "Fonts\\FRIZQT__.ttf",
-    arial = "Fonts\\ARIALN.TTF",
-    morpheus = "Fonts\\MORPHEUS.TTF",
-    skurri = "Fonts\\skurri.ttf",
-}
 
 function addon:HandleSlashCommand(message)
     local args = {}
@@ -52,26 +36,10 @@ function addon:HandleSlashCommand(message)
     elseif command == "position" and #args == 3 then
         -- Keep invalid text in the patch so shared validation rejects it instead of omitting it.
         patch = { position = { x = tonumber(args[2]) or args[2], y = tonumber(args[3]) or args[3] } }
-    elseif command == "font" and #args == 2 then
-        local face = fontAliases[args[2]]
-        if args[2] == "default" then
-            local supported, canonicalFace = self:IsSupportedFont(STANDARD_TEXT_FONT)
-            face = supported and canonicalFace or self.defaults.font.face
-        end
-        if not face then
-            self:Print("Font must be friz, arial, morpheus, skurri, or default. Type /cui help for help.")
-            return
-        end
-        patch = { font = { face = face } }
-    elseif command == "fontsize" and #args == 2 then
-        patch = { font = { size = tonumber(args[2]) or args[2] } }
-    elseif command == "outline" and #args == 2 then
-        patch = { font = { outline = args[2] == "none" and "" or string.upper(args[2]) } }
-    elseif command == "scale" and #args == 2 then
-        patch = { scale = tonumber(args[2]) or args[2] }
-    elseif command == "shadow" and #args == 2
-        and (args[2] == "on" or args[2] == "off") then
-        patch = { shadow = { enabled = args[2] == "on" } }
+    elseif command == "font" or command == "fontsize" or command == "outline"
+        or command == "scale" or command == "shadow" then
+        self:Print("Global reminder style commands are retired. Open /cui, choose an entry in Mobility or Proc, and edit Appearance.")
+        return
     elseif command == "reset" and #args == 1 then
         self:ResetDatabase()
         self:Print("Settings reset to defaults.")

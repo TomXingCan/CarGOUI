@@ -92,6 +92,7 @@ local function setup(saved, loggedIn, client)
         fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, masks = {}, fontStrings = {},
         specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0,
         inCombat = client.inCombat or false, clock = 100, pendingTimers = {},
+        faction = client.faction or "Alliance", factionReads = 0, gradientWrites = 0,
         bindings = {}, formatters = {}, curves = {}, curveEvaluations = {},
         spellReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0 }
     if client.specID == false then state.specID = nil end
@@ -108,6 +109,14 @@ local function setup(saved, loggedIn, client)
     env.GetLocale = function() return client.locale or "enUS" end
     env.GetTime = function() return state.clock end
     env.issecretvalue = isSecret
+    env.UnitFactionGroup = function(unit)
+        equal(unit, "player", "automatic theme uses player faction")
+        state.factionReads = state.factionReads + 1
+        return state.faction, state.faction
+    end
+    env.CreateColor = function(r, g, b, a)
+        return { r = r, g = g, b = b, a = a, GetRGBA = function() return r, g, b, a end }
+    end
     env.UnitClass = function() return state.classToken, state.classToken, state.classToken == "MAGE" and 8 or 1 end
     state.classColors = client.classColors or { MAGE = { 0.25, 0.78, 0.92 }, WARRIOR = { 0.78, 0.61, 0.43 } }
     env.C_ClassColor = { GetClassColor = function(token)
@@ -224,6 +233,7 @@ local function setup(saved, loggedIn, client)
         function binding:SetDuration(value)
             truthy(durations[value], "SetDuration requires an ordinary opaque duration handle, never nil")
             self.duration = value
+            self.durationWrites = (self.durationWrites or 0) + 1
         end
         function binding:SetEnabled(value)
             equal(type(value), "boolean", "binding enablement is public lifecycle state")
@@ -426,6 +436,7 @@ local function setup(saved, loggedIn, client)
     function object:SetFont(face, size, flags)
         assert(type(face) == "string" and type(size) == "number", "Invalid SetFont arguments")
         self.font = { face, size, flags or "" }
+        self.fontWrites = (self.fontWrites or 0) + 1
         state.fontWrites = state.fontWrites + 1
         return true
     end
@@ -485,6 +496,11 @@ local function setup(saved, loggedIn, client)
     function object:GetTexture() return self.texture end
     function object:SetBlendMode(value) self.blendMode = value end
     function object:SetRotation(value) self.rotation = value end
+    function object:SetGradient(orientation, first, last)
+        equal(orientation, "HORIZONTAL", "Options gradient is native and static")
+        self.gradient = { orientation = orientation, first = { first:GetRGBA() }, last = { last:GetRGBA() } }
+        state.gradientWrites = state.gradientWrites + 1
+    end
     function object:SetAtlas(value) self.atlas = value end
     function object:SetVertexColor(...) self.vertexColor = { ... } end
     function object:SetTexCoord(...) self.texCoord = { ... } end
@@ -665,9 +681,9 @@ local function savedPosition(addon, env, x, y)
 end
 
 local function savedFont(addon, size, outline)
-    equal(addon.db.font.face, "Fonts\\FRIZQT__.ttf", "saved font face")
-    equal(addon.db.font.size, size, "saved font size")
-    equal(addon.db.font.outline, outline, "saved font outline")
+    equal(addon.db.styles.mobility_shimmer.font.face, "Fonts\\FRIZQT__.ttf", "saved font face")
+    equal(addon.db.styles.mobility_shimmer.font.size, size, "saved font size")
+    equal(addon.db.styles.mobility_shimmer.font.outline, outline, "saved font outline")
 end
 
 local function test(name, callback)
@@ -695,7 +711,7 @@ test("fresh install initializes once and waits for PLAYER_LOGIN", function()
     state:fire("ADDON_LOADED", "CarGOUI")
     truthy(addon.initialized, "own ADDON_LOADED initializes")
     equal(addon.db, env.CarGOUIDB, "saved variables reference")
-    equal(addon.db.schemaVersion, 3, "schema version migrated")
+    equal(addon.db.schemaVersion, 4, "schema version migrated")
     equal(addon.frame, nil, "display before login")
     equal(env.SLASH_CARGOUI1, "/cui", "primary slash")
     equal(env.SLASH_CARGOUI2, "/cargoui", "compatibility slash")
@@ -721,7 +737,7 @@ test("valid SavedVariables survive a simulated reload", function()
     local env, addon = login(saved)
     savedPosition(addon, env, 125, -75)
     savedFont(addon, 32, "THICKOUTLINE")
-    equal(addon.db.scale, 1.25, "saved scale")
+    equal(addon.db.styles.mobility_shimmer.scale, 1.25, "saved scale")
     equal(addon.db.futureOption.value, 42, "unrelated key preserved")
     local env2, addon2 = login(copy(env.CarGOUIDB))
     savedPosition(addon2, env2, 125, -75)
@@ -740,7 +756,7 @@ end)
 test("malformed SavedVariables and non-finite numbers recover safely", function()
     for _, malformed in ipairs({ false, 17, "invalid" }) do
         local _, addon = login(malformed)
-        equal(addon.db.font.size, 24, "invalid root reset")
+        equal(addon.db.styles.mobility_shimmer.font.size, 24, "invalid root reset")
     end
     local env, addon = login({ schemaVersion = "invalid", enabled = "yes",
         position = { x = math.huge, y = 0 / 0 },
@@ -749,60 +765,41 @@ test("malformed SavedVariables and non-finite numbers recover safely", function(
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
     equal(addon.db.enabled, true, "invalid enabled setting")
-    equal(addon.db.scale, 1, "invalid scale")
-    equal(addon.db.shadow.enabled, true, "invalid shadow")
+    equal(addon.db.styles.mobility_shimmer.scale, 1, "invalid scale")
+    equal(addon.db.styles.mobility_shimmer.shadow.enabled, true, "invalid shadow")
     equal(addon.db.other, "preserve me", "unrelated setting")
     local _, addon2 = login({ position = true, font = "bad", shadow = 9, scale = -1 })
     equal(addon2.db.position.x, 0, "malformed position")
-    equal(addon2.db.font.size, 24, "malformed font")
-    equal(addon2.db.shadow.enabled, true, "malformed shadow")
+    equal(addon2.db.styles.mobility_shimmer.font.size, 24, "malformed font")
+    equal(addon2.db.styles.mobility_shimmer.shadow.enabled, true, "malformed shadow")
     local env3, addon3 = login({ position = { x = 10001, y = -10001 },
         font = { size = 73 }, scale = 3.01 })
     savedPosition(addon3, env3, 0, 0)
     savedFont(addon3, 24, "OUTLINE")
-    equal(addon3.db.scale, 1, "finite out-of-range scale")
+    equal(addon3.db.styles.mobility_shimmer.scale, 1, "finite out-of-range scale")
 end)
 
-test("slash commands apply position, typography, visibility and reset", function()
+test("slash commands retain positions visibility and reset but cannot edit global appearance", function()
     local env, addon, state = login(nil)
     local command = env.SlashCmdList.CARGOUI
-    command("help")
-    command("status")
-    command("position 35 -60")
+    command("help"); command("status"); command("position 35 -60")
     savedPosition(addon, env, 35, -60)
-    equal(addon.db.position.x, 35, "saved x")
-    equal(addon.db.position.y, -60, "saved y")
-    command("fontsize 30")
-    savedFont(addon, 30, "OUTLINE")
-    command("outline none")
-    savedFont(addon, 30, "")
-    command("outline thickoutline")
-    savedFont(addon, 30, "THICKOUTLINE")
-    command("outline outline")
-    savedFont(addon, 30, "OUTLINE")
-    command("scale 1.2")
-    equal(addon.db.scale, 1.2, "saved scale")
-    savedPosition(addon, env, 35, -60)
-    command("shadow off")
-    equal(addon.db.shadow.enabled, false, "disabled shadow")
-    command("hide")
-    equal(addon.db.enabled, false, "saved hidden state")
-    command("show")
-    equal(addon.db.enabled, true, "saved shown state")
-    command("shadow on")
-    equal(addon.db.shadow.enabled, true, "enabled shadow")
+    local appearance = copy(addon.db.styles)
+    for _, legacy in ipairs({ "fontsize 30", "outline none", "outline thickoutline", "scale 1.2", "shadow off" }) do
+        command(legacy)
+        same(addon.db.styles, appearance, "legacy global style command cannot modify reminder styles")
+    end
+    command("hide"); equal(addon.db.enabled, false, "hidden state saved")
+    command("show"); equal(addon.db.enabled, true, "shown state saved")
     local prior = copy(addon.db)
     for _, invalid in ipairs({ "position nope 10", "position 10", "position 1e309 1",
-        "position 10001 0", "position 0 -10001", "fontsize -1", "fontsize 73",
-        "fontsize 1e309", "fontsize nope", "outline bogus", "scale 0", "scale 3.01",
-        "scale 1e309", "shadow maybe", "show extra", "reset extra", "unknowncommand" }) do
+        "position 10001 0", "position 0 -10001", "show extra", "reset extra", "unknowncommand" }) do
         command(invalid)
-        same(addon.db, prior, "invalid command must not mutate settings: " .. invalid)
+        same(addon.db, prior, "invalid commands do not mutate settings")
     end
     command("reset")
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
-    equal(addon.db.scale, 1, "reset scale")
     equal(#state.errors, 0, "command errors")
 end)
 
@@ -955,7 +952,7 @@ test("settings API rejects malformed patches atomically and preserves DB identit
         truthy(type(message) == "string" and #message > 0, "validation reason " .. index)
         same(addon.db, before, "invalid patch must be atomic " .. index)
     end
-    truthy(addon:UpdateSettings({ position = { x = 40 }, font = { size = 28 }, shadow = { enabled = false } }),
+    truthy(addon:UpdateSettings({ position = { x = 40 } }),
         "valid partial patch accepted")
     equal(addon.db, db, "DB reference stable")
     equal(env.CarGOUIDB, db, "SavedVariables references live DB")
@@ -963,53 +960,48 @@ test("settings API rejects malformed patches atomically and preserves DB identit
     equal(addon.db.font, fontSettings, "font reference stable")
     equal(addon.db.shadow, shadow, "shadow reference stable")
     savedPosition(addon, env, 40, 0)
-    savedFont(addon, 28, "OUTLINE")
+    savedFont(addon, 24, "OUTLINE")
 end)
 
-test("all daily GUI controls route through shared settings and survive reload", function()
+test("daily per-entry Appearance controls use shared validation and survive reload", function()
     local env, addon, state = login(nil)
     local panel, controls = options(addon)
     local writes = 0
     local update = addon.UpdateSettings
     addon.UpdateSettings = function(self, patch)
-        writes = writes + 1
+        if patch.styles then
+            truthy(patch.styles.mobility_shimmer, "selected style is the target")
+            for key in pairs(patch.styles) do equal(key, "mobility_shimmer", "only selected style is patched") end
+            writes = writes + 1
+        end
         return update(self, patch)
     end
     local function changed(callback, label)
         local before = writes
         callback()
-        truthy(writes > before, label .. " uses shared UpdateSettings")
+        truthy(writes > before, label .. " uses shared per-entry validation")
     end
-    typeText(controls.x, "165")
-    typeText(controls.y, "-85")
-    changed(function() enter(controls.y, "-85") end, "position Enter")
+    typeText(controls.x, "165"); enter(controls.y, "-85")
     savedPosition(addon, env, 165, -85)
-    changed(function() controls.enabled:Click() end, "visibility")
-    equal(addon.db.enabled, false, "checkbox hides actual display")
+    controls.enabled:Click(); equal(addon.db.enabled, false, "checkbox hides reminders")
     controls.enabled:Click()
-    changed(function() controls.scale:SetValue(1.35) end, "scale slider")
-    equal(addon.db.scale, 1.35, "slider saves scale")
-    savedPosition(addon, env, 165, -85)
-    changed(function() enter(controls.scale.editBox, "1.6") end, "scale numeric field")
-    equal(addon.db.scale, 1.6, "numeric scale saved")
-    addon:SelectOptionsCategory("typography")
-    changed(function() controls.fontSize:SetValue(36) end, "font size slider")
-    savedFont(addon, 36, "OUTLINE")
-    changed(function() enter(controls.fontSize.editBox, "32") end, "font size numeric field")
-    savedFont(addon, 32, "OUTLINE")
-    changed(function() choose(controls.outline, "THICKOUTLINE") end, "outline dropdown")
+    addon:OpenAppearance("mobility", "mobility_shimmer")
+    changed(function() controls.appearanceScale:SetValue(1.35) end, "scale slider")
+    equal(addon.db.styles.mobility_shimmer.scale, 1.35, "scale slider saves immediately")
+    changed(function() enter(controls.appearanceScale.editBox, "1.6") end, "scale Enter")
+    changed(function() controls.appearanceFontSize:SetValue(36) end, "font slider")
+    changed(function() enter(controls.appearanceFontSize.editBox, "32") end, "font Enter")
+    changed(function() choose(controls.appearanceOutline, "THICKOUTLINE") end, "outline")
     savedFont(addon, 32, "THICKOUTLINE")
-    truthy(controls.font.choices and #controls.font.choices >= 1, "font choices available")
-    changed(function() choose(controls.font, controls.font.choices[1].value) end, "font dropdown")
-    equal(addon.db.font.face, controls.font.choices[1].value, "font choice saved")
-    changed(function() controls.shadow:Click() end, "shadow checkbox")
-    equal(addon.db.shadow.enabled, false, "shadow checkbox saved")
+    changed(function() choose(controls.appearanceFont, controls.appearanceFont.choices[1].value) end, "font")
+    changed(function() controls.appearanceShadow:Click() end, "shadow")
+    equal(addon.db.styles.mobility_shimmer.shadow.enabled, false, "shadow saved")
+    equal(addon.db.styles.mobility_blink.font.size, 24, "other Mobility style untouched")
+    equal(addon.db.styles.mage_fire_hot_streak_left.font.size, 24, "Proc style untouched")
     controls.close:Click()
-    equal(panel:IsShown(), false, "close button works")
     local _, reloaded = login(copy(env.CarGOUIDB))
-    same(reloaded.db, addon.db, "GUI changes persist through reload")
-    equal(reloaded.optionsFrame, nil, "reload still defers Options allocation")
-    equal(#state.errors, 0, "GUI interactions cause no errors")
+    same(reloaded.db, addon.db, "GUI settings persist across reload")
+    equal(#state.errors, 0, "GUI interactions produce no errors")
 end)
 
 test("pending XY edits are atomic, preserved until Enter, and discarded on close", function()
@@ -1043,7 +1035,8 @@ end)
 test("invalid numeric edits show errors without changing saved values", function()
     local _, addon = login(nil)
     local panel, controls = options(addon)
-    for _, field in ipairs({ controls.fontSize.editBox, controls.scale.editBox }) do
+    addon:OpenAppearance("mobility", "mobility_shimmer")
+    for _, field in ipairs({ controls.appearanceFontSize.editBox, controls.appearanceScale.editBox }) do
         for _, text in ipairs({ "", "invalid", "1e309", "-100" }) do
             local before = copy(addon.db)
             enter(field, text)
@@ -1054,49 +1047,44 @@ test("invalid numeric edits show errors without changing saved values", function
     end
 end)
 
-test("categories expose working pages and disable unfinished features", function()
+test("categories expose entry Appearance and automatic Theme without unfinished feature controls", function()
     local _, addon = login(nil)
     local panel = options(addon)
     local found = {}
     for _, category in ipairs(panel.categories) do found[category.key] = category end
-    for _, key in ipairs({ "general", "typography", "mobility", "preview" }) do
-        truthy(found[key] and found[key]:IsEnabled(), key .. " category enabled")
-        truthy(panel.pages[key], key .. " page exists")
+    equal(found.typography, nil, "global typography category is removed")
+    for _, key in ipairs({ "general", "mobility", "proc", "themes", "preview" }) do
+        truthy(found[key] and found[key]:IsEnabled(), key .. " enabled")
         found[key]:Click()
-        truthy(panel.pages[key]:IsShown(), key .. " button activates page")
+        truthy(panel.pages[key]:IsShown(), key .. " page active")
         for other, page in pairs(panel.pages) do
-            if other ~= key then equal(page:IsShown(), false, "other pages hidden") end
+            if other ~= key then equal(page:IsShown(), false, "other page hidden") end
         end
     end
-    for _, key in ipairs({ "proc", "themes", "importExport" }) do
-        local button = found[key]
-        truthy(button, key .. " future category visible")
-        equal(button:IsEnabled(), false, key .. " future category disabled")
-        button:Click()
-        addon:SelectOptionsCategory(key)
-        truthy(panel.pages.preview:IsShown(), "unfinished category cannot activate")
-    end
+    truthy(found.importExport and not found.importExport:IsEnabled(), "import/export stays unavailable")
+    found.importExport:Click()
+    truthy(panel.pages.preview:IsShown(), "unfinished category cannot activate")
 end)
 
 test("dropdown lifecycle and hidden refresh remain idle", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
-    addon:SelectOptionsCategory("typography")
-    controls.outline:Click()
-    truthy(controls.outline.menu:IsShown(), "dropdown open")
+    addon:OpenAppearance("mobility", "mobility_shimmer")
+    controls.appearanceOutline:Click()
+    truthy(controls.appearanceOutline.menu:IsShown(), "dropdown open")
     addon:SelectOptionsCategory("general")
-    equal(controls.outline.menu:IsShown(), false, "category change dismisses dropdown")
-    addon:SelectOptionsCategory("typography")
-    controls.outline:Click()
+    equal(controls.appearanceOutline.menu:IsShown(), false, "category change dismisses dropdown")
+    addon:OpenAppearance("mobility", "mobility_shimmer")
+    controls.appearanceOutline:Click()
     panel:Hide()
-    equal(controls.outline.menu:IsShown(), false, "closing window dismisses menu")
+    equal(controls.appearanceOutline.menu:IsShown(), false, "closing window dismisses menu")
     local fontWrites, textWrites = state.fontWrites, state.textWrites
     for _ = 1, 5 do addon:RefreshOptions() end
     equal(state.fontWrites, fontWrites, "hidden refresh does not redraw")
     equal(state.textWrites, textWrites, "hidden refresh does not update control text")
-    local savedScale = addon.db.scale
-    controls.scale:SetValue(2.25)
-    equal(addon.db.scale, savedScale, "hidden slider cannot update settings")
+    local savedScale = addon.db.styles.mobility_shimmer.scale
+    controls.appearanceScale:SetValue(2.25)
+    equal(addon.db.styles.mobility_shimmer.scale, savedScale, "hidden slider cannot update settings")
     local calls = 0
     local update = addon.UpdateSettings
     addon.UpdateSettings = function(self, patch) calls = calls + 1; return update(self, patch) end
@@ -1110,7 +1098,8 @@ end)
 
 test("reset requires confirmation and close cancels an unconfirmed reset", function()
     local env, addon = login(nil)
-    addon:UpdateSettings({ position = { x = 90, y = 45 }, font = { size = 36 }, scale = 1.7 })
+    addon:UpdateSettings({ position = { x = 90, y = 45 } })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 36 }, scale = 1.7 })
     local panel, controls = options(addon)
     local before = copy(addon.db)
     controls.reset:Click()
@@ -1123,7 +1112,7 @@ test("reset requires confirmation and close cancels an unconfirmed reset", funct
     controls.reset:Click()
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
-    equal(addon.db.scale, 1, "confirmed reset restores scale")
+    equal(addon.db.styles.mobility_shimmer.scale, 1, "confirmed reset restores scale")
     equal(tonumber(controls.x:GetText()), 0, "reset clears pending X")
     equal(tonumber(controls.y:GetText()), 0, "reset refreshes Y")
     truthy(panel:IsShown(), "reset keeps Options open")
@@ -1132,7 +1121,7 @@ end)
 test("Escape from any editable field closes Options and releases input focus", function()
     local _, addon = login(nil)
     local panel, controls = options(addon)
-    for _, editBox in ipairs({ controls.x, controls.y, controls.fontSize.editBox, controls.scale.editBox }) do
+    for _, editBox in ipairs({ controls.x, controls.y, controls.appearanceFontSize.editBox, controls.appearanceScale.editBox }) do
         if not panel:IsShown() then addon:ToggleOptions() end
         editBox:SetFocus()
         local escape = editBox:GetScript("OnEscapePressed")
@@ -1146,36 +1135,37 @@ end)
 test("sliders round safely while numeric inputs retain precision and require Enter", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
+    addon:OpenAppearance("mobility", "mobility_shimmer")
     equal(controls.applyPosition, nil, "no XY Apply button")
-    equal(controls.scale.applyButton, nil, "no scale Apply button")
-    equal(controls.fontSize.applyButton, nil, "no font-size Apply button")
+    equal(controls.appearanceScale.applyButton, nil, "no scale Apply button")
+    equal(controls.appearanceFontSize.applyButton, nil, "no font-size Apply button")
     for _, frame in ipairs(state.frames) do
         if frame.kind == "Button" then
             truthy(frame:GetText() ~= "Apply", "Options contains no normal-setting Apply buttons")
         end
     end
     for _, value in ipairs({ 0.5, 0.5000001, 1.049999999, 2.999999999, 3 }) do
-        controls.scale:SetValue(value)
-        truthy(addon:IsNumberInRange(addon.db.scale, addon.limits.scale), "rounded scale stays valid")
-        truthy(math.abs(addon.db.scale * 20 - math.floor(addon.db.scale * 20 + 0.5)) < 0.00001,
+        controls.appearanceScale:SetValue(value)
+        truthy(addon:IsNumberInRange(addon.db.styles.mobility_shimmer.scale, addon.limits.scale), "rounded scale stays valid")
+        truthy(math.abs(addon.db.styles.mobility_shimmer.scale * 20 - math.floor(addon.db.styles.mobility_shimmer.scale * 20 + 0.5)) < 0.00001,
             "slider produces 0.05 increments")
     end
-    enter(controls.scale.editBox, "1.2375")
-    equal(addon.db.scale, 1.2375, "typed scale keeps precision")
-    enter(controls.fontSize.editBox, "31.5")
-    equal(addon.db.font.size, 31.5, "typed font size keeps precision")
-    typeText(controls.scale.editBox, "2.8")
-    typeText(controls.fontSize.editBox, "70")
-    controls.scale.editBox:SetFocus()
-    controls.scale.editBox:ClearFocus()
-    controls.fontSize.editBox:SetFocus()
-    controls.fontSize.editBox:ClearFocus()
-    equal(addon.db.scale, 1.2375, "unconfirmed scale stays pending")
-    equal(addon.db.font.size, 31.5, "unconfirmed font stays pending")
+    enter(controls.appearanceScale.editBox, "1.2375")
+    equal(addon.db.styles.mobility_shimmer.scale, 1.2375, "typed scale keeps precision")
+    enter(controls.appearanceFontSize.editBox, "31.5")
+    equal(addon.db.styles.mobility_shimmer.font.size, 31.5, "typed font size keeps precision")
+    typeText(controls.appearanceScale.editBox, "2.8")
+    typeText(controls.appearanceFontSize.editBox, "70")
+    controls.appearanceScale.editBox:SetFocus()
+    controls.appearanceScale.editBox:ClearFocus()
+    controls.appearanceFontSize.editBox:SetFocus()
+    controls.appearanceFontSize.editBox:ClearFocus()
+    equal(addon.db.styles.mobility_shimmer.scale, 1.2375, "unconfirmed scale stays pending")
+    equal(addon.db.styles.mobility_shimmer.font.size, 31.5, "unconfirmed font stays pending")
     panel:Hide()
     addon:ToggleOptions()
-    equal(tonumber(controls.scale.editBox:GetText()), 1.2375, "closing discards pending scale")
-    equal(tonumber(controls.fontSize.editBox:GetText()), 31.5, "closing discards pending font size")
+    equal(tonumber(controls.appearanceScale.editBox:GetText()), 1.2375, "closing discards pending scale")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 31.5, "closing discards pending font size")
 end)
 
 test("interactive controls stay inside their pages and panel fits small screens", function()
@@ -1208,14 +1198,14 @@ test("zhCN clients retain English Options and saved appearance on reload", funct
         equal(env.GetLocale(), "zhCN", "regression runs on Chinese client")
         if pass == 2 then
             equal(addon.db.position.x, 37, "saved position survives reload")
-            equal(addon.db.font.size, 32, "saved appearance survives reload")
+            equal(addon.db.styles.mobility_shimmer.font.size, 32, "saved appearance survives reload")
         end
         env.SlashCmdList.CARGOUI("")
         local panel, controls = addon.optionsFrame, addon.optionsFrame.controls
         local categories = {}
         for _, category in ipairs(panel.categories) do categories[category.key] = category end
         equal(categories.general:GetText(), "> General", "active category is English")
-        equal(categories.typography:GetText(), "Font & appearance", "appearance category is English")
+        equal(categories.mobility:GetText(), "Mobility", "appearance category is English")
         equal(controls.close:GetText(), "Close", "close button is English")
         truthy(panel.feedback:GetText():find("Enter", 1, true), "opening guidance teaches Enter")
         truthy(not panel.feedback:GetText():find("Apply", 1, true), "obsolete Apply instruction gone")
@@ -1223,9 +1213,9 @@ test("zhCN clients retain English Options and saved appearance on reload", funct
         truthy(panel.feedback:GetText():find("X", 1, true), "coordinate error is readable")
         enter(controls.x, "37")
         equal(panel.feedback:GetText(), "Settings applied.", "success feedback is English")
-        addon:SelectOptionsCategory("typography")
-        equal(controls.outline.choices[1]:GetText(), "None", "dropdown choice is English")
-        enter(controls.fontSize.editBox, "32")
+        addon:OpenAppearance("mobility", "mobility_shimmer")
+        equal(controls.appearanceOutline.choices[1]:GetText(), "None", "dropdown choice is English")
+        enter(controls.appearanceFontSize.editBox, "32")
         controls.reset:Click()
         equal(controls.reset:GetText(), "Confirm reset", "reset confirmation button is English")
         controls.close:Click()
@@ -1236,22 +1226,22 @@ end)
 test("font menu applies each supported face and localized client font persists", function()
     local _, addon = login(nil, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
     local panel, controls = options(addon)
-    addon:SelectOptionsCategory("typography")
+    addon:OpenAppearance("mobility", "mobility_shimmer")
     local foundFriz, foundClient = false, false
-    for _, entry in ipairs(controls.font.choices) do
-        choose(controls.font, entry.value)
-        equal(addon.db.font.face, entry.value, "font dropdown writes chosen face")
+    for _, entry in ipairs(controls.appearanceFont.choices) do
+        choose(controls.appearanceFont, entry.value)
+        equal(addon.db.styles.mobility_shimmer.font.face, entry.value, "font dropdown writes chosen face")
         if entry.value == "Fonts\\FRIZQT__.ttf" then foundFriz = true end
         if entry.value == "Fonts\\ARKai_T.ttf" then foundClient = true end
     end
     truthy(foundFriz, "Friz Quadrata remains selectable")
     truthy(foundClient, "localized client font selectable")
-    local chosen = addon.db.font.face
+    local chosen = addon.db.styles.mobility_shimmer.font.face
     local _, reloaded = login(copy(addon.db), false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
-    equal(reloaded.db.font.face, chosen, "supported saved font survives reload")
-    local ok = addon:UpdateSettings({ font = { face = "fonts\\frizqt__.TTF" } })
+    equal(reloaded.db.styles.mobility_shimmer.font.face, chosen, "supported saved font survives reload")
+    local ok = addon:UpdateReminderStyle("mobility_shimmer", { font = { face = "fonts\\frizqt__.TTF" } })
     truthy(ok, "supported font accepted case-insensitively")
-    equal(addon.db.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
+    equal(addon.db.styles.mobility_shimmer.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
     equal(panel:IsShown(), true, "Options created successfully with a localized client font")
 end)
 
@@ -1471,77 +1461,57 @@ test("external single/all preview renders fixed samples and cleans up on stop an
     equal(state.realReads, 0, "simulated content never reads live buffs or cooldowns")
 end)
 
-test("external preview reacts to shared settings and selected-entry positions without moving Proc centers", function()
+test("external preview updates only the selected region appearance and keeps stock Proc centers", function()
     local env, addon = login(nil)
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("preview")
     local entries = addon:GetPreviewEntries()
-    local selected
-    for _, entry in ipairs(entries) do if entry.kind == "proc" then selected = entry; break end end
-    truthy(selected, "spec defines a Proc preview")
+    local selected = entries[2]
     choose(controls.previewEntry, selected.id)
     controls.previewAll:Click()
-    typeText(controls.entryX, "34")
-    typeText(controls.entryY, "invalid")
+    typeText(controls.entryX, "34"); typeText(controls.entryY, "invalid")
     local prior = copy(addon.db)
     enter(controls.entryX, "34")
-    same(addon.db, prior, "invalid entry offset pair is atomic")
+    same(addon.db, prior, "invalid offset pair is atomic")
     enter(controls.entryY, "-17")
-    equal(addon.db.reminders[selected.id].position.x, 34, "per-entry X saved")
-    equal(addon.db.reminders[selected.id].position.y, -17, "per-entry Y saved")
-    for _, entry in ipairs(entries) do
-        if entry.id ~= selected.id then
-            equal(addon.db.reminders[entry.id].position.x, 0, "editing one region leaves other X offsets alone")
-            equal(addon.db.reminders[entry.id].position.y, 0, "editing one region leaves other Y offsets alone")
-        end
-    end
     addon:SelectOptionsCategory("general")
-    enter(controls.x, "25")
-    enter(controls.y, "-50")
-    enter(controls.scale.editBox, "1.5")
-    addon:SelectOptionsCategory("typography")
-    enter(controls.fontSize.editBox, "40")
-    choose(controls.outline, "THICKOUTLINE")
-    choose(controls.font, "Fonts\\MORPHEUS.TTF")
-    controls.shadow:Click()
-    equal(countKeys(visiblePreviews(addon)), #entries, "preview stays active while editing appearance")
+    enter(controls.x, "25"); enter(controls.y, "-50")
+    addon:OpenAppearance("proc", selected.id)
+    enter(controls.appearanceScale.editBox, "1.5")
+    enter(controls.appearanceFontSize.editBox, "40")
+    choose(controls.appearanceOutline, "THICKOUTLINE")
+    choose(controls.appearanceFont, "Fonts\\MORPHEUS.TTF")
+    controls.appearanceShadow:Click()
+    equal(countKeys(visiblePreviews(addon)), #entries, "all preview remains active during entry edits")
     for _, entry in ipairs(entries) do
         local frame = addon.previewFrames[entry.id]
         reminderAnchor(frame, entry, addon, env)
-        local face, size, outline = frame.text:GetFont()
-        equal(face, "Fonts\\MORPHEUS.TTF", "external renderer updates font")
-        equal(size, 40, "external renderer updates font size")
-        equal(outline, "THICKOUTLINE", "external renderer updates outline")
-        equal(frame:GetScale(), 1.5, "external renderer updates scale")
+        if entry.id == selected.id then
+            same(frame.text.font, { "Fonts\\MORPHEUS.TTF", 40, "THICKOUTLINE" }, "selected appearance applied")
+            equal(frame:GetScale(), 1.5, "selected scale applied")
+            same(frame.text.shadowOffset, { 0, 0 }, "selected shadow off")
+        else
+            same(frame.text.font, { "Fonts\\FRIZQT__.ttf", 24, "OUTLINE" }, "other region font untouched")
+            equal(frame:GetScale(), 1, "other scale untouched")
+            same(frame.text.shadowOffset, { 1, -1 }, "other shadow untouched")
+        end
         if entry.kind == "proc" then
             local guide = frame.guidance
-            local point, relative, relativePoint, x, y = guide:GetPoint()
-            equal(point, "CENTER", "Proc guide anchor")
-            equal(relative, env.UIParent, "Proc shape stays in stock UI space")
-            equal(relativePoint, "CENTER", "Proc guide relative anchor")
+            local _, relative, _, x, y = guide:GetPoint()
+            equal(relative, env.UIParent, "guide remains in stock UI space")
             local factor = guide:GetEffectiveScale() / env.UIParent:GetEffectiveScale()
-            truthy(math.abs(factor - 1) < 0.000001, "Proc shape ignores typography scale")
-            truthy(math.abs(x * factor - entry.anchor.x) < 0.001, "timer offsets never move stock guide X")
-            truthy(math.abs(y * factor - entry.anchor.y) < 0.001, "timer offsets never move stock guide Y")
+            equal(factor, 1, "guide never inherits reminder scale")
+            equal(x, entry.anchor.x, "guide X fixed")
+            equal(y, entry.anchor.y, "guide Y fixed")
         end
-        local sx, sy = frame.text:GetShadowOffset()
-        equal(sx, 0, "external renderer disables shadow X")
-        equal(sy, 0, "external renderer disables shadow Y")
     end
     local reloadEnv, reloaded = login(copy(addon.db))
-    options(reloaded)
-    truthy(reloaded:SetPreview("single", selected.id), "saved region can be previewed after reload")
-    equal(reloaded.db.reminders[selected.id].position.x, 34, "per-region X persists after reload")
-    equal(reloaded.db.reminders[selected.id].position.y, -17, "per-region Y persists after reload")
+    options(reloaded); reloaded:SetPreview("single", selected.id)
     reminderAnchor(reloaded.previewFrames[selected.id], selected, reloaded, reloadEnv)
-    addon:SelectOptionsCategory("preview")
-    controls.entryReset:Click()
-    equal(addon.db.reminders[selected.id].position.x, 0, "entry reset restores default-region X")
-    equal(addon.db.reminders[selected.id].position.y, 0, "entry reset restores default-region Y")
-    typeText(controls.entryX, "900")
-    panel:Hide()
-    addon:ToggleOptions()
-    equal(tonumber(controls.entryX:GetText()), 0, "closing discards uncommitted entry offset")
+    same(reloaded.db.styles[selected.id], addon.db.styles[selected.id], "region style survives reload")
+    addon:SelectOptionsCategory("preview"); controls.entryReset:Click()
+    same(addon.db.reminders[selected.id].position, { x = 0, y = 0 }, "position reset only resets current coordinates")
+    equal(addon.db.styles[selected.id].font.size, 40, "coordinate reset preserves independent appearance")
 end)
 
 test("active preview follows current specialization and unsupported classes disable preview controls", function()
@@ -1711,7 +1681,7 @@ test("branding uses aligned packaged artwork and a narrow native glyph-masked sw
     end
     equal(translations, 1, "one native translation drives the sweep")
     truthy(math.abs(duration - 6.5) < 0.01, "sweep includes five seconds of native idle time")
-    truthy(textures <= 6, "branding stays within decorative texture budget")
+    truthy(textures <= 6 + 1 + 8, "branding plus one static theme background and eight motif strokes stay bounded")
     equal(masks, 1, "one separately counted glyph mask")
     truthy(groups <= 2, "branding stays within animation group budget")
     local bytes = 0
@@ -1791,8 +1761,8 @@ test("branding callbacks stay isolated and ordinary settings do not resize or re
         point = { unpack(header.wordmark.point or {}) }, uv = copy(header.wordmark.texCoord),
         scale = header.wordmark:GetScale(), alpha = header.wordmark:GetAlpha() }
     local initialPlays, initialStops = group.plays, group.stops
-    addon:UpdateSettings({ font = { size = 72, outline = "THICKOUTLINE" }, scale = 3 })
-    addon:SelectOptionsCategory("typography")
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 72, outline = "THICKOUTLINE" }, scale = 3 })
+    addon:OpenAppearance("mobility", "mobility_shimmer")
     addon:SelectOptionsCategory("preview")
     addon:SelectOptionsCategory("general")
     panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
@@ -1863,11 +1833,12 @@ test("branding theme accents preserve artwork identity and never mutate reminder
     local saved, art, emblem = copy(addon.db), header.wordmark:GetTexture(), header.emblem:GetTexture()
     local wordmarkColor, emblemColor = copy(header.wordmark.vertexColor), copy(header.emblem.vertexColor)
     local resources, plays = resourceCounts(state), group.plays
-    same(header.sweep.vertexColor, { 0.2, 0.6, 0.9 }, "deferred theme accent applies to highlight")
-    same(header.accentLine.vertexColor, { 0.2, 0.6, 0.9 }, "deferred accent applies to line")
+    local automaticAccent = copy(header.sweep.vertexColor)
+    truthy(automaticAccent, "automatic theme supplies brand highlight")
+    same(header.accentLine.vertexColor, automaticAccent, "automatic accent applies to line")
     for _, color in ipairs({ false, "bad", {}, { 0.1, 0.2 }, { 0.1, 2, 0.3 }, { 0/0, 0.2, 0.3 } }) do
         equal(addon:UpdateBrandingTheme(color), false, "invalid theme accent rejected")
-        same(header.sweep.vertexColor, { 0.2, 0.6, 0.9 }, "invalid accent leaves previous color intact")
+        same(header.sweep.vertexColor, automaticAccent, "invalid accent leaves previous color intact")
     end
     truthy(addon:UpdateBrandingTheme({ 0.8, 0.7, 0.4 }), "valid theme accent accepted")
     same(header.sweep.vertexColor, { 0.8, 0.7, 0.4 }, "highlight accent updates")
@@ -2152,7 +2123,7 @@ test("live and preview share saved layout and style without resetting schema-2 c
     local env, addon, state = mobilityLogin(212653,
         { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }, nil, saved)
     equal(addon.db, saved, "migration retains SavedVariables identity")
-    equal(addon.db.schemaVersion, 3, "additive schema upgrade")
+    equal(addon.db.schemaVersion, 4, "additive schema upgrade")
     for id, record in pairs(old.reminders) do same(addon.db.reminders[id], record, "existing region remains " .. id) end
     same(addon.db.options.position, old.options.position, "window position remains saved")
     same(addon.db.position, old.position, "global position remains saved")
@@ -2167,7 +2138,7 @@ test("live and preview share saved layout and style without resetting schema-2 c
     equal(preview:GetScale(), scale, "preview and live use same scale")
     same(preview.text.font, live.text.font, "preview and live share typography")
     addon:StopPreview()
-    addon:UpdateSettings({ font = { size = 38 }, scale = 1.5 })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 38 }, scale = 1.5 })
     same(live.text.font, { "Fonts\\FRIZQT__.ttf", 38, "THICKOUTLINE" }, "live font changes apply immediately")
     reminderAnchor(live, entry, addon, env)
     equal(state.liveMeasurements, 0, "live text geometry is never measured")
@@ -2187,7 +2158,7 @@ test("Mobility Options edits apply on Enter and expose working preview and copya
     controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
     same(addon.db.reminders[id].position, { x = 45.5, y = -72 }, "Enter commits both coordinates atomically")
     controls.mobilityTypography:Click()
-    truthy(panel.pages.typography:IsShown(), "Typography shortcut works")
+    truthy(panel.pages.appearance:IsShown(), "Typography shortcut works")
     addon:SelectOptionsCategory("mobility")
     controls.mobilityPreview:Click()
     equal(addon.previewState.entryId, id, "corresponding skill preview starts")
@@ -2253,7 +2224,7 @@ test("secret charges use native visibility while public zero still uses native s
     truthy(isSecret(frame.text.textValue), "native rendering output is treated as opaque")
     state:advance(0.5)
     equal(nativeText(addon), "No Shimmer\n15.5", "secret duration advances only in native binding")
-    addon:UpdateSettings({ font = { size = 30 }, scale = 1.2 })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 30 }, scale = 1.2 })
     equal(nativeText(addon), "No Shimmer\n15.5", "styling does not read secret text")
     equal(state.liveMeasurements, 0, "restricted text is never measured")
     data.charges = 1
@@ -2536,7 +2507,7 @@ test("closing Options stopping Preview and styling preserve secret live visibili
     data.charges, data.cooldownDuration = 1, 1.5
     syncEvent(state, "SPELL_UPDATE_CHARGES")
     equal(nativeText(addon), "", "closed Options still receives recovery and native hide")
-    addon:UpdateSettings({ font = { size = 33 }, scale = 1.4 })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 33 }, scale = 1.4 })
     addon:RefreshReminderClassColor()
     equal(nativeText(addon), "", "font/color refresh cannot overwrite secret zero opacity")
     truthy(isSecret(live.alpha), "style alpha is confined to FontString text color")
@@ -2604,7 +2575,7 @@ test("class color survives font changes reuse spec changes and reload without sa
     local env, addon, state = mobilityLogin(212653, data)
     local frame = currentLive(addon)
     local savedColor = copy(frame.text.textColor)
-    addon:UpdateSettings({ font = { size = 36 }, scale = 1.25 })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 36 }, scale = 1.25 })
     same(frame.text.textColor, savedColor, "changing font reapplies class color")
     data.charges = 1; syncEvent(state, "SPELL_UPDATE_CHARGES")
     data.charges = 0; syncEvent(state, "SPELL_UPDATE_CHARGES")
@@ -2619,7 +2590,7 @@ test("class color survives font changes reuse spec changes and reload without sa
     same(currentLive(reloaded).text.textColor, savedColor, "reload derives current player color")
     local _, warrior = login(copy(env.CarGOUIDB), false, { classToken = "WARRIOR" })
     local sample = warrior:AcquireReminderFrame({ id = "future_proc" }, "preview")
-    warrior:ApplyFontSettings(sample.text)
+    warrior:ApplyFontSettings(sample.text, warrior:GetReminderStyle(sample.styleKey))
     same(sample.text.textColor, { 0.78, 0.61, 0.43, 1 }, "shared account DB cannot carry Mage RGB onto another class")
     equal(addon.db.reminderClassColor, nil, "session cache is not a SavedVariables member")
 end)
@@ -2666,6 +2637,314 @@ test("Options exposes no custom reminder colors and class style adds no polling 
             truthy(not source:find(forbidden, 1, true), path .. " does not introduce " .. forbidden)
         end
     end
+end)
+
+
+test("schema-4 migration copies valid legacy appearance once and breaks every mutable alias", function()
+    local shared = { font = { size = 41 }, shadow = { enabled = false }, scale = 1.7 }
+    local saved = { schemaVersion = 3, font = { face = "Fonts\\MORPHEUS.TTF", size = 30, outline = "THICKOUTLINE" },
+        shadow = { enabled = false }, scale = 1.25, position = { x = 79, y = -51 },
+        options = { animatedTitle = false, position = { x = 43, y = -18 } }, mobility = { enabled = false },
+        reminders = { mage_fire_shimmer = { position = { x = 15, y = 27 } } },
+        styles = { mobility_blink = { font = { size = 35 } },
+            mage_fire_hot_streak_left = shared, mage_fire_hot_streak_right = shared } }
+    local _, addon = login(saved)
+    equal(addon.db, saved, "root SavedVariables identity retained")
+    equal(addon.db.schemaVersion, 4, "migration version recorded")
+    same(addon.db.position, { x = 79, y = -51 }, "global coordinates retained")
+    same(addon.db.reminders.mage_fire_shimmer.position, { x = 15, y = 27 }, "existing position ID retained")
+    same(addon.db.options.position, { x = 43, y = -18 }, "window coordinates retained")
+    equal(addon.db.options.animatedTitle, false, "animation preference retained")
+    equal(addon.db.mobility.enabled, false, "module preference retained")
+    for _, entry in ipairs(addon.appearanceEntries) do
+        local style = addon.db.styles[entry.key]
+        equal(style.font.face, "Fonts\\MORPHEUS.TTF", "legacy face fills missing field")
+        equal(style.font.outline, "THICKOUTLINE", "legacy outline fills missing field")
+        for _, other in ipairs(addon.appearanceEntries) do
+            if other.key ~= entry.key then
+                local rhs = addon.db.styles[other.key]
+                truthy(style ~= rhs and style.font ~= rhs.font and style.shadow ~= rhs.shadow,
+                    "each style and mutable child table is independently owned")
+            end
+        end
+        truthy(style.font ~= addon.db.font and style.shadow ~= addon.db.shadow, "legacy fields are detached")
+    end
+    equal(addon.db.styles.mobility_blink.font.size, 35, "valid preexisting independent value wins")
+    equal(addon.db.styles.mobility_blink.scale, 1.25, "missing independent scale inherits once")
+    equal(addon.db.styles.mage_fire_hot_streak_left.font.size, 41, "existing region size wins")
+    equal(addon.db.styles.mobility_shimmer.font.size, 30, "legacy size copied to missing skill")
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 48 } })
+    local after = copy(addon.db)
+    after.font.size, after.scale = 66, 2.5
+    after.styles.mage_arcane_clearcasting_left = nil
+    local _, reloaded = login(after)
+    equal(reloaded.db.styles.mobility_shimmer.font.size, 48, "reload never reapplies obsolete global appearance")
+    same(reloaded.db.styles.mage_arcane_clearcasting_left, reloaded.factoryReminderStyle, "missing schema-4 entry gets factory values")
+    equal(reloaded.db.styles.mobility_blink.font.size, 35, "new entry never modifies another style")
+end)
+
+test("entry style validation is atomic canonicalizes fonts and resets only selected appearance", function()
+    local _, addon = login({ reminders = { mage_fire_shimmer = { position = { x = 23, y = -34 } } } })
+    local before = copy(addon.db)
+    for _, patch in ipairs({ { font = { size = 7 } }, { font = { size = 99 } },
+        { font = { face = "bad.ttf" } }, { font = { outline = "bad" } },
+        { scale = 0/0 }, { scale = 3.01 }, { shadow = { enabled = 1 } },
+        { font = { size = 30 }, color = { 1, 0, 0 } }, { position = { x = 9 } } }) do
+        equal(addon:UpdateReminderStyle("mobility_blink", patch), false, "invalid style rejected")
+        same(addon.db, before, "invalid style leaves every setting unchanged")
+    end
+    equal(addon:UpdateReminderStyle("invented_entry", { scale = 2 }), false, "unknown entry rejected")
+    truthy(addon:UpdateReminderStyle("mobility_blink", { font = { face = "fonts\\morpheus.ttf", size = 42 }, scale = 2 }), "valid style accepted")
+    equal(addon.db.styles.mobility_blink.font.face, "Fonts\\MORPHEUS.TTF", "face canonicalized per entry")
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 37 } })
+    local others = copy(addon.db.styles)
+    addon:ResetReminderStyle("mobility_blink")
+    same(addon.db.styles.mobility_blink, addon.factoryReminderStyle, "selected style reset to factory")
+    for key, style in pairs(others) do
+        if key ~= "mobility_blink" then same(addon.db.styles[key], style, "current reset leaves other entries intact") end
+    end
+    same(addon.db.reminders, before.reminders, "current style reset preserves all coordinates")
+end)
+
+test("Appearance selection discards drafts and each Proc region supports explicitly labeled Preview only", function()
+    local _, addon, state = login()
+    local panel, controls = options(addon)
+    addon:OpenAppearance("mobility", "mobility_blink")
+    enter(controls.appearanceFontSize.editBox, "29")
+    typeText(controls.appearanceFontSize.editBox, "67")
+    typeText(controls.appearanceScale.editBox, "2.7")
+    choose(controls.appearanceEntry, "mobility_shimmer")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "new entry loads its own saved size")
+    equal(tonumber(controls.appearanceScale.editBox:GetText()), 1, "new entry has no previous draft scale")
+    enter(controls.appearanceFontSize.editBox, "33")
+    choose(controls.appearanceEntry, "mobility_blink")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 29, "returning entry discards former unsubmitted text")
+    controls.appearanceReset:Click()
+    equal(addon.db.styles.mobility_blink.font.size, 24, "UI resets only selected skill")
+    equal(addon.db.styles.mobility_shimmer.font.size, 33, "other skill survives reset")
+    addon:SelectOptionsCategory("proc")
+    choose(controls.procEntry, "mage_fire_hot_streak_left")
+    controls.procAppearance:Click()
+    equal(panel.selectedAppearanceKey, "mage_fire_hot_streak_left", "Proc shortcut selects specific region")
+    controls.appearanceFontSize:SetValue(45)
+    equal(addon.db.styles.mage_fire_hot_streak_left.font.size, 45, "Proc size changes immediately")
+    equal(addon.db.styles.mage_fire_hot_streak_right.font.size, 24, "same Proc other region remains independent")
+    controls.appearancePreview:Click()
+    equal(addon.previewState.entryId, "mage_fire_hot_streak_left", "Appearance opens only selected region sample")
+    equal(addon.previewFrames.mage_fire_hot_streak_left.text.font[2], 45, "sample uses saved region style")
+    typeText(controls.appearanceFontSize.editBox, "66")
+    state.specID = 64
+    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "spec switch discards draft when changing eligible entry")
+    truthy(panel.selectedAppearanceKey:find("mage_frost_", 1, true), "spec switch selects only defined current-spec Proc entries")
+    for _, category in ipairs(panel.categories) do
+        equal(category.themeSelection:IsShown(), category.key == "proc", "appearance retains parent-category highlight after palette change")
+    end
+    state.specID = 63
+    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    addon:OpenAppearance("proc", "mage_fire_hot_streak_left")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 45, "returning to original specialization restores committed size")
+    local sourceFile = assert(io.open(root .. "/UI/Options.lua", "r"))
+    local source = sourceFile:read("*a"); sourceFile:close()
+    truthy(source:find("Preview only", 1, true), "Proc limitation is explicitly labeled")
+    for _, key in ipairs({ "font", "fontSize", "outline", "shadow", "scale" }) do
+        equal(controls[key], nil, "old global appearance control removed")
+    end
+end)
+
+test("actual Blink and Shimmer use distinct appearance without changing established position identities", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 97, chargeDuration = 20 }
+    local env, addon, state = mobilityLogin(1953, data)
+    addon:UpdateReminderStyle("mobility_blink", { font = { size = 27 }, scale = 1.2 })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 43 }, scale = 1.8 })
+    local id, blink = addon:GetMobilityEntry().id, currentLive(addon)
+    addon:UpdateSettings({ reminders = { [id] = { position = { x = 52, y = -29 } } } })
+    equal(blink.text.font[2], 27, "actual Blink gets Blink style")
+    local savedPositionID = addon:GetMobilityEntry().id
+    state.mobility.known[212653], state.mobility.override = true, 212653
+    state.mobility.spells[212653] = data
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(addon:GetMobilityEntry().id, savedPositionID, "learning replacement never renames position setting")
+    equal(currentLive(addon).text.font[2], 43, "actual Shimmer gets distinct Shimmer style")
+    equal(currentLive(addon):GetScale(), 1.8, "actual spell controls scale exactly once")
+    reminderAnchor(currentLive(addon), addon:GetMobilityEntry(), addon, env)
+    state.specID = 62
+    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(currentLive(addon).text.font[2], 43, "specialization switch retains actual skill style")
+    equal(addon.db.reminders[savedPositionID].position.x, 52, "old specialization coordinates survive")
+    local _, reloaded = mobilityLogin(212653, data, { specID = 62 }, copy(addon.db))
+    equal(currentLive(reloaded).text.font[2], 43, "skill style survives reload and spec change")
+end)
+
+test("style edits preserve opaque live alpha and native countdown binding without any spell query", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 94, chargeDuration = 20,
+        secretCharges = true, secretDuration = true, cooldownStart = 100, cooldownDuration = 20 }
+    local env, addon, state = mobilityLogin(212653, data, { inCombat = true })
+    local frame = currentLive(addon)
+    local binding, originalAlpha, originalDuration = frame.durationBinding, frame.alpha, frame.durationBinding.duration
+    local durationWrites, alphaWrites, reads = binding.durationWrites, frame.alphaWrites, copy(state.spellReads)
+    local timer = nativeText(addon)
+    truthy(addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 44, outline = "THICKOUTLINE" }, scale = 1.75, shadow = { enabled = false } }), "live style accepted")
+    equal(binding.duration, originalDuration, "style keeps exact native duration handle")
+    equal(binding.durationWrites, durationWrites, "style never calls SetDuration")
+    equal(frame.alpha, originalAlpha, "style keeps exact opaque native opacity")
+    equal(frame.alphaWrites, alphaWrites, "style never overwrites native alpha")
+    same(state.spellReads, reads, "style refresh never queries current combat APIs")
+    equal(nativeText(addon), timer, "style never recalculates timer text")
+    equal(frame:GetWidth(), 44 * 16, "live frame width follows entry font size")
+    equal(frame:GetHeight(), 44 * 3, "live frame height follows entry font size")
+    reminderAnchor(frame, addon:GetMobilityEntry(), addon, env)
+    state:advance(2)
+    equal(nativeText(addon), "No Shimmer\n12.0", "original recharge continues instead of restarting")
+    equal(state.liveMeasurements, 0, "style does not measure restricted text")
+    equal(state.alphaReads, 0, "style never reads native opacity back")
+    data.charges, data.cooldownDuration = 1, 0
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "first restored charge still hides immediately")
+end)
+
+test("explicit skill appearance Preview shares that skill style without altering learned live identity", function()
+    local _, addon = mobilityLogin(1953, { charges = 0, maxCharges = 1, chargeStart = 100, chargeDuration = 20 })
+    options(addon)
+    addon:UpdateReminderStyle("mobility_blink", { font = { size = 32 }, scale = 1.25 })
+    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 47 }, scale = 1.7 })
+    truthy(addon:StartAppearancePreview("mobility_blink"), "actual skill sample starts")
+    local id = addon:GetMobilityEntry().id
+    local preview = addon.previewFrames[id]
+    same(preview.text.font, currentLive(addon).text.font, "same entry preview/live typography matches")
+    equal(preview:GetScale(), currentLive(addon):GetScale(), "same entry preview/live scale matches")
+    truthy(addon:StartAppearancePreview("mobility_shimmer"), "alternative skill style is previewable without learning it")
+    equal(preview.text.font[2], 47, "alternate sample selects alternate style")
+    equal(addon:GetMobilityStatus().spellID, 1953, "preview does not manufacture learned Shimmer")
+    addon:StopPreview()
+    equal(currentLive(addon).text.font[2], 32, "stopping alternate sample restores actual Blink appearance")
+    equal(nativeText(addon), "No Blink\n20.0", "real Blink timer retained")
+end)
+
+test("updating one displayed entry does not touch any other cached reminder font", function()
+    local _, addon = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 })
+    options(addon)
+    addon:SetPreview("all")
+    local snapshots = {}
+    for _, pool in pairs(addon.reminderFrames) do
+        for _, frame in pairs(pool) do snapshots[frame] = frame.text.fontWrites end
+    end
+    addon:UpdateReminderStyle("mage_fire_hot_streak_left", { font = { size = 39 } })
+    for frame, writes in pairs(snapshots) do
+        if frame.styleKey == "mage_fire_hot_streak_left" then
+            truthy(frame.text.fontWrites > writes, "selected preview updates")
+        else
+            equal(frame.text.fontWrites, writes, "other live/preview entries receive no font writes")
+        end
+    end
+end)
+
+test("Alliance Arcane automatically uses the specified red-to-purple Options gradient only", function()
+    local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
+    equal(state.factionReads, 0, "hidden Options performs no decorative identity reads")
+    local before = copy(addon.db)
+    local panel, controls = options(addon)
+    local info = addon:GetAutomaticThemeInfo()
+    equal(info.mode, "Automatic", "theme mode is automatic")
+    equal(info.faction, "Alliance", "faction detected")
+    equal(info.specialization, "Arcane", "specialization detected")
+    equal(info.themeKey, "alliance_arcane", "specified combination selected")
+    same(panel.theme.header.gradient.first, { 0.48, 0.07, 0.13, 0.45 }, "header starts at requested red")
+    same(panel.theme.header.gradient.last, { 0.36, 0.13, 0.58, 0.45 }, "header ends in Arcane purple")
+    same(panel.brandingHeader.sweep.vertexColor, { 0.72, 0.46, 0.98 }, "brand highlight uses central accent")
+    equal(panel.brandingHeader.wordmark.vertexColor, nil, "blue/gold wordmark receives no tint")
+    same(addon.db, before, "automatic theme never writes saved reminder settings")
+    for key in pairs(controls) do
+        truthy(not key:lower():find("color", 1, true), "no custom color controls")
+        truthy(key ~= "themeSelect" and key ~= "faction" and key ~= "specialization" and key ~= "applyTheme", "no manual theme selector")
+    end
+    for _, category in ipairs(panel.categories) do
+        equal(category.themeSelection:IsShown(), category.key == panel.activeCategory, "selection gradient follows category")
+    end
+end)
+
+test("all six Mage faction-spec combinations and unknown identities resolve safe automatic themes", function()
+    local _, addon, state = login(nil, false, { mobility = nil })
+    local panel = options(addon)
+    for _, faction in ipairs({ "Alliance", "Horde" }) do
+        for spec, name in pairs({ [62] = "arcane", [63] = "fire", [64] = "frost" }) do
+            state.faction, state.specID = faction, spec
+            addon:RefreshOptionsTheme()
+            equal(addon:GetAutomaticThemeInfo().themeKey, faction:lower() .. "_" .. name, "all mapped combinations resolve")
+        end
+    end
+    for _, item in ipairs({ { "Neutral", "MAGE", 62, "mage" }, { "Unknown", "MAGE", 62, "mage" },
+        { "Alliance", "MAGE", false, "mage" }, { "Horde", "MAGE", 999, "mage" },
+        { "Alliance", "WARRIOR", 71, "neutral" }, { "Alliance", "UNKNOWN", false, "neutral" },
+        { secret("Alliance"), "MAGE", 62, "mage" }, { "Alliance", "MAGE", secret(62), "mage" } }) do
+        state.faction, state.classToken, state.specID = item[1], item[2], item[3] or nil
+        addon:RefreshOptionsTheme()
+        local info = addon:GetAutomaticThemeInfo()
+        equal(info.themeKey, item[4], "unknown/unselected/secret identity never borrows wrong specialization")
+        truthy(info.fallback, "fallback reason is explicit")
+    end
+    equal(panel:IsShown(), true, "fallback requires no manual selection or dialog")
+    equal(#state.errors, 0, "opaque identity fallback is safe")
+end)
+
+test("theme events refresh visible Options only and closing preserves live Mobility subscriptions", function()
+    local _, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20 })
+    local panel = options(addon)
+    local resources, before = resourceCounts(state), copy(addon.db)
+    state.specID = 62
+    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(addon:GetAutomaticThemeInfo().themeKey, "alliance_arcane", "visible spec event changes theme")
+    same(addon.db, before, "spec change does not replace entry settings")
+    state.faction = "Horde"
+    state:fire("UNIT_FACTION", "target")
+    equal(addon:GetAutomaticThemeInfo().themeKey, "alliance_arcane", "non-player faction event ignored")
+    state:fire("UNIT_FACTION", "player")
+    equal(addon:GetAutomaticThemeInfo().themeKey, "horde_arcane", "player faction event updates automatically")
+    panel:Hide()
+    local reads, gradients = state.factionReads, state.gradientWrites
+    state.faction, state.specID = "Alliance", 64
+    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    state:fire("UNIT_FACTION", "player")
+    addon:RefreshOptionsTheme()
+    equal(state.factionReads, reads, "hidden theme stops identity reads")
+    equal(state.gradientWrites, gradients, "hidden theme stops decorative writes")
+    truthy(addon.mobilityTracking, "closing does not disable live monitoring")
+    equal(nativeText(addon), "No Shimmer\n16.0", "live monitoring survives hidden spec events")
+    addon:ToggleOptions()
+    equal(addon:GetAutomaticThemeInfo().themeKey, "alliance_frost", "reopening freshly resolves current identity")
+    -- One new live frame is allowed for each newly used position ID; decorations are reused.
+    equal(#state.textures, resources.textures, "theme updates reuse all textures")
+    equal(#state.animations, resources.groups, "theme updates allocate no animation groups")
+    equal(panel.themeWatching, true, "visible theme subscribed")
+    panel:Hide()
+    equal(panel.themeWatching, false, "hidden theme unsubscribed independently")
+end)
+
+test("theme refresh cannot reset opaque timers opacity class colors or entry appearance", function()
+    local _, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 93, chargeDuration = 20,
+            secretCharges = true, secretDuration = true, cooldownStart = 100, cooldownDuration = 20 },
+        { inCombat = true })
+    local panel = options(addon)
+    local frame, saved = currentLive(addon), copy(addon.db)
+    local binding = frame.durationBinding
+    local alpha, alphaWrites, duration, writes = frame.alpha, frame.alphaWrites, binding.duration, binding.durationWrites
+    local reads, color = copy(state.spellReads), copy(frame.text.textColor)
+    for _, id in ipairs({ 62, 64, 63 }) do
+        state.specID = id
+        addon:RefreshOptionsTheme()
+    end
+    same(addon.db, saved, "decorative themes never write any reminder setting")
+    same(state.spellReads, reads, "theme resolver does not query skill state")
+    equal(binding.duration, duration, "native duration binding unchanged")
+    equal(binding.durationWrites, writes, "theme never rebinds native timer")
+    equal(frame.alpha, alpha, "opaque alpha identity unchanged")
+    equal(frame.alphaWrites, alphaWrites, "theme never writes live opacity")
+    same(frame.text.textColor, color, "reminder class color independent of spec accents")
+    equal(panel.titleAnimation:IsPlaying(), false, "automatic theme respects combat-stopped brand animation")
+    state:advance(1)
+    equal(nativeText(addon), "No Shimmer\n12.0", "native countdown advances after theme changes")
 end)
 
 test("live runtime sources contain no polling cast-count inference or timer text readback", function()

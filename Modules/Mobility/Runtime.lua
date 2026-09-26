@@ -35,7 +35,7 @@ function addon:RenderMobilityState()
     -- Updating a continuing reminder need not clear/hide its native binding.
     -- Only obsolete/suppressed entries are explicitly torn down.
     self:HideLiveMobility(state.entry.id)
-    self:RenderLiveMobility(state.entry, state.spellName, state.duration, state.visibility)
+    self:RenderLiveMobility(state.entry, state.spellName, state.duration, state.visibility, state.spellID)
 end
 
 function addon:RefreshMobility()

@@ -1,5 +1,7 @@
 # CarGOUI 0.1.0-alpha.6 — 战斗显隐与固定职业色
 
+> **后续反馈：用户已实测确认 alpha.6 Blink / Shimmer 正常。** 下文保留当时的开发/验收记录与接口边界；alpha.7 仅增加独立样式和自动主题，见 [当前说明与验收](ENTRY_STYLES.md)。用户反馈未提供完整 build/场景矩阵，不扩写为所有边界均已通过。
+
 在 alpha.5 `1076f4158af0663cee58bce76fec99b58a75f816` 上增量修改，沿用 PR #1 / `feat/options-window`。未回退 alpha.4 或已完成的 Options 功能。
 
 ## 修改内容

@@ -1,10 +1,27 @@
 local _, addon = ...
 
+addon.factoryReminderStyle = {
+    font = { face = "Fonts\\FRIZQT__.ttf", size = 24, outline = "OUTLINE" },
+    scale = 1,
+    shadow = { enabled = true },
+}
+
+-- Every call returns fresh nested tables: no entry inherits a mutable style.
+function addon:NewReminderStyle()
+    local style = self.factoryReminderStyle
+    return {
+        font = { face = style.font.face, size = style.font.size, outline = style.font.outline },
+        scale = style.scale,
+        shadow = { enabled = style.shadow.enabled },
+    }
+end
+
 addon.defaults = {
-    schemaVersion = 3,
+    schemaVersion = 4,
     enabled = true,
     mobility = { enabled = true },
     position = { x = 0, y = 0 },
+    -- Retained for one-time migration/history; no global reminder-style editor.
     font = {
         face = "Fonts\\FRIZQT__.ttf",
         size = 24,
@@ -14,7 +31,12 @@ addon.defaults = {
     shadow = { enabled = true },
     options = { position = { x = 0, y = 0 }, animatedTitle = true },
     reminders = {},
+    styles = {},
 }
+
+for _, entry in ipairs(addon.appearanceEntries) do
+    addon.defaults.styles[entry.key] = addon:NewReminderStyle()
+end
 
 -- Per-region offsets share the same database and validation pipeline as other settings.
 for _, entry in ipairs(addon.previewEntries) do
