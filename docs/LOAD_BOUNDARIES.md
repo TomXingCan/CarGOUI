@@ -1,4 +1,13 @@
-# Loading and measurement boundary — alpha.9, unified Data package
+# Loading and measurement boundary — alpha.10, unified Data package
+
+Alpha.10 adds all 13 classes / 40 specializations to the core's lightweight
+Options theme definitions. These UI palette tables and geometry-generating code
+are loaded with CarGOUI, regardless of Mobility support. They are not business
+adapters or a spell database. Only the current Body motif's segments are built,
+using the existing 64-Line pool while Options exists; no additional reminder
+frames, gameplay subscriptions or cooldown queries are created for a theme.
+This does not provide full-class Mobility support: the shipped live adapter is
+still Mage. The previously documented Data/storage tradeoff below is unchanged.
 
 ## Explicit architecture tradeoff
 

@@ -1,6 +1,6 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.9**，目标 WoW Retail 12.1.0（Interface 120100）。本轮开放 Options 全面板空白区域拖动，分离阵营 Header / 专精 Body，并统一为 CarGOUI + CarGOUI_Data 两个安装目录。保留用户已实测通过的 Blink / Shimmer 战斗路径；没有开始其他职业真实 Mobility、真实 Proc 或 Free Move。
+当前版本 **0.1.0-alpha.10**，目标 WoW Retail 12.1.0（Interface 120100）。本次增量补齐 **13 职业、40 专精的 Body 主题**，包括 Devourer；保留用户已实测通过的法师主题、阵营 Header、全面板空白区域拖动及 Blink / Shimmer 战斗路径。继续使用 CarGOUI + CarGOUI_Data 两个安装目录。本次主题覆盖与技能监控覆盖分别记录：此源码目前仍只有法师真实 Mobility，没有真实 Proc 或 Free Move。
 
 ## 安装与升级
 
@@ -42,7 +42,9 @@ Test Mode 使用外部游戏空间的固定 `8.0` 样例并标记 TEST。Proc **
 
 Header 只表达阵营：Alliance 蓝色、Horde 红色，中立/未知使用中性回退。同阵营切专精不改变 Header 主色或品牌强调色；原始彩色徽记/字标保持清晰。
 
-Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。法师 Arcane 为深紫→奥术紫和符文法阵水印，Fire 为暗红棕→琥珀橙和火焰/余烬水印，Frost 为深蓝→冰青和冰晶霜纹水印。按钮、输入框、菜单使用同色系层次，普通正文保持清楚。
+Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标版本全部 13 职业、40 专精都有明确配色和图案；同职业专精使用不同成品主题。法师 Arcane 的深紫→奥术紫符文法阵、Fire 的暗红棕→琥珀橙火焰、Frost 的深蓝→冰青冰晶均保持 alpha.9 的原始定义。按钮、输入框、菜单使用同色系层次，普通正文保持清楚。[完整 Body 覆盖表、来源与逐项验收状态](docs/BODY_THEME_COVERAGE.md)。
+
+未选专精使用本职业基础主题，身份暂不可用使用中性回退并在信息恢复事件后更新。打开窗口始终重新解析；隐藏时停止主题监听。关闭 Mobility、尚未学会位移、未加载业务适配器或关闭 Preview 均不影响主题。所有主题定义属于核心轻量 UI 数据，不为显示主题加载全职业业务或创建提醒框体。
 
 图案位于 Body 右下内容背景，使用原创静态几何与原生 Line 的纯色线段绘制；不加载宣传图、不新增图片、粒子或旋转动画。共用线段池只绘制当前图案，身份变化或打开时更新；不承诺游戏纹理缓存立即卸载。Header 与 Body 配色映射独立，提醒职业色、字体、坐标、DurationTextBinding 和显隐不受影响。[分层主题与素材/API 来源](docs/THEMES.md)。
 
@@ -70,7 +72,7 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 离线测试保留战斗秘密值与战斗标志分别模拟的回归，并验证范围隔离、延迟初始化、加载/订阅/绑定有界、主题和草稿行为。交付报告记录**最终 ZIP 解包后的测试**及 SHA256。
 
-**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 正常；alpha.9 新包的实机迁移、渲染、安装后战斗回归、CPU/内存实测均待验收。离线 mock 值不作为真实客户端测量。Phase B 全职业 Mobility 尚未开始。
+**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及 alpha.9 法师 Header/Body 正常；alpha.10 所有新增主题的实机视觉、各 UI 缩放、安装后战斗回归与 CPU/内存实测仍待验收。离线映射或模拟图案检查不作为实机验收。其他职业的 Body 支持不代表其真实 Mobility 已支持。
 
 ## 源码结构
 
@@ -78,4 +80,4 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
 
-升级清理、全面板拖动的接口核查及本轮验收步骤见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)。
+两目录升级清理、全面板拖动接口核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；本轮新增主题验收见 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。从 alpha.9 更新只需替换两个程序目录，继续保留 WTF / SavedVariables，无新增配置迁移。

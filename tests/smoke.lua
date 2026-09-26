@@ -2957,7 +2957,7 @@ test("all six Mage faction-spec combinations and unknown identities resolve safe
     end
     for _, item in ipairs({ { "Neutral", "MAGE", 62, "neutral_arcane" }, { "Unknown", "MAGE", 62, "neutral_arcane" },
         { "Alliance", "MAGE", false, "alliance_mage" }, { "Horde", "MAGE", 999, "horde_mage" },
-        { "Alliance", "WARRIOR", 71, "alliance_neutral" }, { "Alliance", "UNKNOWN", false, "alliance_neutral" },
+        { "Alliance", "WARRIOR", 9999, "alliance_warrior" }, { "Alliance", "UNKNOWN", false, "alliance_neutral" },
         { secret("Alliance"), "MAGE", 62, "neutral_arcane" }, { "Alliance", "MAGE", secret(62), "alliance_mage" } }) do
         state.faction, state.classToken, state.specID = item[1], item[2], item[3] or nil
         addon:RefreshOptionsTheme()
@@ -3452,6 +3452,244 @@ test("Arcane Fire and Frost Body watermarks use distinct native endpoint geometr
     state.specID = 62; addon:RefreshOptionsTheme()
     equal(state.gradientWrites, gradients, "hidden watermark does not update")
     equal(state.factionReads, reads, "hidden theme performs no identity refresh")
+end)
+
+-- Independent Retail 12.1 build 69933 roster fixture, not generated from theme
+-- implementation tables. Blizzard SPEC_FORMAT_STRINGS at pinned UI commit:
+-- 09b9db7948abc9b9648dedaab51eb0cf3ee67b31 / Blizzard_ClassSpecializationsFrame.lua.
+local themeRoster = {
+    { "WARRIOR", { {71,"Arms"}, {72,"Fury"}, {73,"Protection"} } },
+    { "PALADIN", { {65,"Holy"}, {66,"Protection"}, {70,"Retribution"} } },
+    { "HUNTER", { {253,"Beast Mastery"}, {254,"Marksmanship"}, {255,"Survival"} } },
+    { "ROGUE", { {259,"Assassination"}, {260,"Outlaw"}, {261,"Subtlety"} } },
+    { "PRIEST", { {256,"Discipline"}, {257,"Holy"}, {258,"Shadow"} } },
+    { "DEATHKNIGHT", { {250,"Blood"}, {251,"Frost"}, {252,"Unholy"} } },
+    { "SHAMAN", { {262,"Elemental"}, {263,"Enhancement"}, {264,"Restoration"} } },
+    { "MAGE", { {62,"Arcane"}, {63,"Fire"}, {64,"Frost"} } },
+    { "WARLOCK", { {265,"Affliction"}, {266,"Demonology"}, {267,"Destruction"} } },
+    { "MONK", { {268,"Brewmaster"}, {269,"Windwalker"}, {270,"Mistweaver"} } },
+    { "DRUID", { {102,"Balance"}, {103,"Feral"}, {104,"Guardian"}, {105,"Restoration"} } },
+    { "DEMONHUNTER", { {577,"Havoc"}, {581,"Vengeance"}, {1480,"Devourer"} } },
+    { "EVOKER", { {1467,"Devastation"}, {1468,"Preservation"}, {1473,"Augmentation"} } },
+}
+
+local function motifFingerprint(segments)
+    local first, second = 0, 0
+    for _, segment in ipairs(segments) do
+        for field = 1, 5 do
+            local number = math.floor(segment[field] * 1000000 + 0.5)
+            first = (first * 131 + number) % 2147483647
+            second = (second * 257 + number) % 2147483629
+        end
+    end
+    return #segments .. ":" .. first .. ":" .. second
+end
+
+test("all 13 classes and 40 independently verified specializations have class-qualified Body themes", function()
+    local _, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    local panel = options(addon)
+    local header, count, seenIDs = panel.theme.header.gradient, 0, {}
+    equal(countKeys(addon.optionThemeClasses), 13, "complete current class roster with no invented classes")
+    for _, row in ipairs(themeRoster) do
+        local token, specs = row[1], row[2]
+        local map = assert(addon.optionThemeClasses[token], "Missing class Body definition " .. token)
+        equal(countKeys(map.specs), #specs, "exact verified spec count for " .. token)
+        for _, spec in ipairs(specs) do
+            local definition = assert(map.specs[spec[1]], "Missing independently verified spec " .. spec[1])
+            equal(definition.label, spec[2], "spec identity from pinned roster")
+            truthy(not seenIDs[spec[1]], "spec ID belongs to exactly one class")
+            seenIDs[spec[1]], count = token, count + 1
+            truthy(addon.optionBodyThemes[definition.key], "mapped Body palette exists")
+            state.classToken, state.specID = token, spec[1]
+            addon:RefreshOptionsTheme()
+            local info = addon:GetAutomaticThemeInfo()
+            equal(info.classToken, token, "class identity resolved")
+            equal(info.specID, spec[1], "numeric spec identity resolved")
+            equal(info.specialization, spec[2], "automatic labels use correct class/spec name")
+            equal(info.bodyKey, definition.key, "current class-qualified Body selected")
+            equal(info.coverage, "specialization", "supported theme is not reported as fallback")
+            equal(info.fallback, nil, "known Alliance class/spec has no fallback reason")
+            equal(panel.theme.header.gradient, header, "same faction Header stays unchanged through all 40 specs")
+        end
+    end
+    equal(count, 40, "complete independently verified specialization roster")
+    equal(seenIDs[1480], "DEMONHUNTER", "Devourer is mapped to Demon Hunter")
+end)
+
+test("each class has distinct spec palette and bounded non-degenerate watermark geometry", function()
+    local _, addon = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    for _, row in ipairs(themeRoster) do
+        local palettes, geometries, keys = {}, {}, {}
+        for _, spec in ipairs(row[2]) do
+            local key = addon.optionThemeClasses[row[1]].specs[spec[1]].key
+            local body = addon.optionBodyThemes[key]
+            truthy(not keys[key], "same-class specs do not share a Body definition")
+            keys[key] = true
+            local colors = {}
+            for _, field in ipairs({ "background", "left", "right", "accent", "input", "button" }) do
+                local rgb = body[field]
+                equal(#rgb, 3, "palette uses RGB triplets")
+                for _, value in ipairs(rgb) do
+                    truthy(type(value) == "number" and value == value and value >= 0 and value <= 1, "palette channels remain valid")
+                    colors[#colors + 1] = value
+                end
+            end
+            local signature = table.concat(colors, ":")
+            truthy(not palettes[signature], "same-class specs are not identical color palettes")
+            palettes[signature] = true
+            local motif = addon:BuildOptionsThemeMotif(body.motif)
+            truthy(#motif > 0 and #motif <= 64, "known specialization has a bounded explicit motif")
+            for _, segment in ipairs(motif) do
+                equal(#segment, 5, "native Line segment consists of two endpoints and thickness")
+                for i = 1, 4 do truthy(math.abs(segment[i]) <= 100, "motif remains inside its 200px area") end
+                truthy(segment[1] ~= segment[3] or segment[2] ~= segment[4], "no zero-length decorative segment")
+                truthy(segment[5] > 0 and segment[5] <= 5, "restrained positive stroke thickness")
+            end
+            local fingerprint = motifFingerprint(motif)
+            truthy(not geometries[fingerprint], "same-class specialization motifs differ in geometry, not just tint")
+            geometries[fingerprint] = true
+        end
+    end
+end)
+
+test("all classes have automatic no-spec and unmapped-spec fallbacks without borrowing another class", function()
+    local _, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    local panel = options(addon)
+    local classKeys = {}
+    for _, row in ipairs(themeRoster) do
+        local token = row[1]
+        local base = addon.optionThemeClasses[token].key
+        truthy(base ~= "neutral" and not classKeys[base], "each known class owns an explicit base Body")
+        classKeys[base] = true
+        state.classToken, state.specID = token, nil
+        addon:RefreshOptionsTheme()
+        local info = addon:GetAutomaticThemeInfo()
+        equal(info.bodyKey, base, "no spec uses own class theme")
+        equal(info.coverage, "class fallback", "no spec fallback is explicit")
+        equal(info.specialization, "Not selected", "no spec does not claim a specialization")
+        truthy(info.fallback, "no-spec fallback reason supplied")
+        state.specID = 9999; addon:RefreshOptionsTheme()
+        info = addon:GetAutomaticThemeInfo()
+        equal(info.bodyKey, base, "unknown spec cannot borrow a known theme")
+        equal(info.coverage, "unmapped specialization", "unmapped spec is reported distinctly")
+        state.specID = token == "MAGE" and 71 or 62; addon:RefreshOptionsTheme()
+        equal(addon:GetAutomaticThemeInfo().bodyKey, base, "a valid spec of another class must not match")
+    end
+    state.classToken, state.specID = "UNKNOWN", 62; addon:RefreshOptionsTheme()
+    equal(addon:GetAutomaticThemeInfo().bodyKey, "neutral", "unknown class uses neutral even with valid Mage spec ID")
+    equal(panel.theme.motifCount, 0, "neutral fallback clears old spec watermark")
+    for _, line in ipairs(panel.theme.motif) do equal(line:IsShown(), false, "neutral fallback has no residual strokes") end
+    state.classToken, state.specID = secret("MAGE"), secret(62); addon:RefreshOptionsTheme()
+    equal(addon:GetAutomaticThemeInfo().bodyKey, "neutral", "opaque identity safely selects neutral")
+end)
+
+test("all-class Body themes work without gameplay adapters or cooldown queries and do not write configuration", function()
+    for _, row in ipairs(themeRoster) do
+        local token, first = row[1], row[2][1]
+        local _, addon, state = login(nil, false, { classToken = token, specID = first[1] })
+        options(addon)
+        equal(state.moduleLoads, token == "MAGE" and 1 or 0, "theme coverage never causes another gameplay module to load")
+        local saved, spellReads = copy(addon.db), copy(state.spellReads)
+        local before = addon:GetRuntimeLoadDiagnostics()
+        for _, spec in ipairs(row[2]) do
+            state.specID = spec[1]; addon:RefreshOptionsTheme()
+            equal(addon:GetAutomaticThemeInfo().coverage, "specialization", "theme available regardless of adapter support")
+        end
+        same(addon.db, saved, "theme-only updates do not write or initialize additional configuration")
+        same(state.spellReads, spellReads, "theme-only updates do not query cooldown or charge state")
+        equal(state.realReads, 0, "decorative themes never call live buff/cooldown APIs")
+        local after = addon:GetRuntimeLoadDiagnostics()
+        equal(after.allocatedBindings, before.allocatedBindings, "theme coverage creates no native cooldown binding")
+        equal(after.liveFrames + after.previewFrames, 0, "opening unsupported or unlearned themes creates no reminders")
+        if token ~= "MAGE" then
+            equal(after.modules.activeAdapterClass, nil, "theme does not manufacture a gameplay adapter")
+            equal(addon.db.classes.MAGE, nil, "non-Mage theme does not instantiate Mage configuration")
+        end
+    end
+end)
+
+test("visible identity recovery and disabled or unlearned Mobility do not block theme selection", function()
+    local _, addon, state = login(nil, false, { classToken = "UNKNOWN", specID = false })
+    local panel = options(addon)
+    local saved = copy(addon.db)
+    equal(addon:GetAutomaticThemeInfo().bodyKey, "neutral", "initial unavailable identity uses neutral")
+    state.classToken, state.specID = "SHAMAN", 262
+    state:fire("SPELLS_CHANGED")
+    equal(addon:GetAutomaticThemeInfo().specialization, "Elemental", "visible spell-data event resolves newly available identity")
+    state.specID = nil; state:fire("PLAYER_TALENT_UPDATE")
+    equal(addon:GetAutomaticThemeInfo().coverage, "class fallback", "temporary no-spec state uses own class fallback")
+    state.specID = 264; state:fire("PLAYER_TALENT_UPDATE")
+    equal(addon:GetAutomaticThemeInfo().specialization, "Restoration", "visible talent event recovers current spec")
+    same(addon.db, saved, "identity-only theme recovery leaves configuration untouched")
+    equal(state.moduleLoads, 0, "identity-only recovery never loads gameplay code")
+    equal(state.realReads, 0, "identity recovery never queries buffs or cooldowns")
+    panel:Hide()
+    local reads, gradients = state.factionReads, state.gradientWrites
+    state.specID = 263; state:fire("SPELLS_CHANGED"); state:fire("PLAYER_TALENT_UPDATE")
+    equal(state.factionReads, reads, "hidden identity recovery events perform no decoration lookup")
+    equal(state.gradientWrites, gradients, "hidden identity recovery events perform no redraw")
+    addon:ToggleOptions()
+    equal(addon:GetAutomaticThemeInfo().specialization, "Enhancement", "reopening freshly resolves current identity")
+    local _, mage, ms = login({ mobility = { enabled = false } }, false, { specID = 62 })
+    options(mage)
+    equal(mage:GetAutomaticThemeInfo().bodyKey, "arcane", "disabled Mobility cannot disable Arcane Options theme")
+    ms.specID = 64; ms:fire("SPELLS_CHANGED")
+    equal(mage:GetAutomaticThemeInfo().bodyKey, "frost", "unlearned disabled Mage still responds to theme identity events")
+    equal(mage:GetRuntimeLoadDiagnostics().allocatedBindings, 0, "no timer is created for disabled/unlearned Mobility")
+    equal(ms.realReads, 0, "disabled theme path does not read skill cooldowns")
+end)
+
+test("repeated full-roster theme cycles reuse 64 Lines and leave no stale motifs listeners or gameplay state", function()
+    local _, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    local idleEvents = addon:GetEventDiagnostics()
+    local panel = options(addon)
+    local resources, events, saved = resourceCounts(state), addon:GetEventDiagnostics(), copy(addon.db)
+    local lines = {}; for i, line in ipairs(panel.theme.motif) do lines[i] = line end
+    local header = panel.theme.header.gradient
+    for _ = 1, 4 do
+        for _, row in ipairs(themeRoster) do
+            for _, spec in ipairs(row[2]) do
+                state.classToken, state.specID = row[1], spec[1]
+                addon:RefreshOptionsTheme()
+                local expected = #addon:BuildOptionsThemeMotif(addon.optionBodyThemes[addon:GetAutomaticThemeInfo().bodyKey].motif)
+                equal(panel.theme.motifCount, expected, "new motif owns exact active stroke count")
+                for i, line in ipairs(panel.theme.motif) do
+                    equal(line, lines[i], "every class reuses native Line pool")
+                    equal(line:IsShown(), i <= expected, "new motif hides every unused old stroke")
+                end
+                equal(panel.theme.header.gradient, header, "Body cycling preserves same-faction Header object")
+            end
+        end
+    end
+    same(resourceCounts(state), resources, "160 theme transitions allocate no extra objects")
+    same(addon:GetEventDiagnostics(), events, "theme refresh cannot accumulate identity listeners")
+    same(addon.db, saved, "full-roster Body transitions never write saved settings")
+    equal(state.moduleLoads, 0, "theme cycling never activates Mage gameplay module")
+    equal(state.realReads, 0, "theme cycling never reads gameplay state")
+    panel:Hide()
+    same(addon:GetEventDiagnostics(), idleEvents, "closing removes all theme listeners and restores idle ownership")
+    for _ = 1, 8 do addon:ToggleOptions(); panel:Hide() end
+    same(resourceCounts(state), resources, "reopening known UI reuses all theme objects")
+    same(addon:GetEventDiagnostics(), idleEvents, "repeated reopen/close leaves no hidden identity watcher")
+end)
+
+test("Mage Body palettes and all watermark endpoints exactly retain the accepted alpha-9 baseline", function()
+    local _, addon = login()
+    local palettes = {
+        arcane = { background = {0.043,0.025,0.067}, left = {0.064,0.031,0.11}, right = {0.17,0.078,0.245},
+            accent = {0.73,0.49,0.98}, input = {0.035,0.021,0.060}, button = {0.12,0.064,0.18} },
+        fire = { background = {0.070,0.027,0.018}, left = {0.12,0.034,0.019}, right = {0.245,0.13,0.047},
+            accent = {1,0.62,0.27}, input = {0.057,0.025,0.019}, button = {0.18,0.082,0.032} },
+        frost = { background = {0.018,0.039,0.070}, left = {0.026,0.062,0.14}, right = {0.055,0.18,0.23},
+            accent = {0.43,0.84,1}, input = {0.018,0.031,0.058}, button = {0.042,0.105,0.16} },
+    }
+    -- Dual rolling fingerprints calculated from git e033af9, six-decimal
+    -- integer endpoint/thickness values; they do not inspect current UI output.
+    local geometry = { arcane = "60:1027259727:123858337", fire = "27:1877310240:1128453855", frost = "36:584702318:1618801814" }
+    for key, fields in pairs(palettes) do
+        for field, expected in pairs(fields) do same(addon.optionBodyThemes[key][field], expected, "accepted Mage palette " .. key .. "/" .. field) end
+        equal(motifFingerprint(addon:BuildOptionsThemeMotif(key)), geometry[key], "accepted Mage geometry " .. key)
+    end
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

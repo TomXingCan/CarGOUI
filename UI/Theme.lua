@@ -1,5 +1,8 @@
 local _, addon = ...
-local events = { "PLAYER_ENTERING_WORLD", "PLAYER_SPECIALIZATION_CHANGED", "UNIT_FACTION", "NEUTRAL_FACTION_SELECT_RESULT" }
+-- Identity can become available after the window opens (login / talent load).
+-- Subscribe only while shown; these callbacks never start a gameplay adapter.
+local events = { "PLAYER_ENTERING_WORLD", "PLAYER_SPECIALIZATION_CHANGED", "UNIT_FACTION",
+    "NEUTRAL_FACTION_SELECT_RESULT", "PLAYER_TALENT_UPDATE", "SPELLS_CHANGED" }
 
 local function IsPublic(value)
     return not issecretvalue or not issecretvalue(value)
@@ -26,14 +29,19 @@ end
 
 local function ResolveTheme()
     local faction, classToken, specID = ReadIdentity()
-    local spec = classToken == "MAGE" and specID and addon.optionThemeSpecs[specID]
+    local class = classToken and addon.optionThemeClasses[classToken]
+    local spec = class and specID and class.specs[specID]
     local headerKey = faction == "Alliance" and "alliance" or faction == "Horde" and "horde" or "neutral"
-    local bodyKey, fallback = "neutral", "This class has no dedicated Body theme."
-    if classToken == "MAGE" then
-        bodyKey = spec and spec.key or "mage"
+    local bodyKey, fallback, coverage = "neutral", nil, "neutral fallback"
+    if class then
+        bodyKey = spec and spec.key or class.key
+        coverage = spec and "specialization" or "class fallback"
         if spec then fallback = nil
-        else fallback = "No covered specialization; using the Mage Body fallback." end
-    elseif not classToken or not addon.optionThemeClassNames[classToken] then
+        elseif specID then
+            coverage = "unmapped specialization"
+            fallback = "Unmapped specialization; using this class's base Body theme."
+        else fallback = "No specialization selected; using this class's base Body theme." end
+    else
         fallback = "Class identity is unavailable; using the neutral Body fallback."
     end
     if headerKey == "neutral" then
@@ -42,6 +50,7 @@ local function ResolveTheme()
     local header, body = addon.optionHeaderThemes[headerKey], addon.optionBodyThemes[bodyKey]
     return header, body, {
         mode = "Automatic", faction = faction, class = addon.optionThemeClassNames[classToken] or "Unknown",
+        classToken = classToken, specID = specID, coverage = coverage,
         specialization = spec and spec.label or (specID and ("Unmapped (" .. specID .. ")") or "Not selected"),
         headerKey = headerKey, bodyKey = bodyKey, headerPalette = header.label, bodyPalette = body.label,
         palette = header.label .. " / " .. body.label, themeKey = headerKey .. "_" .. bodyKey, fallback = fallback,

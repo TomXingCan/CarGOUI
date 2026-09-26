@@ -18,6 +18,11 @@ theme = source("UI/Theme.lua")
 assert not re.search(r"OnUpdate|NewTicker|C_Timer|C_Spell|SetFont\s*\(|UpdateSettings|RefreshMobility|RenderLiveMobility|CarGOUIDB", theme)
 assert "UpdateBrandingTheme" in theme and "SetGradient" in theme
 print("PASS Automatic theme changes only Options surfaces, with no polling or reminder/configuration writes")
+assert "optionThemeClasses[classToken]" in theme and "class.specs[specID]" in theme
+assert not re.search(r"GetMobilityState|GetMobilityStatus|GetMobilityConfig|GetReminderStyle|EnsureCurrentClassModule|RegisterClassAdapter|mobilityTracking", theme)
+theme_data = source("Database/Themes.lua")
+assert not re.search(r"C_AddOns|C_Spell|C_Timer|RegisterEvent|CreateFrame|CarGOUIDB|GetProcConfig|GetMobilityConfig", theme_data)
+print("PASS All-class Body selection uses class-qualified specialization keys independently of gameplay adapters and configuration")
 options = source("UI/Options.lua")
 assert not re.search(r"controls\.(?:font|fontSize|scale|outline|shadow)\s*=", options)
 assert not re.search(r"ColorPicker|Apply Theme|themeSelector|SetColorRGB|classSelector|specSelector|profileSelector|loadModuleButton", options)
