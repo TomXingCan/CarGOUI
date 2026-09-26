@@ -45,13 +45,13 @@ Stock scale-1 regions use long side `256 * 0.8`, short side `128 * 0.8`. Side ce
 
 ## Lightweight brand header
 
-`UI/Branding.lua` combines original navy/gold TGA artwork, a cargo/movement emblem, a native Friz wordmark and a separate soft blue glow. One native AnimationGroup runs two Alpha animations over 4.8 seconds with IN_OUT smoothing. It plays only while Options is visible and Animated title is enabled. Disabling/closing stops it and restores a static glow; there are no Lua animation callbacks or decorative OnUpdate scripts.
+`UI/Branding.lua` now renders a separate transparent artwork wordmark and compact emblem based on the user's supplied logo. One native AnimationGroup translates a narrow highlight through a fixed glyph mask over 1.5 seconds, then rests for 5 seconds. The wordmark/emblem themselves stay static and independent of reminder typography. It plays only while Options is actually visible, Animated title is enabled, and the player is out of combat. Closing/disabling stops it, clears the highlight and releases combat listeners. There are no Lua animation callbacks or decorative OnUpdate scripts.
 
-`Media/Branding/` includes the in-game-safe 32-bit uncompressed TGA files, editable SVG references and a reproducible generator. [Asset mapping/provenance](../Media/Branding/README.md) explains the future Curse promo sources. The original art follows the requested direction; no unprovided logo is claimed to have been reproduced. No full Curse promo composition is included.
+`Media/Branding/` includes four 32-bit uncompressed runtime TGA files (606,280 bytes), production PNG sources, full generation prompts, and a reproducible converter. The PNG sources stay in the repository and are excluded from the install ZIP. [Asset mapping/provenance](../Media/Branding/README.md) records the supplied reference and processing. [Branding implementation](BRANDING.md) documents the native masking APIs, object budgets, explicit glyph-pulse fallback and outstanding client checks. No Curse promo content is made in this increment.
 
 ## Verification and next runtime phase
 
-31 Lua 5.1 mock tests pass, including paired validation, pending text, header-only dragging, scale-aware position persistence, animated/static title lifecycle, external single/all previews, fixed region guidance, class/spec changes, distinct renderer channels, and rejection of live state reads/polling. TGA format, power-of-two dimensions, alpha, payload and decoding checks pass. The header has been inspected in an offline asset composition; this is not an in-game screenshot.
+37 Lua 5.1 mock tests pass, including paired validation, pending text, header-only dragging, scale-aware position persistence, title visibility/combat/static lifecycle, 20-cycle resource reuse, art/mask alignment and fallback, external single/all previews, fixed region guidance, class/spec changes, distinct renderer channels, and rejection of live state reads/polling. TGA format, power-of-two dimensions, alpha, payload and decoding checks pass. The header has been inspected in an offline asset composition; this is not an in-game screenshot.
 
 Real Retail 12.1 rendering, templates, pointer interactions, client texture IDs, UI scaling and region alignment remain untested in-game. See the README acceptance steps.
 

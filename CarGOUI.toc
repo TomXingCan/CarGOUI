@@ -2,7 +2,7 @@
 ## Title: CarGOUI
 ## Notes: Lightweight settings and simulated reminder previews. Live detection not yet implemented.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.3
+## Version: 0.1.0-alpha.4
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua

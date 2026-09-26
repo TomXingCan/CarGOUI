@@ -1,91 +1,186 @@
 local addonName, addon = ...
 local assetPath = "Interface\\AddOns\\" .. addonName .. "\\Media\\Branding\\"
 
--- Native alpha animation only: no timers, events, or per-frame Lua callbacks.
+-- Shared art/mask UV rectangle [4,7,508,120] in their 512x128 canvases.
+-- Preserve this content ratio inside a 224x44 slot; never stretch the letters.
+local wordmarkUV = { 4 / 512, 508 / 512, 7 / 128, 120 / 128 }
+local contentWidth, contentHeight = 504, 113
+local wordmarkWidth = math.min(224, 44 * contentWidth / contentHeight)
+local wordmarkHeight = wordmarkWidth * contentHeight / contentWidth
+local accent = { 0.78, 0.94, 1 }
+
+local function ResetHighlight(panel)
+    local header = panel.brandingHeader
+    if not header then return end
+    if panel.titleAnimation and panel.titleAnimation:IsPlaying() then panel.titleAnimation:Stop() end
+    header.sweep:SetAlpha(0)
+    header.sweep:ClearAllPoints()
+    if header.animationMode == "masked-sweep" then
+        header.sweep:SetPoint("LEFT", header.wordmark, "LEFT", -header.bandWidth, 0)
+    else
+        header.sweep:SetPoint("CENTER", header.wordmark, "CENTER", 0, 0)
+    end
+end
+
+local function OnBrandingCombatChanged(self, event)
+    local panel = self.optionsFrame
+    if not panel then return end
+    if event == "PLAYER_REGEN_DISABLED" then
+        -- Do not refresh Options or sample frames in response to decoration events.
+        ResetHighlight(panel)
+    else
+        self:RefreshTitleAnimation()
+    end
+end
+
+local function WatchCombat(self, enabled)
+    local panel = self.optionsFrame
+    if panel.brandingCombatEvents == enabled then return end
+    panel.brandingCombatEvents = enabled
+    local method = enabled and self.RegisterEvent or self.UnregisterEvent
+    method(self, "PLAYER_REGEN_DISABLED", OnBrandingCombatChanged)
+    method(self, "PLAYER_REGEN_ENABLED", OnBrandingCombatChanged)
+end
+
+local function Alpha(group, from, to, duration, delay)
+    local animation = group:CreateAnimation("Alpha")
+    animation:SetOrder(1)
+    animation:SetFromAlpha(from)
+    animation:SetToAlpha(to)
+    animation:SetDuration(duration)
+    animation:SetStartDelay(delay or 0)
+    animation:SetSmoothing("IN_OUT")
+    return animation
+end
+
 function addon:CreateOptionsBranding(panel)
     if panel.brandingHeader then return panel.brandingHeader end
     local header = CreateFrame("Frame", nil, panel)
-    header:SetPoint("TOPLEFT", panel, "TOPLEFT", 14, -8)
-    header:SetSize(692, 66)
+    header:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
+    header:SetSize(720, 76)
     header:EnableMouse(true)
+    panel.brandingHeader = header
 
-    local background = header:CreateTexture(nil, "BACKGROUND")
-    background:SetAllPoints(header)
-    background:SetTexture(assetPath .. "header.tga")
-
-    local glow = header:CreateTexture(nil, "ARTWORK")
-    glow:SetPoint("TOPLEFT", header, "TOPLEFT", 70, -2)
-    glow:SetSize(250, 60)
-    glow:SetTexture(assetPath .. "glow.tga")
-    glow:SetBlendMode("ADD")
-    glow:SetAlpha(0.35)
-    header.glow = glow
-
-    local emblem = header:CreateTexture(nil, "OVERLAY")
-    emblem:SetPoint("TOPLEFT", header, "TOPLEFT", 10, -1)
-    emblem:SetSize(64, 64)
+    local emblem = header:CreateTexture(nil, "ARTWORK")
+    emblem:SetPoint("TOPLEFT", header, "TOPLEFT", 24, -18)
+    emblem:SetSize(40, 40)
     emblem:SetTexture(assetPath .. "emblem.tga")
+    emblem:SetAlpha(1)
+    header.emblem = emblem
 
-    local title = header:CreateFontString(nil, "OVERLAY")
-    title:SetPoint("TOPLEFT", header, "TOPLEFT", 90, -7)
-    title:SetSize(260, 32)
-    if not title:SetFont("Fonts\\FRIZQT__.ttf", 28, "") then
-        title:SetFont(STANDARD_TEXT_FONT, 28, "")
-    end
-    title:SetJustifyH("LEFT")
-    title:SetTextColor(0.94, 0.84, 0.61)
-    title:SetShadowColor(0.04, 0.29, 0.48, 0.9)
-    title:SetShadowOffset(1, -1)
-    title:SetText("CarGOUI")
-    header.wordmark = title
+    local wordmark = header:CreateTexture(nil, "ARTWORK")
+    wordmark:SetPoint("TOPLEFT", header, "TOPLEFT", 76, -16 - (44 - wordmarkHeight) / 2)
+    wordmark:SetSize(wordmarkWidth, wordmarkHeight)
+    wordmark:SetTexture(assetPath .. "wordmark.tga")
+    wordmark:SetTexCoord(unpack(wordmarkUV))
+    wordmark:SetAlpha(1)
+    header.wordmark = wordmark
+
+    local line = header:CreateTexture(nil, "BORDER")
+    line:SetPoint("TOPLEFT", header, "TOPLEFT", 24, -75)
+    line:SetSize(672, 1)
+    line:SetColorTexture(1, 1, 1, 0.13)
+    header.accentLine = line
 
     local subtitle = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    subtitle:SetPoint("TOPLEFT", header, "TOPLEFT", 92, -42)
-    subtitle:SetSize(230, 16)
-    subtitle:SetJustifyH("LEFT")
-    subtitle:SetTextColor(0.48, 0.75, 0.88)
-    subtitle:SetText("OPTIONS  /  ALPHA 0.1")
+    subtitle:SetPoint("TOPRIGHT", header, "TOPRIGHT", -24, -20)
+    subtitle:SetSize(250, 18)
+    subtitle:SetJustifyH("RIGHT")
+    subtitle:SetTextColor(0.68, 0.74, 0.78)
+    subtitle:SetText("Options / " .. self.version)
+    header.subtitle = subtitle
 
     local hint = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hint:SetPoint("TOPRIGHT", header, "TOPRIGHT", -18, -26)
-    hint:SetSize(180, 18)
+    hint:SetPoint("TOPRIGHT", header, "TOPRIGHT", -24, -44)
+    hint:SetSize(310, 18)
     hint:SetJustifyH("RIGHT")
-    hint:SetTextColor(0.56, 0.65, 0.71)
+    hint:SetTextColor(0.46, 0.56, 0.62)
     hint:SetText("Drag header to move")
+    header.hint = hint
 
-    local animation = glow:CreateAnimationGroup()
-    local brighten = animation:CreateAnimation("Alpha")
-    brighten:SetFromAlpha(0.25)
-    brighten:SetToAlpha(0.58)
-    brighten:SetDuration(2.4)
-    brighten:SetOrder(1)
-    brighten:SetSmoothing("IN_OUT")
-    local soften = animation:CreateAnimation("Alpha")
-    soften:SetFromAlpha(0.58)
-    soften:SetToAlpha(0.25)
-    soften:SetDuration(2.4)
-    soften:SetOrder(2)
-    soften:SetSmoothing("IN_OUT")
-    animation:SetLooping("REPEAT")
-    panel.brandingHeader = header
-    panel.titleAnimation = animation
+    local sweep = header:CreateTexture(nil, "OVERLAY")
+    sweep:SetAlpha(0)
+    sweep:SetBlendMode("ADD")
+    header.sweep = sweep
+    header.bandWidth = wordmarkWidth * 0.18
+    header.animationMode = "glyph-pulse-fallback"
+    -- Blizzard's PlayerChoice/Soulbinds sheen uses a fixed same-parent mask and
+    -- a translated texture. The mask never inherits the strip's animation.
+    if header.CreateMaskTexture and sweep.AddMaskTexture then
+        local ok = pcall(function()
+            local mask = header:CreateMaskTexture(nil, "ARTWORK")
+            header.mask = mask
+            mask:SetAllPoints(wordmark)
+            local loaded = mask:SetTexture(assetPath .. "wordmark-mask.tga",
+                "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+            if loaded == false then error("Glyph mask could not be loaded") end
+            mask:SetTexCoord(unpack(wordmarkUV))
+            sweep:AddMaskTexture(mask)
+        end)
+        if ok then header.animationMode = "masked-sweep" end
+    end
+
+    local group = sweep:CreateAnimationGroup()
+    group:SetLooping("REPEAT")
+    group:SetToFinalAlpha(false)
+    if header.animationMode == "masked-sweep" then
+        sweep:SetTexture(assetPath .. "sweep.tga")
+        sweep:SetSize(header.bandWidth, wordmarkHeight)
+        local travel = group:CreateAnimation("Translation")
+        travel:SetOrder(1)
+        travel:SetOffset(wordmarkWidth + header.bandWidth, 0)
+        travel:SetDuration(1.5)
+        travel:SetEndDelay(5)
+        travel:SetSmoothing("IN_OUT")
+        Alpha(group, 0, 0.22, 0.25)
+        Alpha(group, 0.22, 0, 0.25, 1.25):SetEndDelay(5)
+    else
+        -- Explicit capability fallback: a precomputed glyph highlight breathes;
+        -- never pass an unmasked rectangle off as a completed text sweep.
+        sweep:SetTexture(assetPath .. "wordmark-mask.tga")
+        sweep:SetTexCoord(unpack(wordmarkUV))
+        sweep:SetSize(wordmarkWidth, wordmarkHeight)
+        Alpha(group, 0, 0.12, 2.4)
+        Alpha(group, 0.12, 0, 2.4, 2.4)
+        hint:SetText("Glyph pulse fallback / drag header to move")
+    end
+    panel.titleAnimation = group
+    self:UpdateBrandingTheme(accent)
+    ResetHighlight(panel)
     return header
+end
+
+function addon:UpdateBrandingTheme(color)
+    if type(color) ~= "table" then return false end
+    for i = 1, 3 do
+        if type(color[i]) ~= "number" or not (color[i] >= 0 and color[i] <= 1) then return false end
+    end
+    accent = { color[1], color[2], color[3] }
+    local panel = self.optionsFrame
+    local header = panel and panel.brandingHeader
+    if header then
+        header.sweep:SetVertexColor(unpack(accent))
+        header.accentLine:SetVertexColor(unpack(accent))
+    end
+    return true
 end
 
 function addon:StopTitleAnimation()
     local panel = self.optionsFrame
-    if not panel or not panel.titleAnimation then return end
-    panel.titleAnimation:Stop()
-    -- Stop restores an animation target's base alpha; keep the fallback explicit.
-    panel.brandingHeader.glow:SetAlpha(0.35)
+    if not panel or not panel.brandingHeader then return end
+    ResetHighlight(panel)
+    WatchCombat(self, false)
 end
 
 function addon:RefreshTitleAnimation()
     local panel = self.optionsFrame
     if not panel or not panel.titleAnimation then return end
-    if panel:IsShown() and self.db and self.db.options.animatedTitle then
-        if not panel.titleAnimation:IsPlaying() then panel.titleAnimation:Play() end
-    else
-        self:StopTitleAnimation()
+    local active = panel:IsVisible() and self.db and self.db.options.animatedTitle
+    if not active then self:StopTitleAnimation(); return end
+    WatchCombat(self, true)
+    if InCombatLockdown() then
+        ResetHighlight(panel)
+    elseif not panel.titleAnimation:IsPlaying() then
+        panel.titleAnimation:Play()
     end
 end

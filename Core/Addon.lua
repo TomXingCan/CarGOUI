@@ -1,7 +1,7 @@
 local addonName, addon = ...
 
 addon.name = addonName
-addon.version = "0.1.0-alpha.3"
+addon.version = "0.1.0-alpha.4"
 addon.initialized = false
 addon.enabled = false
 

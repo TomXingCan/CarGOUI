@@ -66,8 +66,9 @@ local function setup(saved, loggedIn, client)
     env.GameFontHighlight = { template = "GameFontHighlight" }
     env.GameFontHighlightSmall = { template = "GameFontHighlightSmall" }
     local state = { frames = {}, errors = {}, messages = {}, loggedIn = loggedIn or false,
-        fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, fontStrings = {},
-        specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0 }
+        fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, masks = {}, fontStrings = {},
+        specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0,
+        inCombat = client.inCombat or false }
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
         state.messages[#state.messages + 1] = message
@@ -76,7 +77,7 @@ local function setup(saved, loggedIn, client)
         return function(message) state.errors[#state.errors + 1] = tostring(message) end
     end
     env.IsLoggedIn = function() return state.loggedIn end
-    env.InCombatLockdown = function() return false end
+    env.InCombatLockdown = function() return state.inCombat end
     env.GetBuildInfo = function() return "12.1.0", "99999", "Sep 26 2026", 120100 end
     env.GetLocale = function() return client.locale or "enUS" end
     env.UnitClass = function() return state.classToken, state.classToken, state.classToken == "MAGE" and 8 or 1 end
@@ -108,8 +109,8 @@ local function setup(saved, loggedIn, client)
     function object:SetSize(width, height) self.width, self.height = width, height end
     function object:SetWidth(width) self.width = width end
     function object:SetHeight(height) self.height = height end
-    function object:GetWidth() return self.width end
-    function object:GetHeight() return self.height end
+    function object:GetWidth() return self.width or (self.allPoints and self.allPoints:GetWidth()) end
+    function object:GetHeight() return self.height or (self.allPoints and self.allPoints:GetHeight()) end
     function object:SetScale(scale) self.scale = scale end
     function object:GetScale() return self.scale or 1 end
     function object:GetEffectiveScale()
@@ -146,6 +147,7 @@ local function setup(saved, loggedIn, client)
     end
     function object:SetShown(shown) if shown then self:Show() else self:Hide() end end
     function object:SetAlpha(alpha) self.alpha = alpha end
+    function object:GetAlpha() return self.alpha == nil and 1 or self.alpha end
     function object:SetFrameStrata(strata) self.strata = strata end
     function object:SetClampedToScreen(value) self.clampedToScreen = value end
     function object:SetFrameLevel(level) self.frameLevel = level end
@@ -217,6 +219,7 @@ local function setup(saved, loggedIn, client)
     function object:SetBackdropBorderColor(...) self.backdropBorderColor = { ... } end
     function object:SetColorTexture(...) self.color = { ... } end
     function object:SetTexture(value) self.texture = value end
+    function object:GetTexture() return self.texture end
     function object:SetBlendMode(value) self.blendMode = value end
     function object:SetRotation(value) self.rotation = value end
     function object:SetAtlas(value) self.atlas = value end
@@ -285,6 +288,23 @@ local function setup(saved, loggedIn, client)
         state.textures[#state.textures + 1] = texture
         return texture
     end
+    function object:CreateMaskTexture(name, layer)
+        local mask = setmetatable({ parent = self, name = name, layer = layer,
+            scripts = {}, events = {}, kind = "MaskTexture" }, { __index = object })
+        if name then env[name] = mask end
+        state.masks[#state.masks + 1] = mask
+        return mask
+    end
+    function object:AddMaskTexture(mask)
+        assert(mask and mask.kind == "MaskTexture", "Glyph clipping requires a MaskTexture")
+        self.masks = self.masks or {}
+        self.masks[#self.masks + 1] = mask
+    end
+    function object:RemoveMaskTexture(mask)
+        for index, existing in ipairs(self.masks or {}) do
+            if existing == mask then table.remove(self.masks, index); return end
+        end
+    end
     function object:CreateFontString(name, layer, template)
         local fontString = setmetatable({ parent = self, name = name, layer = layer,
             template = template, scripts = {}, events = {}, kind = "FontString" }, { __index = object })
@@ -330,6 +350,7 @@ local function setup(saved, loggedIn, client)
         state.animations[#state.animations + 1] = group
         return group
     end
+    if client.maskUnavailable then object.CreateMaskTexture = nil end
     env.CreateFrame = function(kind, name, parent, template)
         local frame = setmetatable({ kind = kind, name = name, parent = parent, template = template,
             events = {}, scripts = {}, shown = true }, { __index = object })
@@ -348,6 +369,8 @@ local function setup(saved, loggedIn, client)
     end
     function state:fire(event, ...)
         if event == "PLAYER_LOGIN" then self.loggedIn = true end
+        if event == "PLAYER_REGEN_DISABLED" then self.inCombat = true end
+        if event == "PLAYER_REGEN_ENABLED" then self.inCombat = false end
         -- Only frames that existed at event dispatch start receive this event.
         local existing = {}
         for index, frame in ipairs(self.frames) do existing[index] = frame end
@@ -1303,6 +1326,283 @@ test("preview validation, visibility and shared renderer keep sample state separ
     equal(liveFrame.text:GetText(), "6.0", "stopping samples does not replace caller reminder content")
     truthy(liveFrame:IsShown(), "stopping preview leaves a separate caller-owned frame alone")
     equal(state.realReads, 0, "renderer never reads live combat state")
+end)
+
+
+local function descendantOf(object, ancestor)
+    while object do
+        if object == ancestor then return true end
+        object = object.parent
+    end
+    return false
+end
+
+local function resourceCounts(state)
+    local animationCount = 0
+    for _, group in ipairs(state.animations) do animationCount = animationCount + #group.animations end
+    return { frames = #state.frames, textures = #state.textures, masks = #state.masks,
+        fontStrings = #state.fontStrings, groups = #state.animations, animations = animationCount }
+end
+
+local function brandAsset(texture)
+    truthy(texture and (texture.kind == "Texture" or texture.kind == "MaskTexture"), "branding uses a texture asset")
+    local path = texture:GetTexture()
+    local prefix = "Interface\\AddOns\\CarGOUI\\"
+    truthy(type(path) == "string" and path:sub(1, #prefix) == prefix, "branding uses an in-package asset")
+    local relative = path:sub(#prefix + 1):gsub("\\", "/")
+    truthy(relative:match("^Media/Branding/.+%.tga$"), "runtime branding uses a packaged TGA")
+    local file = assert(io.open(root .. "/" .. relative, "rb"), "Missing game-loadable branding asset: " .. relative)
+    local data = file:read("*a")
+    file:close()
+    truthy(#data >= 18, "TGA has a complete header")
+    local imageType, bits, descriptor = data:byte(3), data:byte(17), data:byte(18)
+    truthy(imageType == 2 or imageType == 10, "runtime TGA uses true-color pixels")
+    equal(bits, 32, "runtime TGA has RGBA pixels")
+    equal(descriptor % 16, 8, "runtime TGA declares its alpha channel")
+    local width = data:byte(13) + data:byte(14) * 256
+    local height = data:byte(15) + data:byte(16) * 256
+    truthy(width > 0 and height > 0, "runtime TGA has valid dimensions")
+    return { path = path, width = width, height = height, bytes = #data }
+end
+
+local function combatSubscriptions(state, expected)
+    for _, event in ipairs({ "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }) do
+        local count = 0
+        for _, frame in ipairs(state.frames) do
+            if frame:IsEventRegistered(event) then count = count + 1 end
+        end
+        equal(count, expected, event .. " listener lifetime")
+    end
+end
+
+test("branding uses aligned packaged artwork and a narrow native glyph-masked sweep", function()
+    local _, addon, state = login(nil)
+    local panel = options(addon)
+    local header = panel.brandingHeader
+    equal(header.wordmark.kind, "Texture", "brand name is artwork, not a FontString")
+    equal(header.emblem.kind, "Texture", "emblem is actual artwork")
+    local wordmark = brandAsset(header.wordmark)
+    local emblem = brandAsset(header.emblem)
+    local mask = brandAsset(header.mask)
+    local sweep = brandAsset(header.sweep)
+    truthy(wordmark.width <= 512 and wordmark.height <= 128, "wordmark source stays compact")
+    equal(emblem.width, 128, "compact emblem texture width")
+    equal(emblem.height, 128, "compact emblem texture height")
+    equal(mask.width, wordmark.width, "glyph mask width aligns with wordmark")
+    equal(mask.height, wordmark.height, "glyph mask height aligns with wordmark")
+    equal(header.animationMode, "masked-sweep", "native glyph masking path selected")
+    equal(header.mask.kind, "MaskTexture", "sweep has a real glyph mask")
+    truthy(header.sweep.masks and header.sweep.masks[1] == header.mask, "mask attached to moving light")
+    equal(header.mask:GetParent(), header, "glyph mask belongs to stationary header")
+    truthy(header.mask.allPoints == header.wordmark
+        or (header.mask.point and header.mask.point[2] == header.wordmark), "glyph mask follows stationary artwork geometry")
+    local ratio = header.sweep:GetWidth() / header.wordmark:GetWidth()
+    truthy(ratio >= 0.15 and ratio <= 0.20, "moving highlight is 15-20 percent of wordmark width")
+    local uv = header.wordmark.texCoord or { 0, 1, 0, 1 }
+    local contentRatio = wordmark.width * math.abs(uv[2] - uv[1]) / (wordmark.height * math.abs(uv[4] - uv[3]))
+    truthy(math.abs(header.wordmark:GetWidth() / header.wordmark:GetHeight() - contentRatio) < 0.01,
+        "wordmark layout preserves cropped artwork aspect ratio")
+    equal(header.wordmark:GetAlpha(), 1, "base wordmark stays opaque")
+    local textures, masks, groups, uniqueAssets = 0, 0, 0, {}
+    for _, texture in ipairs(state.textures) do
+        if descendantOf(texture, header) then
+            textures = textures + 1
+            if type(texture:GetTexture()) == "string" then
+                local asset = brandAsset(texture)
+                uniqueAssets[asset.path] = asset.bytes
+            end
+        end
+    end
+    for _, texture in ipairs(state.masks) do
+        if descendantOf(texture, header) then masks = masks + 1; local asset = brandAsset(texture); uniqueAssets[asset.path] = asset.bytes end
+    end
+    local duration, translations = 0, 0
+    for _, group in ipairs(state.animations) do
+        if descendantOf(group.parent, header) then
+            groups = groups + 1
+            equal(group.parent, header.sweep, "only highlight layer moves or changes alpha")
+            equal(group.looping, "REPEAT", "native sweep loop")
+            local orders = {}
+            for _, animation in ipairs(group.animations) do
+                truthy(animation.kind == "Translation" or animation.kind == "Alpha", "no rotating/scaling/bouncing brand text")
+                local span = (animation.startDelay or 0) + animation.duration + (animation.endDelay or 0)
+                orders[animation.order or 1] = math.max(orders[animation.order or 1] or 0, span)
+                if animation.kind == "Translation" then
+                    translations = translations + 1
+                    truthy(math.abs(animation.duration - 1.5) < 0.01, "light travels for about 1.5 seconds")
+                    truthy(animation.offset[1] > 0 and animation.offset[2] == 0, "light moves left to right")
+                else
+                    truthy(animation.fromAlpha >= 0 and animation.toAlpha >= 0, "valid alpha endpoints")
+                    truthy(animation.fromAlpha <= 0.25 and animation.toAlpha <= 0.25, "highlight peak remains subtle")
+                end
+            end
+            for _, span in pairs(orders) do duration = duration + span end
+        end
+    end
+    equal(translations, 1, "one native translation drives the sweep")
+    truthy(math.abs(duration - 6.5) < 0.01, "sweep includes five seconds of native idle time")
+    truthy(textures <= 6, "branding stays within decorative texture budget")
+    equal(masks, 1, "one separately counted glyph mask")
+    truthy(groups <= 2, "branding stays within animation group budget")
+    local bytes = 0
+    for _, size in pairs(uniqueAssets) do bytes = bytes + size end
+    truthy(bytes <= 1024 * 1024, "referenced runtime branding assets fit initial 1 MiB budget")
+end)
+
+test("twenty Options reopen cycles reuse every branding object and stop motion immediately", function()
+    local _, addon, state = login(nil)
+    local panel, controls = options(addon)
+    local header, group = panel.brandingHeader, panel.titleAnimation
+    local objects = resourceCounts(state)
+    for _ = 1, 20 do
+        panel:Hide()
+        equal(group:IsPlaying(), false, "closing explicitly stops native sweep")
+        equal(header.wordmark:GetAlpha(), 1, "closed wordmark retains readable base alpha")
+        equal(header.sweep:GetAlpha(), 0, "closing clears any residual highlight alpha")
+        combatSubscriptions(state, 0)
+        addon:ToggleOptions()
+        equal(panel.brandingHeader, header, "same header reused")
+        equal(panel.titleAnimation, group, "same native animation group reused")
+        truthy(group:IsPlaying(), "reopening resumes enabled title")
+        same(resourceCounts(state), objects, "reopening allocates no duplicate branding resources")
+    end
+    local art, emblem = header.wordmark:GetTexture(), header.emblem:GetTexture()
+    controls.animatedTitle:Click()
+    equal(group:IsPlaying(), false, "toggle stops immediately")
+    equal(header.wordmark:GetTexture(), art, "disabled mode uses same artwork")
+    equal(header.emblem:GetTexture(), emblem, "disabled mode uses same emblem")
+    equal(header.wordmark:GetAlpha(), 1, "disabled title remains fully readable")
+    equal(header.sweep:GetAlpha(), 0, "disabled mode clears highlight residue")
+    combatSubscriptions(state, 0)
+end)
+
+test("combat pauses branding and resumes only while visible and enabled", function()
+    local env, addon, state = login(nil)
+    local panel, controls = options(addon)
+    local group, header = panel.titleAnimation, panel.brandingHeader
+    combatSubscriptions(state, 1)
+    state:fire("PLAYER_REGEN_DISABLED")
+    equal(group:IsPlaying(), false, "entering combat stops sweep immediately")
+    equal(header.wordmark:GetAlpha(), 1, "combat leaves base wordmark opaque")
+    equal(header.sweep:GetAlpha(), 0, "combat clears highlight residue")
+    combatSubscriptions(state, 1)
+    state:fire("PLAYER_REGEN_ENABLED")
+    truthy(group:IsPlaying(), "visible enabled title resumes after combat")
+    state:fire("PLAYER_REGEN_DISABLED")
+    controls.animatedTitle:Click()
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(group:IsPlaying(), false, "disabled preference prevents combat-end restart")
+    controls.animatedTitle:Click()
+    truthy(group:IsPlaying(), "re-enabling while visible resumes")
+    state:fire("PLAYER_REGEN_DISABLED")
+    panel:Hide()
+    combatSubscriptions(state, 0)
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(group:IsPlaying(), false, "combat ending with window closed never restarts motion")
+    addon:ToggleOptions()
+    env.UIParent.IsVisible = function() return false end
+    addon:RefreshTitleAnimation()
+    equal(group:IsPlaying(), false, "ancestor invisibility prevents playing a shown child")
+    env.UIParent.IsVisible = function() return true end
+    addon:RefreshTitleAnimation()
+    truthy(group:IsPlaying(), "visible ancestor permits resumption")
+    local _, inCombatAddon, combatState = login(nil, false, { inCombat = true })
+    local combatPanel = options(inCombatAddon)
+    equal(combatPanel.titleAnimation:IsPlaying(), false, "opening during combat starts statically")
+    combatState:fire("PLAYER_REGEN_ENABLED")
+    truthy(combatPanel.titleAnimation:IsPlaying(), "first opening in combat can resume after combat")
+end)
+
+test("branding callbacks stay isolated and ordinary settings do not resize or restart the art", function()
+    local _, addon, state = login(nil)
+    local panel = options(addon)
+    local header, group = panel.brandingHeader, panel.titleAnimation
+    local base = { width = header.wordmark:GetWidth(), height = header.wordmark:GetHeight(),
+        point = { unpack(header.wordmark.point or {}) }, uv = copy(header.wordmark.texCoord),
+        scale = header.wordmark:GetScale(), alpha = header.wordmark:GetAlpha() }
+    local initialPlays, initialStops = group.plays, group.stops
+    addon:UpdateSettings({ font = { size = 72, outline = "THICKOUTLINE" }, scale = 3 })
+    addon:SelectOptionsCategory("typography")
+    addon:SelectOptionsCategory("preview")
+    addon:SelectOptionsCategory("general")
+    panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
+    panel.mockCenter = { 1000, 550 }
+    panel.header:GetScript("OnDragStop")(panel.header)
+    panel.mockCenter = nil
+    equal(group.plays, initialPlays, "settings, categories and dragging do not restart playing sweep")
+    equal(group.stops, initialStops, "ordinary settings never interrupt sweep")
+    equal(header.wordmark:GetWidth(), base.width, "reminder font/scale do not change brand width")
+    equal(header.wordmark:GetHeight(), base.height, "reminder font/scale do not change brand height")
+    equal(header.wordmark:GetScale(), base.scale, "reminder scale does not change brand scale")
+    equal(header.wordmark:GetAlpha(), base.alpha, "base wordmark alpha stays stable")
+    for index = 1, 5 do equal(header.wordmark.point[index], base.point[index], "base wordmark position stays stable") end
+    same(header.wordmark.texCoord, base.uv, "base wordmark UV coordinates stay stable")
+    local refreshOptions, refreshPreview, renderReminder = addon.RefreshOptions, addon.RefreshPreview, addon.RenderReminder
+    local panelRefreshes, previewRefreshes, renders = 0, 0, 0
+    addon.RefreshOptions = function(self, ...) panelRefreshes = panelRefreshes + 1; return refreshOptions(self, ...) end
+    addon.RefreshPreview = function(self, ...) previewRefreshes = previewRefreshes + 1; return refreshPreview(self, ...) end
+    addon.RenderReminder = function(self, ...) renders = renders + 1; return renderReminder(self, ...) end
+    local fontWrites, textWrites = state.fontWrites, state.textWrites
+    for _, event in ipairs({ "OnLoop", "OnFinished" }) do
+        if group:GetScript(event) then group:GetScript(event)(group) end
+    end
+    state:fire("PLAYER_REGEN_DISABLED")
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(panelRefreshes, 0, "animation/combat callbacks never rebuild Options")
+    equal(previewRefreshes, 0, "animation/combat callbacks never refresh simulated reminders")
+    equal(renders, 0, "animation/combat callbacks never render reminder content")
+    equal(state.fontWrites, fontWrites, "branding callbacks never recreate fonts")
+    equal(state.textWrites, textWrites, "branding callbacks never rewrite text")
+    equal(state.realReads, 0, "decorative combat handling never reads skill or aura state")
+end)
+
+test("missing glyph-mask support falls back to aligned artwork rather than an unmasked rectangle", function()
+    local _, addon, state = login(nil, false, { maskUnavailable = true })
+    local panel, controls = options(addon)
+    local header, group = panel.brandingHeader, panel.titleAnimation
+    equal(header.animationMode, "glyph-pulse-fallback", "fallback mode is explicit")
+    equal(header.wordmark.kind, "Texture", "fallback retains actual brand artwork")
+    equal(#state.masks, 0, "unsupported mask API is not called")
+    truthy(group:IsPlaying(), "fallback can animate native glyph highlight")
+    equal(header.sweep:GetWidth(), header.wordmark:GetWidth(), "fallback highlight aligns with wordmark width")
+    equal(header.sweep:GetHeight(), header.wordmark:GetHeight(), "fallback highlight aligns with wordmark height")
+    for _, animation in ipairs(group.animations) do
+        equal(animation.kind, "Alpha", "fallback never translates an unmasked rectangle")
+    end
+    local baseAsset = header.wordmark:GetTexture()
+    controls.animatedTitle:Click()
+    equal(group:IsPlaying(), false, "fallback stops immediately when disabled")
+    equal(header.wordmark:GetTexture(), baseAsset, "fallback disabled art remains identical")
+    equal(header.wordmark:GetAlpha(), 1, "fallback disabled base is never translucent")
+    equal(header.sweep:GetAlpha(), 0, "fallback clears highlight residue")
+end)
+
+
+test("branding theme accents preserve artwork identity and never mutate reminder settings", function()
+    local _, addon, state = login(nil)
+    truthy(addon:UpdateBrandingTheme({ 0.2, 0.6, 0.9 }), "theme accent can be set before header allocation")
+    equal(addon.optionsFrame, nil, "theme entry does not eagerly allocate Options")
+    local panel = options(addon)
+    local header, group = panel.brandingHeader, panel.titleAnimation
+    local saved, art, emblem = copy(addon.db), header.wordmark:GetTexture(), header.emblem:GetTexture()
+    local wordmarkColor, emblemColor = copy(header.wordmark.vertexColor), copy(header.emblem.vertexColor)
+    local resources, plays = resourceCounts(state), group.plays
+    same(header.sweep.vertexColor, { 0.2, 0.6, 0.9 }, "deferred theme accent applies to highlight")
+    same(header.accentLine.vertexColor, { 0.2, 0.6, 0.9 }, "deferred accent applies to line")
+    for _, color in ipairs({ false, "bad", {}, { 0.1, 0.2 }, { 0.1, 2, 0.3 }, { 0/0, 0.2, 0.3 } }) do
+        equal(addon:UpdateBrandingTheme(color), false, "invalid theme accent rejected")
+        same(header.sweep.vertexColor, { 0.2, 0.6, 0.9 }, "invalid accent leaves previous color intact")
+    end
+    truthy(addon:UpdateBrandingTheme({ 0.8, 0.7, 0.4 }), "valid theme accent accepted")
+    same(header.sweep.vertexColor, { 0.8, 0.7, 0.4 }, "highlight accent updates")
+    same(header.accentLine.vertexColor, { 0.8, 0.7, 0.4 }, "line accent updates")
+    same(header.wordmark.vertexColor, wordmarkColor, "base wordmark colors remain authored")
+    same(header.emblem.vertexColor, emblemColor, "emblem colors remain authored")
+    equal(header.wordmark:GetTexture(), art, "theme retains brand artwork")
+    equal(header.emblem:GetTexture(), emblem, "theme retains emblem artwork")
+    equal(group.plays, plays, "theme changes do not restart sweep")
+    same(resourceCounts(state), resources, "theme changes allocate no new objects")
+    same(addon.db, saved, "branding accent never modifies reminder settings")
 end)
 
 print("All " .. total .. " offline smoke tests passed.")
