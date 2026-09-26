@@ -1,6 +1,8 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.10**，目标 WoW Retail 12.1.0（Interface 120100）。本次增量补齐 **13 职业、40 专精的 Body 主题**，包括 Devourer；保留用户已实测通过的法师主题、阵营 Header、全面板空白区域拖动及 Blink / Shimmer 战斗路径。继续使用 CarGOUI + CarGOUI_Data 两个安装目录。本次主题覆盖与技能监控覆盖分别记录：此源码目前仍只有法师真实 Mobility，没有真实 Proc 或 Free Move。
+当前版本 **0.1.0-alpha.11**，目标 WoW Retail 12.1.0（Interface 120100）。在 alpha.10 上新增其余 12 职业的真实 Mobility 适配器，按当前专精、实际学习状态及原生替换关系选择技能，并行显示各技能的真实冷却/下一次充能倒计时。保留全部 Header / Body 主题、Options 交互及用户实测的 Blink / Shimmer 判断代码。
+
+**职业适配器存在不等于所有天赋分支已通过战斗验收。** 普通冷却、充能和特殊返回/免费重施分开记录；已知无法准确判定的分支明确报告限制。逐技能及专精的实现、离线验证、客户端待验收和缺口见 [真实 Mobility 覆盖表](docs/MOBILITY_COVERAGE.md)。本轮没有真实 Proc 或 Free Move。
 
 ## 安装与升级
 
@@ -48,17 +50,20 @@ Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标
 
 图案位于 Body 右下内容背景，使用原创静态几何与原生 Line 的纯色线段绘制；不加载宣传图、不新增图片、粒子或旋转动画。共用线段池只绘制当前图案，身份变化或打开时更新；不承诺游戏纹理缓存立即卸载。Header 与 Body 配色映射独立，提醒职业色、字体、坐标、DurationTextBinding 和显隐不受影响。[分层主题与素材/API 来源](docs/THEMES.md)。
 
-## 真实法师 Mobility
+## 真实 Mobility
 
-只监控实际学习、生效的 Blink 1953 / Shimmer 212653；有一次可用就隐藏，最后一次耗尽显示下一次恢复的真实倒计时，恢复一次立即不可见。计时使用正在进行的充能 DurationObject，不能从第二次使用重新起算。
+当前职业适配器只选择本职业、当前专精、实际学习且生效的技能。替换技能归入同一技能族，不重复显示。各技能使用独立的状态、提醒框体和原生计时绑定；一个技能恢复不会清掉另一个仍在冷却的提醒。普通冷却使用排除 GCD 的原生对象；充能倒计时始终使用正在进行的下一次充能恢复对象。多充能秘密值的显隐仅使用该技能独立核查的原生曲线规则，没有通用法师阈值。
 
-可读状态直接判断；多充能数受限时，继续沿用原生冷却 DurationObject → 已核查曲线 → SetAlpha 路径。数字计时使用独立的充能恢复对象及 DurationTextBinding。原生结果不在 Lua 中比较、算术、拼接或反读。GCD、沉默、法力等其他原因不代替耗尽。容量不硬编码为两次。
+可读充能至少一次时隐藏；耗尽后显示 `No <Ability>` 与真实恢复时间；恢复一次即消失。不可施法、目标、距离、资源、沉默和控制不作为耗尽。法师 Blink 1953 / Shimmer 212653 的已验证判断主体保持原文件不变。新增原生路径与限制见 [API 核查](docs/MOBILITY_API_AUDIT.md)，原法师记录保留于 [Mage 战斗核查](docs/Mobility-Combat-API-Audit.md)。
 
-`Native tracking` 表示原生管理可见性，Lua 不声称已知 Ready/Depleted。缺少接口或不符合 Blink/Shimmer 已核查元数据边界时，明确报告 Restricted/Unsupported 并安全隐藏。具体边界见[战斗 API 记录](docs/Mobility-Combat-API-Audit.md)。本轮 SpellState 的判断主体保持不变，仅调整内部命名空间前导代码，放入 Data 包的 Mage 私有适配器。
+`Native tracking` 表示显隐交给原生接口，Lua 不宣称知道最终 Ready / Depleted；`Tracking` 表示原生计时控制零值和到期输出。特殊免费重施、条件返回等尚无可靠契约的分支报告 `Unsupported`，未通过规则或元数据校验的秘密多充能分支报告 `Restricted`。不会用样例、固定 CD、施法记录或秘密值反读填补。
 
+每个技能族有稳定的预设槽位；第一个位于原职业 Mobility 锚点，其余按定义向下每槽 84 个 UI 单位排列。不可用技能的空槽不引起其他技能跳位；本职业 XY 一起平移这组槽位。法师 Blink/Shimmer 的原位置 ID、坐标和外观不变。所有技能共享本职业 Mobility 样式，不创建逐技能字体。已有 Test Mode 菜单可选择当前活动技能或同时预览；测试单个条目只暂时抑制该条目的 live。
+
+[升级与游戏内验收步骤](docs/UPGRADE_ALPHA11.md) 包括并行耗尽、错开使用、GCD、恢复一次、替换、切专精、关闭 Preview/Options 与诊断取样。
 ## 加载、诊断和限制
 
-登录识别当前受支持职业后请求原生按需加载的 `CarGOUI_Data`。同一 Data TOC 列出的文件、静态定义会一起加载；职业子目录本身不具备独立按需加载能力。本轮只有 Mage 业务定义；将来添加职业文件后也不能声称其他职业代码仍完全未加载。
+登录识别当前受支持职业后请求原生按需加载的 `CarGOUI_Data`。同一 Data TOC 列出的文件、静态定义会一起加载；职业子目录本身不具备独立按需加载能力。本轮 13 职业的适配器定义会一起加载，只有当前职业的定义工厂与实际学习筛选执行；不能声称其他职业代码未加载。
 
 明确的职业适配器注册表选择当前职业，禁止多个职业文件依次覆盖核心方法。只有当前适配器运行当前专精/实际生效技能的路径，无无关技能查询、业务监听、提醒框体或计时绑定。重复注册被拒绝。残留旧 `CarGOUI_Mage` 若被加载，旧桥接写入隔离对象，不会覆盖新核心；升级仍应清理旧程序目录。
 
@@ -72,12 +77,12 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 离线测试保留战斗秘密值与战斗标志分别模拟的回归，并验证范围隔离、延迟初始化、加载/订阅/绑定有界、主题和草稿行为。交付报告记录**最终 ZIP 解包后的测试**及 SHA256。
 
-**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及 alpha.9 法师 Header/Body 正常；alpha.10 所有新增主题的实机视觉、各 UI 缩放、安装后战斗回归与 CPU/内存实测仍待验收。离线映射或模拟图案检查不作为实机验收。其他职业的 Body 支持不代表其真实 Mobility 已支持。
+**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及法师 Header/Body 正常；新增真实技能路径、alpha.10 新主题视觉、本包的战斗回归及 CPU/内存仍待客户端验收。离线测试只能验证提供的 API 响应下的行为，不能证明客户端所有天赋/热修/秘密值语义。Body 主题覆盖与真实 Mobility 覆盖始终分别记录。
 
 ## 源码结构
 
-`Core/`：初始化、事件、配置校验迁移、按需加载、诊断；`Config/`：工厂默认、英文文案、命令；`Database/`：通用样式上下文与主题映射；`UI/`：共用提醒、Preview、Options、品牌/主题；`Modules/Mobility/Runtime.lua`：当前活动技能事件引擎；`Modules/CarGOUI_Data/`：统一 LoD TOC、职业注册及 `Classes/Mage/` 私有适配器；`tests/`：Lua 5.1 离线测试与静态检查。
+`Core/`：初始化、事件、配置校验迁移、按需加载、诊断；`Config/`：工厂默认、英文文案、命令；`Database/`：通用样式上下文与主题映射；`UI/`：共用提醒、Preview、Options、品牌/主题；`Modules/Mobility/Runtime.lua`：当前活动技能事件引擎；`Modules/CarGOUI_Data/`：统一 LoD TOC、职业注册、`Shared/` 状态引擎与各 `Classes/` 私有定义/适配器；`tests/`：Lua 5.1 离线测试与静态检查。
 
 运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
 
-两目录升级清理、全面板拖动接口核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；本轮新增主题验收见 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。从 alpha.9 更新只需替换两个程序目录，继续保留 WTF / SavedVariables，无新增配置迁移。
+本轮安装与验收见 [UPGRADE_ALPHA11.md](docs/UPGRADE_ALPHA11.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables，本轮无新增配置迁移。

@@ -154,7 +154,8 @@ end
 
 function addon:HideLiveMobility(except)
     for _, frame in pairs(self.reminderFrames and self.reminderFrames.live or {}) do
-        if frame.mobilityOwned and frame.entryId ~= except then
+        local keep = type(except) == "table" and except[frame.entryId] or frame.entryId == except
+        if frame.mobilityOwned and not keep then
             frame:Hide()
             if frame.durationBinding then
                 frame.durationBinding:Disable()

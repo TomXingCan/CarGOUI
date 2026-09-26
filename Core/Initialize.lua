@@ -51,7 +51,7 @@ function addon:OnClassModuleAvailable()
     if not self.initialized then return end
     self:StopPreview(true)
     self:HideLiveMobility()
-    self.mobilityState = nil
+    self.mobilityState, self.mobilityStates = nil, nil
     self:RefreshActiveEntries()
     self:RefreshConfigurationContext()
     self.configurationClass, self.configurationSpec = self:GetPlayerContext()
@@ -71,7 +71,7 @@ local function OnConfigurationContextChanged(self, event, unit)
     -- Mobility record survives all spec changes; cached frames remain reusable.
     self:StopPreview(true)
     self:HideLiveMobility()
-    self.mobilityState = nil
+    self.mobilityState, self.mobilityStates = nil, nil
     self:EnsureCurrentClassModule()
     self:OnClassModuleAvailable()
 end

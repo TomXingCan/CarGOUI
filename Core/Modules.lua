@@ -2,7 +2,9 @@ local _, addon = ...
 
 -- A capability index, not a spell database. One native Data addon contains all
 -- shipped definitions; its subdirectories are not separately load-on-demand.
-local supportedClasses = { MAGE = true }
+local supportedClasses = { MAGE = true, WARRIOR = true, PALADIN = true, HUNTER = true,
+    ROGUE = true, PRIEST = true, DEATHKNIGHT = true, SHAMAN = true, WARLOCK = true,
+    MONK = true, DRUID = true, DEMONHUNTER = true, EVOKER = true }
 local classAdapters, noEntries = {}, {}
 addon.previewEntries = noEntries
 
@@ -38,7 +40,7 @@ function addon:RegisterClassAdapter(class, adapter)
     return true
 end
 
-function addon:RefreshActiveEntries()
+function addon:RefreshActiveEntries(force)
     local class, specID = self:GetCurrentModuleIdentity()
     local selected = self.dataPackageLoaded and classAdapters[class] or nil
     local previous = self.activeClassAdapter
@@ -46,7 +48,7 @@ function addon:RefreshActiveEntries()
     if changed and previous then previous:DeactivateEntries() end
     self.activeClassAdapter, self.activeAdapterClass = selected, selected and class or nil
     if selected then
-        changed = selected:ActivateEntries(specID) or changed
+        changed = selected:ActivateEntries(specID, force) or changed
         self.activeModuleClass, self.activeModuleSpec = class, specID
         self.activeMobilityEntry = selected:GetMobilityEntry()
         self.mobilityEntries, self.previewEntries = selected.mobilityEntries, selected.previewEntries
@@ -55,6 +57,14 @@ function addon:RefreshActiveEntries()
         self.mobilityEntries, self.previewEntries = nil, noEntries
     end
     return changed
+end
+
+function addon:GetMobilityEntries()
+    local adapter = self.activeClassAdapter
+    if not adapter then return noEntries end
+    if adapter.GetMobilityEntries then return adapter:GetMobilityEntries() end
+    local entry = adapter:GetMobilityEntry()
+    return entry and { entry } or noEntries
 end
 
 local function CurrentAdapter(self)
@@ -79,6 +89,12 @@ function addon:ReadMobilityState()
     local adapter = CurrentAdapter(self)
     if adapter then return adapter:ReadMobilityState() end
     return { status = "Unsupported", reason = self.classModuleReason or "No current class adapter is active.", path = "none" }
+end
+
+function addon:ReadMobilityStates()
+    local adapter = CurrentAdapter(self)
+    if adapter and adapter.ReadMobilityStates then return adapter:ReadMobilityStates() end
+    return { self:ReadMobilityState() }
 end
 
 local function OnDeferredLoad(self)
@@ -142,8 +158,8 @@ function addon:GetModuleLoadReport()
     return {
         currentClass = class, currentSpec = specID, module = "CarGOUI_Data",
         dataPackageLoaded = loaded, clientDataPackageLoaded = actualLoaded,
-        registeredAdapters = registered, loadedClassFiles = loaded and 5 or 0,
-        loadedDataFiles = loaded and 7 or 0,
+        registeredAdapters = registered, loadedClassFiles = loaded and (self.dataClassFileCount or 0) or 0,
+        loadedDataFiles = loaded and (self.dataCodeFileCount or 0) or 0,
         activeAdapterClass = active and self.activeAdapterClass or nil,
         retiredMageLoaded = ClientLoaded("CarGOUI_Mage") == true,
         retiredMageRegistered = type(_G.CarGOUI_Internal) == "table"
@@ -151,7 +167,7 @@ function addon:GetModuleLoadReport()
         fileStatus = loaded and (active and "loaded; current adapter active" or "loaded; no current adapter active")
             or (actualLoaded and "loaded but registration incomplete" or "not loaded"),
         active = active, activeSpec = active and self.activeModuleSpec or nil,
-        mobilityEntries = active and self.activeMobilityEntry and 1 or 0,
+        mobilityEntries = active and #self:GetMobilityEntries() or 0,
         previewEntries = active and #self.previewEntries or 0,
         configuration = "CarGOUIDB is shared: all previously saved class tables are restored by the core.",
         reason = self.classModuleReason,

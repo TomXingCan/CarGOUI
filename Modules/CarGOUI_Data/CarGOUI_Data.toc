@@ -2,14 +2,29 @@
 ## Title: CarGOUI - Data (internal)
 ## Notes: Automatically loaded class adapter definitions. Only the current class is activated.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.10
+## Version: 0.1.0-alpha.11
 ## Dependencies: CarGOUI
 ## LoadOnDemand: 1
 
 Bootstrap.lua
+Shared\SpellState.lua
+Shared\Adapter.lua
 Classes\Mage\Bootstrap.lua
 Classes\Mage\MobilityEntries.lua
 Classes\Mage\PreviewEntries.lua
 Classes\Mage\SpellState.lua
 Classes\Mage\Register.lua
+Classes\Mage\AdditionalMobility.lua
+Classes\DeathKnight\MobilityDefinitions.lua
+Classes\DemonHunter\MobilityDefinitions.lua
+Classes\Druid\MobilityDefinitions.lua
+Classes\Evoker\MobilityDefinitions.lua
+Classes\Hunter\MobilityDefinitions.lua
+Classes\Monk\MobilityDefinitions.lua
+Classes\Paladin\MobilityDefinitions.lua
+Classes\Priest\MobilityDefinitions.lua
+Classes\Rogue\MobilityDefinitions.lua
+Classes\Shaman\MobilityDefinitions.lua
+Classes\Warlock\MobilityDefinitions.lua
+Classes\Warrior\MobilityDefinitions.lua
 Complete.lua

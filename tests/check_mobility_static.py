@@ -3,11 +3,21 @@ from pathlib import Path
 import re
 
 root = Path(__file__).resolve().parent.parent
-mage_root = root / "Modules/CarGOUI_Data"
-if not mage_root.is_dir():
-    mage_root = root.parent / "CarGOUI_Data"
-modules = [mage_root / "Classes/Mage/SpellState.lua", root / "Modules/Mobility/Runtime.lua"]
+data_root = root / "Modules/CarGOUI_Data"
+if not data_root.is_dir():
+    data_root = root.parent / "CarGOUI_Data"
+toc = (data_root / "CarGOUI_Data.toc").read_text(encoding="utf-8")
+declared = [line.strip().replace("\\", "/") for line in toc.splitlines()
+            if line.strip() and not line.strip().startswith("#")]
+assert len(declared) == len(set(declared)), "Data TOC contains duplicate Lua entries"
+business = sorted(path.relative_to(data_root).as_posix() for path in data_root.rglob("*.lua"))
+assert sorted(declared) == business, "Every business Lua source must be loaded and audited; no orphan or omitted implementation"
+for name in declared:
+    path = (data_root / name).resolve()
+    assert path.is_relative_to(data_root.resolve()) and path.suffix == ".lua", "Unsafe Data TOC entry"
+modules = [data_root / name for name in declared] + [root / "Modules/Mobility/Runtime.lua", root / "Core/Modules.lua"]
 sources = {path: path.read_text(encoding="utf-8") for path in modules}
+print(f"PASS Auditing all {len(declared)} declared Data Lua files plus runtime and adapter dispatcher")
 
 
 def code(text):

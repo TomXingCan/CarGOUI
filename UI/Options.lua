@@ -372,13 +372,31 @@ function addon:RefreshMobilityOptions()
     end
     controls.mobilityEnabled:SetChecked(self:GetMobilityConfig().enabled)
     local spellName = state.spellName or L.mobilityNoSpell
-    SetPublicText(panel.mobilitySpell, string.format(L.mobilitySpell, spellName))
+    local states = self.GetMobilityStatuses and self:GetMobilityStatuses() or { state }
+    local names, unavailable = {}, 0
+    for _, current in ipairs(states) do
+        if current.entry and current.spellName then names[#names + 1] = current.spellName end
+        if current.status == "Restricted" or current.status == "Unsupported" or current.status == "Unknown" then
+            unavailable = unavailable + 1
+        end
+    end
+    if #names > 1 then
+        local text = names[1] .. ", " .. names[2]
+        if #names > 2 then text = text .. " (+" .. (#names - 2) .. ")" end
+        SetPublicText(panel.mobilitySpell, "Detected: " .. text)
+    else SetPublicText(panel.mobilitySpell, string.format(L.mobilitySpell, spellName)) end
     if id and state.spellName then
-        controls.previewEntry:SetEntryLabel(id, state.spellName .. " - mobility sample")
+        local suffix = (state.status == "Unsupported" or state.status == "Restricted")
+            and " - Preview only (live unavailable)" or " - mobility sample"
+        controls.previewEntry:SetEntryLabel(id, state.spellName .. suffix)
     end
     local reason = state.reason or ""
     if not self:GetMobilityConfig().enabled then reason = L.mobilityDisabled end
-    SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, state.status or "Unknown") .. "\n" .. reason)
+    if #states > 1 and self:GetMobilityConfig().enabled then
+        SetPublicText(panel.mobilityStatus, "Detected " .. #names .. " learned skills."
+            .. "\n" .. (unavailable > 0 and (unavailable .. " unavailable/restricted; see Copy diagnostics.")
+                or "Per-skill details: Copy diagnostics. Samples: Test Mode entry menu."))
+    else SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, state.status or "Unknown") .. "\n" .. reason) end
     local position = id and self:GetReminderPosition(entry)
     controls.mobilityX:SetEnabled(position ~= nil)
     controls.mobilityY:SetEnabled(position ~= nil)

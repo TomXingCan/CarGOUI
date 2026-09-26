@@ -22,6 +22,17 @@ assert(#files > 0, "CarGOUI.toc contains no Lua files")
 local moduleRoot = root .. "/Modules/CarGOUI_Data"
 local probe = io.open(moduleRoot .. "/CarGOUI_Data.toc", "r")
 if probe then probe:close() else moduleRoot = root .. "/../CarGOUI_Data" end
+local dataFiles, classFileCount = {}, 0
+local dataTOC = assert(io.open(moduleRoot .. "/CarGOUI_Data.toc", "r"))
+for line in dataTOC:lines() do
+    local path = line:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
+    if path ~= "" and path:sub(1, 1) ~= "#" then
+        assert(path:match("%.lua$") and not path:find("..", 1, true), "Unsafe business TOC path")
+        dataFiles[#dataFiles + 1] = path
+        if path:match("^Classes/") then classFileCount = classFileCount + 1 end
+    end
+end
+dataTOC:close()
 local total, failed = 0, 0
 
 local function equal(actual, expected, label)
@@ -97,8 +108,8 @@ local function setup(saved, loggedIn, client)
         inCombat = client.inCombat or false, clock = 100, pendingTimers = {},
         faction = client.faction or "Alliance", factionReads = 0, gradientWrites = 0,
         bindings = {}, formatters = {}, curves = {}, curveEvaluations = {},
-        spellReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0,
-        loadedModules = {}, loadedFiles = {}, moduleLoads = 0 }
+        spellReads = {}, knownReads = {}, overrideReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0,
+        loadedModules = {}, moduleNamespaces = {}, loadedFiles = {}, moduleLoads = 0 }
     if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
@@ -293,26 +304,31 @@ local function setup(saved, loggedIn, client)
         state.mobility = client.mobility
         state.mobility.known = state.mobility.known or { [1953] = true }
         state.mobility.spells = state.mobility.spells or {}
+        state.allowedSpellIDs = client.allowedSpellIDs or { [1953] = true, [212653] = true,
+            [342245] = true, [342247] = true, [389713] = true }
         -- Public metadata fixtures model the audited ordinary spell interval and
         -- GCD envelope. They do not prove actual client values or semantics.
         state.baseCooldowns = client.baseCooldowns or { [1953] = { 500, 1500 }, [212653] = { 500, 0 } }
         env.GetSpellBaseCooldown = function(id)
-            truthy(id == 1953 or id == 212653, "base metadata remains limited to Blink/Shimmer")
+            truthy(state.allowedSpellIDs[id], "base metadata stays inside explicit current-class test fixture")
             local record = state.baseCooldowns[id]
             if record then return unpack(record) end
         end
         local function spellData(id, api)
-            truthy(id == 1953 or id == 212653, "live runtime only queries supported Mage spell IDs")
+            truthy(state.allowedSpellIDs[id], "live runtime only queries explicitly permitted current-class spell IDs")
             state.realReads = state.realReads + 1
             state.spellReads[#state.spellReads + 1] = { id = id, api = api }
             return state.mobility.spells[id]
         end
         env.C_SpellBook = { IsSpellKnown = function(id)
-            truthy(id == 1953 or id == 212653, "learning queries stay inside supported spell IDs")
+            truthy(state.allowedSpellIDs[id], "learning queries stay inside explicitly permitted current-class IDs")
+            state.knownReads[#state.knownReads + 1] = id
             return state.mobility.known[id] or false
         end }
         env.C_Spell.GetOverrideSpell = function(id)
-            truthy(id == 1953 or id == 212653, "override query scope")
+            truthy(state.allowedSpellIDs[id], "override queries stay inside explicit current-class IDs")
+            state.overrideReads[#state.overrideReads + 1] = id
+            if state.mobility.overrides then return state.mobility.overrides[id] or id end
             return state.mobility.override or id
         end
         env.C_Spell.GetSpellCharges = function(id)
@@ -694,6 +710,7 @@ local function setup(saved, loggedIn, client)
             if state.loadedModules[name] then return true end
             state.moduleLoads = state.moduleLoads + 1
             local namespace = {}
+            state.moduleNamespaces[name] = namespace
             local moduleTOC = assert(io.open(moduleRoot .. "/CarGOUI_Data.toc", "r"))
             for line in moduleTOC:lines() do
                 local path = line:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
@@ -2110,7 +2127,7 @@ test("unlearned and unsupported characters do not manufacture live reminders", f
     local reads = state.realReads
     addon:RefreshMobility()
     equal(state.realReads, reads, "unlearned spell does not query cooldowns")
-    local _, other, unsupported = mobilityLogin(1953, { cooldownDuration = 15 }, { classToken = "WARRIOR" })
+    local _, other, unsupported = mobilityLogin(1953, { cooldownDuration = 15 }, { classToken = "UNKNOWN" })
     mobilityStatus(other, "Unsupported")
     equal(unsupported.realReads, 0, "unsupported class never queries Mage state")
     equal(unsupported:activeTimers(), 0, "unsupported class schedules no updates")
@@ -2767,7 +2784,7 @@ test("non-Mage login does not inherit or instantiate legacy Mage settings and re
     same(warrior:GetMobilityConfig().position, { anchor = "CENTER", x = 0, y = 0 }, "new class has factory position")
     equal(warrior:GetMobilityConfig().enabled, true, "Mage disable never leaks to Warrior")
     equal(warrior.db.classes.MAGE, nil, "pending migration does not allocate Mage config on Warrior")
-    equal(ws.moduleLoads, 0, "Warrior never loads class business files")
+    equal(ws.moduleLoads, 1, "Warrior loads unified Data without inheriting Mage configuration")
     warrior:UpdateReminderStyle("mobility:WARRIOR", { font = { size = 29 } })
     local _, mage = mobilityLogin(1953, { charges = 1, maxCharges = 1 }, nil, copy(warrior.db))
     equal(mage:GetMobilityConfig().style.font.size, 52, "Mage consumes its backed-up legacy appearance later")
@@ -3088,7 +3105,7 @@ test("native class loading distinguishes files active data saved configuration a
     equal(report.activeSkills, 1, "one effective current skill")
     equal(report.activeBindings, 1, "one live native timer")
     local saved = copy(mage.db)
-    local _, warrior, ws = login(saved, false, { classToken = "WARRIOR", specID = 71 })
+    local _, warrior, ws = login(saved, false, { classToken = "UNKNOWN", specID = false })
     local wr = warrior:GetRuntimeLoadDiagnostics()
     equal(ws.moduleLoads, 0, "data package is not automatically loaded on unsupported Warrior")
     equal(wr.modules.fileStatus, "not loaded", "files not loaded distinct from inactive")
@@ -3106,7 +3123,7 @@ end)
 test("already loaded class module is reported inactive without pretending code or cached frames unload", function()
     local _, addon, state = mobilityLogin(1953, { charges = 0, maxCharges = 1, chargeStart = 100, chargeDuration = 20 })
     local old = currentLive(addon)
-    state.classToken, state.specID = "WARRIOR", 71
+    state.classToken, state.specID = "UNKNOWN", nil
     syncEvent(state, "PLAYER_ENTERING_WORLD")
     local report = addon:GetRuntimeLoadDiagnostics()
     equal(report.modules.fileStatus, "loaded; no current adapter active", "loaded code is never claimed unloaded")
@@ -3118,16 +3135,16 @@ test("already loaded class module is reported inactive without pretending code o
 end)
 
 test("unified data registration stays inactive on an unsupported class and never creates its saved defaults", function()
-    local env, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    local env, addon, state = login(nil, false, { classToken = "UNKNOWN", specID = false })
     equal(state.moduleLoads, 0, "unsupported current class does not request Data automatically")
     local before = addon:GetRuntimeLoadDiagnostics()
     truthy(env.C_AddOns.LoadAddOn("CarGOUI_Data"), "explicit native loading is modeled independently of activation")
     addon:RefreshActiveEntries()
     local after = addon:GetRuntimeLoadDiagnostics()
     equal(after.modules.dataPackageLoaded, true, "whole unified package is now loaded")
-    equal(after.modules.registeredAdapters, 1, "shipped Mage definition is registered")
-    equal(after.modules.loadedClassFiles, 5, "file report counts loaded class business code honestly")
-    equal(after.modules.loadedDataFiles, 7, "whole Data TOC is loaded, internal folders are not separately LoD")
+    equal(after.modules.registeredAdapters, 13, "all shipped class definitions are registered")
+    equal(after.modules.loadedClassFiles, classFileCount, "file report counts loaded class business code honestly")
+    equal(after.modules.loadedDataFiles, #dataFiles, "whole Data TOC is loaded, internal folders are not separately LoD")
     equal(after.modules.activeAdapterClass, nil, "Mage adapter not selected on Warrior")
     equal(after.modules.mobilityEntries + after.modules.previewEntries, 0, "registration does not instantiate Mage entries")
     equal(after.activeSkills + after.activeBindings + after.allocatedBindings + after.liveFrames + after.previewFrames, 0, "registration creates no unrelated runtime objects")
@@ -3146,23 +3163,23 @@ test("class adapter registry rejects duplicates and only activates the adapter f
     equal(addon:RegisterClassAdapter("MAGE", replacement), false, "duplicate class registration rejected")
     equal(addon:RegisterClassAdapter("WARRIOR", replacement), false, "class-token mismatch rejected")
     local selections, deactivations = 0, 0
-    local synthetic = { classToken = "WARRIOR", mobilityEntries = {}, previewEntries = {},
+    local synthetic = { classToken = "TESTCLASS", mobilityEntries = {}, previewEntries = {},
         ActivateEntries = function(self, spec) selections = selections + 1; self.spec = spec; return true end,
         DeactivateEntries = function() deactivations = deactivations + 1 end,
         GetMobilityEntry = function() return nil end,
         GetPreviewEntries = function() return {} end,
         ReadMobilityState = function() return { status = "Unsupported", reason = "Offline adapter fixture only", path = "none" } end }
-    truthy(addon:RegisterClassAdapter("WARRIOR", synthetic), "generic registry accepts an offline future-class fixture")
+    truthy(addon:RegisterClassAdapter("TESTCLASS", synthetic), "generic registry accepts an offline future-class fixture")
     equal(selections, 0, "registration does not activate non-current class")
     equal(addon.activeClassAdapter, adapter, "registered active adapter retains identity")
     syncEvent(state, "SPELL_UPDATE_CHARGES")
     equal(nativeText(addon), "No Blink\n18.0", "validated Blink path remains current")
     equal(called, 0, "rejected record never executes a factory or reader")
     local after = addon:GetRuntimeLoadDiagnostics()
-    equal(after.modules.registeredAdapters, 2, "one shipped adapter plus one explicit offline fixture")
+    equal(after.modules.registeredAdapters, 14, "13 shipped adapters plus one explicit offline fixture")
     equal(after.events.callbacks, before.events.callbacks, "duplicate rejection adds no listener")
     equal(after.allocatedBindings, before.allocatedBindings, "duplicate rejection adds no binding")
-    state.classToken, state.specID = "WARRIOR", 71
+    state.classToken, state.specID = "TESTCLASS", 71
     syncEvent(state, "PLAYER_ENTERING_WORLD")
     equal(addon.activeClassAdapter, synthetic, "current class selects its own registered adapter")
     equal(synthetic.spec, 71, "current specialization passed to selected adapter")
@@ -3307,7 +3324,7 @@ test("login Options Preview combat stop and repeated spec switches keep listener
 end)
 
 test("runtime CPU and memory diagnostics sample only on demand and disclose unavailable profiling", function()
-    local env, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    local env, addon, state = login(nil, false, { classToken = "UNKNOWN", specID = false })
     local memoryReads, cpuReads, updates = {}, {}, 0
     env.UpdateAddOnMemoryUsage = function() updates = updates + 1 end
     env.GetAddOnMemoryUsage = function(name) memoryReads[#memoryReads + 1] = name; return 123.5 end
@@ -3332,7 +3349,9 @@ test("runtime CPU and memory diagnostics sample only on demand and disclose unav
 end)
 
 test("live runtime sources contain no polling cast-count inference or timer text readback", function()
-    for _, path in ipairs({ root .. "/Modules/Mobility/Runtime.lua", moduleRoot .. "/Classes/Mage/SpellState.lua" }) do
+    local inspected = { root .. "/Modules/Mobility/Runtime.lua", root .. "/Core/Modules.lua" }
+    for _, path in ipairs(dataFiles) do inspected[#inspected + 1] = moduleRoot .. "/" .. path end
+    for _, path in ipairs(inspected) do
         local file = assert(io.open(path, "r"))
         local source = file:read("*a"); file:close()
         for _, forbidden in ipairs({ "NewTicker", '"OnUpdate"', "COMBAT_LOG_EVENT_UNFILTERED",
@@ -3587,8 +3606,9 @@ test("all-class Body themes work without gameplay adapters or cooldown queries a
     for _, row in ipairs(themeRoster) do
         local token, first = row[1], row[2][1]
         local _, addon, state = login(nil, false, { classToken = token, specID = first[1] })
+        local initialLoads = state.moduleLoads
         options(addon)
-        equal(state.moduleLoads, token == "MAGE" and 1 or 0, "theme coverage never causes another gameplay module to load")
+        equal(state.moduleLoads, initialLoads, "theme coverage never causes another gameplay module to load")
         local saved, spellReads = copy(addon.db), copy(state.spellReads)
         local before = addon:GetRuntimeLoadDiagnostics()
         for _, spec in ipairs(row[2]) do
@@ -3602,7 +3622,7 @@ test("all-class Body themes work without gameplay adapters or cooldown queries a
         equal(after.allocatedBindings, before.allocatedBindings, "theme coverage creates no native cooldown binding")
         equal(after.liveFrames + after.previewFrames, 0, "opening unsupported or unlearned themes creates no reminders")
         if token ~= "MAGE" then
-            equal(after.modules.activeAdapterClass, nil, "theme does not manufacture a gameplay adapter")
+            equal(after.modules.activeAdapterClass, token, "theme preserves the registry selection made at login")
             equal(addon.db.classes.MAGE, nil, "non-Mage theme does not instantiate Mage configuration")
         end
     end
@@ -3645,7 +3665,7 @@ test("repeated full-roster theme cycles reuse 64 Lines and leave no stale motifs
     local panel = options(addon)
     local resources, events, saved = resourceCounts(state), addon:GetEventDiagnostics(), copy(addon.db)
     local lines = {}; for i, line in ipairs(panel.theme.motif) do lines[i] = line end
-    local header = panel.theme.header.gradient
+    local header, initialLoads = panel.theme.header.gradient, state.moduleLoads
     for _ = 1, 4 do
         for _, row in ipairs(themeRoster) do
             for _, spec in ipairs(row[2]) do
@@ -3664,7 +3684,7 @@ test("repeated full-roster theme cycles reuse 64 Lines and leave no stale motifs
     same(resourceCounts(state), resources, "160 theme transitions allocate no extra objects")
     same(addon:GetEventDiagnostics(), events, "theme refresh cannot accumulate identity listeners")
     same(addon.db, saved, "full-roster Body transitions never write saved settings")
-    equal(state.moduleLoads, 0, "theme cycling never activates Mage gameplay module")
+    equal(state.moduleLoads, initialLoads, "theme cycling never causes another gameplay package load")
     equal(state.realReads, 0, "theme cycling never reads gameplay state")
     panel:Hide()
     same(addon:GetEventDiagnostics(), idleEvents, "closing removes all theme listeners and restores idle ownership")
@@ -3690,6 +3710,675 @@ test("Mage Body palettes and all watermark endpoints exactly retain the accepted
         for field, expected in pairs(fields) do same(addon.optionBodyThemes[key][field], expected, "accepted Mage palette " .. key .. "/" .. field) end
         equal(motifFingerprint(addon:BuildOptionsThemeMotif(key)), geometry[key], "accepted Mage geometry " .. key)
     end
+end)
+
+-- Generic-engine fixtures are deliberately synthetic. Their explicit metadata
+-- tests the native API contract, not the actual semantics of any real ability.
+local function genericEngine(item, client)
+    client = client or {}
+    local enterCombat = client.inCombat
+    client.inCombat = false
+    client.classToken, client.specID = "UNKNOWN", false
+    client.allowedSpellIDs = { [987001] = true, [987002] = true }
+    client.mobility = { known = {}, spells = { [987001] = item } }
+    client.baseCooldowns = client.baseCooldowns or { [987001] = { 1000, 1500 } }
+    local env, addon, state = login(nil, false, client)
+    truthy(env.C_AddOns.LoadAddOn("CarGOUI_Data"), "load engine without activating any gameplay adapter")
+    if enterCombat then state:fire("PLAYER_REGEN_DISABLED") end
+    local entry = { id = "offline_engine", class = "UNKNOWN", kind = "mobility", anchor = { x = 0, y = 0 } }
+    return state.moduleNamespaces.CarGOUI_Data, entry, { spellID = 987001, spellName = "Offline fixture" }, addon, state, env
+end
+
+local function textFor(addon, id)
+    local frame = addon.reminderFrames.live and addon.reminderFrames.live[id]
+    if not frame or not frame:IsVisible() or nativeValue(frame.alpha) == 0 then return "" end
+    return frame.text.nativeRenderedText or ""
+end
+
+test("generic engine uses actual public charge capacity and first recovery without learning or usability inference", function()
+    for _, capacity in ipairs({ 1, 2, 3, 5 }) do
+        local item = { charges = capacity, maxCharges = capacity, chargeStart = 91, chargeDuration = 23 }
+        local engine, entry, definition, _, state = genericEngine(item)
+        equal(engine:ReadAbilityState(entry, definition).status, "Ready", "capacity comes from current API")
+        item.charges = 1
+        equal(engine:ReadAbilityState(entry, definition).status, "Ready", "any available charge is enough")
+        item.charges = 0
+        local result = engine:ReadAbilityState(entry, definition)
+        equal(result.status, "Depleted", "zero actual charges confirms depletion")
+        truthy(result.duration, "zero uses binds real ongoing charge timer")
+        local binding = state.moduleNamespaces.CarGOUI_Data.host:AcquireReminderFrame(entry, "live")
+        engine.host:RenderLiveMobility(entry, definition.spellName, result.duration, result.visibility, definition.spellID)
+        state:nativeTick()
+        equal(textFor(engine.host, entry.id), "No Offline fixture\n14.0", "recharge already started nine seconds ago")
+        item.charges = 1
+        local recovered = engine:ReadAbilityState(entry, definition)
+        equal(recovered.status, "Ready", "first recovery is immediately ready")
+        equal(recovered.duration, nil, "no timer retained until full recharge")
+        equal(#state.knownReads + #state.overrideReads, 0, "engine never selects learned or replacement candidates")
+        truthy(binding.durationBinding, "native formatter used rather than restricted string formatting")
+    end
+end)
+
+test("generic secret charges distinguish one-slot recovery and blocked unaudited multiple-slot visibility", function()
+    local item = { charges = 0, maxCharges = 1, chargeStart = 96, chargeDuration = 15,
+        secretCharges = true, secretDuration = true }
+    local engine, entry, definition, _, state = genericEngine(item, { inCombat = true })
+    local result = engine:ReadAbilityState(entry, definition)
+    equal(result.status, "Depleted", "public active single-slot recovery proves empty slot")
+    truthy(result.duration, "secret remaining duration stays in native handle")
+    item.maxCharges = 2
+    result = engine:ReadAbilityState(entry, definition)
+    equal(result.status, "Restricted", "multiple secret charges require per-ability semantic audit")
+    equal(result.path, "blocked: native charge visibility", "blocker precisely distinguishes missing visibility gate")
+    equal(result.duration, nil, "restricted path does not fabricate depletion")
+    equal(#state.curves, 0, "no universal Mage threshold borrowed")
+    item.active = false
+    equal(engine:ReadAbilityState(entry, definition).status, "Unknown", "inactive recharge with secret count is not falsely Ready")
+    item.active, item.secretCapacity = true, true
+    equal(engine:ReadAbilityState(entry, definition).status, "Restricted", "secret capacity is never branched on")
+    item.secretCapacity, item.secretActivity = false, true
+    equal(engine:ReadAbilityState(entry, definition).status, "Restricted", "secret activity is never branched on")
+end)
+
+test("generic audited fixture keeps native visibility separate from existing recharge and never reads secret alpha", function()
+    local item = { charges = 1, maxCharges = 2, chargeStart = 93, chargeDuration = 20,
+        cooldownStart = 100, cooldownDuration = 1, secretCharges = true, secretDuration = true }
+    local engine, entry, definition, addon, state = genericEngine(item)
+    definition.chargeVisibility = { baseCooldownMS = 1000, baseGCDMS = 1500,
+        boundaryMS = 1000, ignoreGCD = true, audit = "Offline contract fixture, not a shipped spell audit" }
+    for _, step in ipairs({ { 1, 1, "" }, { 0, 20, "No Offline fixture\n13.0" }, { 1, 1, "" } }) do
+        item.charges, item.cooldownDuration = step[1], step[2]
+        local result = engine:ReadAbilityState(entry, definition)
+        equal(result.status, "Native tracking", "Lua does not claim native final Ready/Depleted")
+        truthy(result.duration ~= result.visibility.duration, "separate native objects have different responsibilities")
+        addon:RenderLiveMobility(entry, definition.spellName, result.duration, result.visibility, definition.spellID)
+        state:nativeTick()
+        equal(textFor(addon, entry.id), step[3], "native display alone evaluates opacity")
+        truthy(isSecret(addon.reminderFrames.live[entry.id].alpha), "secret curve result reaches allowed SetAlpha sink")
+    end
+    equal(#state.curves, 1, "same explicit ability boundary reuses one curve")
+    state.baseCooldowns[987001] = { 1500, 1500 }
+    local mismatch = engine:ReadAbilityState(entry, definition)
+    equal(mismatch.status, "Restricted", "previously cached gate cannot bypass changed public metadata")
+    equal(mismatch.duration, nil, "cached classifier cannot claim current validity")
+    state.baseCooldowns[987001] = { 1000, 1500 }
+    equal(state.alphaReads + state.liveMeasurements, 0, "no opacity readback or restricted text measurement")
+    for _, query in ipairs(state.spellReads) do
+        truthy(query.api ~= "cooldown-duration-visibility", "generic fixture explicitly removes GCD in visibility purpose")
+    end
+    engine:ClearAbilityStateCache()
+    engine:ReadAbilityState(entry, definition)
+    equal(#state.curves, 2, "deactivation can release old per-ability curve cache")
+end)
+
+test("generic visibility audit rejects mismatched incomplete and opaque public metadata without timer guesses", function()
+    local item = { charges = 0, maxCharges = 2, chargeStart = 90, chargeDuration = 20,
+        secretCharges = true, secretDuration = true, cooldownStart = 100, cooldownDuration = 20 }
+    local engine, entry, definition, _, state = genericEngine(item)
+    local valid = { baseCooldownMS = 1000, baseGCDMS = 1500, boundaryMS = 1000, ignoreGCD = true, audit = "Offline fixture" }
+    for _, patch in ipairs({ { audit = "" }, { baseCooldownMS = 500 }, { baseGCDMS = 0 },
+        { boundaryMS = 999 }, { ignoreGCD = false }, { boundaryMS = secret(1000) } }) do
+        definition.chargeVisibility = copy(valid)
+        for k, v in pairs(patch) do definition.chargeVisibility[k] = v end
+        local result = engine:ReadAbilityState(entry, definition)
+        equal(result.status, "Restricted", "invalid public per-ability evidence stays explicitly blocked")
+        equal(result.duration, nil, "cannot treat active recharge as depletion")
+    end
+    definition.chargeVisibility = valid
+    state.baseCooldowns[987001] = { secret(1000), 1500 }
+    equal(engine:ReadAbilityState(entry, definition).status, "Restricted", "secret metadata does not enter arithmetic")
+    equal(#state.curves, 0, "invalid evidence never creates a classifier")
+end)
+
+test("generic ordinary cooldowns exclude GCD and allow native secret zero expiry without raw timing reads", function()
+    local item = { cooldownStart = 100, cooldownDuration = 1.5, isOnGCD = true, secretDuration = true }
+    local engine, entry, definition, addon, state = genericEngine(item)
+    local result = engine:ReadAbilityState(entry, definition)
+    equal(result.status, "Tracking", "opaque zero stays native tracking instead of Lua inferred Ready")
+    addon:RenderLiveMobility(entry, definition.spellName, result.duration, result.visibility, definition.spellID)
+    state:nativeTick()
+    equal(textFor(addon, entry.id), "", "native ignoreGCD zero duration is invisible")
+    item.isOnGCD, item.cooldownStart, item.cooldownDuration = false, 90, 18
+    result = engine:ReadAbilityState(entry, definition)
+    addon:RenderLiveMobility(entry, definition.spellName, result.duration, result.visibility, definition.spellID)
+    state:nativeTick()
+    equal(textFor(addon, entry.id), "No Offline fixture\n8.0", "ordinary native cooldown uses actual start")
+    state:advance(9)
+    equal(textFor(addon, entry.id), "", "native binding expires without Lua polling")
+    local before = state.realReads
+    definition.unsupportedReason = "Explicit offline unsupported mechanism"
+    equal(engine:ReadAbilityState(entry, definition).status, "Unsupported", "unsupported mechanism honest diagnostic")
+    equal(state.realReads, before, "explicit unsupported mechanism does not query cooldown state")
+end)
+
+local warriorIDs = { [100] = true, [6544] = true, [3411] = true, [385952] = true }
+local function warriorLogin(spells, known, spec, saved)
+    return login(saved, false, { classToken = "WARRIOR", specID = spec or 71,
+        allowedSpellIDs = warriorIDs, mobility = { known = known or { [100] = true, [6544] = true, [3411] = true },
+            overrides = {}, spells = spells } })
+end
+
+test("Warrior concurrent live abilities keep independent real timers and hiding one cannot clear another", function()
+    local charge = { charges = 0, maxCharges = 2, chargeStart = 91, chargeDuration = 20 }
+    local leap = { charges = 0, maxCharges = 1, chargeStart = 95, chargeDuration = 45, secretDuration = true }
+    local intervene = { charges = 1, maxCharges = 1, chargeStart = 100, chargeDuration = 30 }
+    local _, addon, state = warriorLogin({ [100] = charge, [6544] = leap, [3411] = intervene })
+    state:nativeTick()
+    equal(#addon:GetMobilityEntries(), 3, "three currently learned abilities, not one compatibility slot")
+    equal(textFor(addon, "warrior_charge"), "No Charge\n11.0", "first ability next recovery")
+    equal(textFor(addon, "warrior_heroic_leap"), "No Heroic Leap\n40.0", "second ability independent remaining")
+    equal(textFor(addon, "warrior_intervene"), "", "available third ability absent")
+    local leapFrame = addon.reminderFrames.live.warrior_heroic_leap
+    local disables = leapFrame.durationBinding.disableCalls or 0
+    charge.charges = 1; syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(textFor(addon, "warrior_charge"), "", "one restored charge immediately hides only Charge")
+    equal(textFor(addon, "warrior_heroic_leap"), "No Heroic Leap\n40.0", "Leap remains independently live")
+    equal(leapFrame.durationBinding.disableCalls or 0, disables, "another skill cannot detach Leap timer")
+    state:advance(4)
+    equal(textFor(addon, "warrior_heroic_leap"), "No Heroic Leap\n36.0", "still-existing native timer advances")
+    intervene.charges, intervene.chargeStart = 0, 104
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(textFor(addon, "warrior_intervene"), "No Intervene\n30.0", "third skill can independently become depleted")
+    equal(addon:GetRuntimeLoadDiagnostics().activeBindings, 2, "only two depleted abilities bind timers")
+    local statuses = addon:GetMobilityStatuses()
+    equal(#statuses, 3, "diagnostics report every active ability")
+    equal(addon:GetMobilityStatus("warrior_charge").status, "Ready", "named diagnostic selects correct ready ability")
+    for _, status in ipairs(statuses) do
+        equal(status.duration, nil, "public diagnostics cannot expose opaque duration")
+        equal(status.visibility, nil, "public diagnostics cannot expose native alpha classifier")
+    end
+end)
+
+test("Warrior shared class styles preserve independent slot anchors and never reset opaque live bindings", function()
+    local _, addon, state = warriorLogin({
+        [100] = { charges = 0, maxCharges = 1, chargeStart = 93, chargeDuration = 20, secretCharges = true, secretDuration = true },
+        [6544] = { charges = 0, maxCharges = 1, chargeStart = 94, chargeDuration = 45, secretCharges = true, secretDuration = true },
+        [3411] = { charges = 1, maxCharges = 1 },
+    })
+    addon:UpdateSettings({ position = { x = 38, y = -17 } })
+    local snapshots, reads = {}, state.realReads
+    for _, entry in ipairs(addon:GetMobilityEntries()) do
+        equal(entry.anchor.y, -84 * (entry.slot - 1), "stable slot supplies deterministic separated anchor")
+        local frame = addon.reminderFrames.live[entry.id]
+        if frame then snapshots[entry.id] = { frame.durationBinding.duration, frame.durationBinding.durationWrites, frame.alpha, frame.alphaWrites } end
+    end
+    addon:UpdateReminderStyle("mobility:WARRIOR", { font = { size = 39 }, scale = 1.4, shadow = { enabled = false } })
+    equal(state.realReads, reads, "style-only editing never queries real cooldowns")
+    for _, entry in ipairs(addon:GetMobilityEntries()) do
+        local frame = addon.reminderFrames.live[entry.id]
+        if frame then
+            local before = snapshots[entry.id]
+            equal(frame.durationBinding.duration, before[1], "same native duration handle")
+            equal(frame.durationBinding.durationWrites, before[2], "no rebind from styling")
+            equal(frame.alpha, before[3], "same native opacity")
+            equal(frame.alphaWrites, before[4], "style does not override gate")
+            equal(frame.text.font[2], 39, "all current class abilities use shared font")
+            equal(frame.point[4] * frame:GetScale(), 38, "scale does not move shared X anchor")
+            truthy(math.abs(frame.point[5] * frame:GetScale() - (-17 + entry.anchor.y)) < 0.000001,
+                "scale does not multiply slot or saved Y twice")
+        end
+    end
+    equal(addon.db.classes.MAGE, nil, "Warrior creates no Mage settings")
+    local _, reload = warriorLogin(state.mobility.spells, nil, 72, copy(addon.db))
+    equal(reload:GetMobilityConfig().style.font.size, 39, "another Warrior spec retains class style")
+    equal(reload:GetMobilityConfig().position.x, 38, "another Warrior spec retains class position")
+    local _, mage = mobilityLogin(1953, { charges = 1, maxCharges = 1 }, nil, copy(addon.db))
+    same(mage:GetMobilityConfig().style, mage.factoryReminderStyle, "first Mage does not inherit Warrior style")
+    equal(mage.db.classes.WARRIOR.mobility.style.font.size, 39, "returnable Warrior settings preserved")
+end)
+
+test("single-entry and all Preview leave unrelated live Mobility independent and closing restores current reality", function()
+    local _, addon, state = warriorLogin({ [100] = { charges = 0, maxCharges = 1, chargeStart = 90, chargeDuration = 20 },
+        [6544] = { charges = 0, maxCharges = 1, chargeStart = 90, chargeDuration = 45 }, [3411] = { charges = 1, maxCharges = 1 } })
+    local panel = options(addon)
+    truthy(addon:SetPreview("single", "warrior_charge"), "single current ability can be previewed")
+    equal(textFor(addon, "warrior_charge"), "", "matching live suppressed")
+    equal(textFor(addon, "warrior_heroic_leap"), "No Heroic Leap\n35.0", "other live reminder remains active during single preview")
+    state:advance(3)
+    truthy(addon:SetPreview("all"), "existing all-preview entrypoint supports all current abilities")
+    equal(textFor(addon, "warrior_charge"), "", "all preview suppresses first real frame")
+    equal(textFor(addon, "warrior_heroic_leap"), "", "all preview suppresses second real frame")
+    equal(addon:GetRuntimeLoadDiagnostics().activeBindings, 0, "simulation has no live native binding")
+    addon:StopPreview(); state:nativeTick()
+    equal(textFor(addon, "warrior_charge"), "No Charge\n7.0", "stop requeries real first timer")
+    equal(textFor(addon, "warrior_heroic_leap"), "No Heroic Leap\n32.0", "stop requeries separate second timer")
+    panel:Hide(); syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(addon:GetRuntimeLoadDiagnostics().activeBindings, 2, "closing Options cannot end real monitoring")
+    equal(#state.errors, 0, "preview/live transition has no API errors")
+end)
+
+test("active-only cooldown refresh never reselects class candidates and learning-zero retains only identity watchers", function()
+    local _, addon, state = warriorLogin({ [100] = { charges = 0, maxCharges = 1, chargeStart = 100, chargeDuration = 20 } }, {})
+    equal(#addon:GetMobilityEntries(), 0, "zero learned skills means zero active entries")
+    equal(addon.mobilityIdentityWatching, true, "learning can be discovered without polling")
+    equal(addon.mobilityCooldownWatching, false, "no unrelated cooldown listeners")
+    local report = addon:GetRuntimeLoadDiagnostics()
+    equal(report.activeSkills + report.liveFrames + report.allocatedBindings, 0, "unlearned current class creates no timers or live frames")
+    equal(state.realReads, 0, "zero learned skills means no cooldown queries")
+    state.mobility.known[100] = true
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(#addon:GetMobilityEntries(), 1, "learning event activates exactly newly learned skill")
+    equal(addon.mobilityCooldownWatching, true, "cooldown listeners begin only with active skill")
+    local known, overrides, firstQuery = #state.knownReads, #state.overrideReads, #state.spellReads
+    local factoryCalls, originalFactory = 0, addon.activeClassAdapter.definitionFactory
+    addon.activeClassAdapter.definitionFactory = function(spec)
+        factoryCalls = factoryCalls + 1
+        return originalFactory(spec)
+    end
+    for _ = 1, 8 do syncEvent(state, "SPELL_UPDATE_COOLDOWN") end
+    equal(factoryCalls, 0, "normal refresh revalidates retained families without rebuilding full current-class catalog")
+    for i = known + 1, #state.knownReads do
+        equal(state.knownReads[i], 100, "normal cooldown updates may revalidate active learning but never scan inactive candidates")
+    end
+    for i = overrides + 1, #state.overrideReads do
+        equal(state.overrideReads[i], 100, "temporary replacement checks may inspect active ID only, never inactive candidates")
+    end
+    for i = firstQuery + 1, #state.spellReads do equal(state.spellReads[i].id, 100, "only active ID is queried") end
+    state.mobility.known[100] = nil
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(addon.mobilityCooldownWatching, false, "unlearning final skill detaches runtime listeners")
+    equal(addon:GetRuntimeLoadDiagnostics().activeBindings, 0, "unlearning final skill detaches duration")
+    equal(addon.mobilityIdentityWatching, true, "identity watchers remain for future learning")
+end)
+
+test("Data diagnostics inventory exactly matches the loaded manifest rather than claiming hardcoded class coverage", function()
+    local _, addon, state = login()
+    same(addon.dataFileManifest, dataFiles, "reported code inventory exactly equals actual TOC order")
+    local loaded = {}
+    for _, path in ipairs(state.loadedFiles) do
+        local item = path:match("^CarGOUI_Data/(.*)$")
+        if item then loaded[#loaded + 1] = item end
+    end
+    same(loaded, dataFiles, "native mock actually executed every shipped business file once")
+    equal(addon:GetModuleLoadReport().loadedClassFiles, classFileCount, "derived class-file inventory")
+    equal(addon:GetModuleLoadReport().loadedDataFiles, #dataFiles, "derived code-file inventory")
+    equal(countKeys(addon.db.classes), 1, "shipping definitions does not instantiate other saved class trees")
+end)
+
+local function includeDefinitionIDs(ids, definition)
+    if definition.spellID then ids[definition.spellID] = true end
+    if definition.baseSpellID then ids[definition.baseSpellID] = true end
+    for _, key in ipairs({ "requiresKnown", "excludesKnown", "preferKnown" }) do
+        for _, id in ipairs(definition[key] or {}) do ids[id] = true end
+    end
+    for id in pairs(definition.blockedIfKnown or {}) do ids[id] = true end
+    for _, variant in ipairs(definition.variants or {}) do includeDefinitionIDs(ids, variant) end
+end
+
+local function definitionsFor(data, class, spec)
+    local adapter = data.adapters[class]
+    truthy(adapter, "actual registered adapter required for " .. class)
+    local generic = class == "MAGE" and adapter.additionalMobility or adapter
+    truthy(generic and generic.definitionFactory, "actual lazy definition factory required for " .. class)
+    return generic.definitionFactory(spec)
+end
+
+-- Independent family checklist from the bounded feature scope, not generated
+-- from the addon registry. This checks meaningful coverage before a count can
+-- be reported. Mage Blink/Shimmer retain their separate acceptance regressions.
+local mobilityFamilies = {
+    WARRIOR = { "warrior_charge", "warrior_heroic_leap", "warrior_intervene" },
+    PALADIN = { "paladin_divine_steed" }, HUNTER = { "hunter_disengage", "hunter_aspect_of_the_cheetah" },
+    ROGUE = { "rogue_sprint", "rogue_shadowstep" }, PRIEST = { "priest_angelic_feather" },
+    DEATHKNIGHT = { "deathknight_deaths_advance", "deathknight_wraith_walk" },
+    SHAMAN = { "shaman_spirit_walk", "shaman_gust_of_wind", "shaman_wind_rush_totem" }, WARLOCK = { "warlock_demonic_circle_teleport" },
+    MONK = { "monk_roll", "monk_transcendence_transfer", "monk_tigers_lust" },
+    DRUID = { "druid_dash", "druid_wild_charge", "druid_stampeding_roar" },
+    DEMONHUNTER = { "demonhunter_movement", "demonhunter_vengeful_retreat" },
+    EVOKER = { "evoker_hover", "evoker_deep_breath", "evoker_verdant_embrace", "evoker_rescue" },
+}
+local specFamilies = { warrior_shield_charge = { [73] = true }, hunter_harpoon = { [255] = true },
+    rogue_grappling_hook = { [260] = true }, shaman_feral_lunge = { [263] = true }, monk_flying_serpent_kick = { [269] = true },
+    demonhunter_felblade = { [577] = true, [581] = true }, demonhunter_voidblade = { [1480] = true },
+    demonhunter_the_hunt = { [577] = true, [1480] = true }, demonhunter_metamorphosis = { [577] = true },
+    evoker_dream_flight = { [1468] = true } }
+
+test("every shipped non-Mage class and specialization has concrete audited families and no unrelated spec instances", function()
+    local engine, _, _, addon, state = genericEngine({})
+    local classCount, specCount, variants = 0, 0, 0
+    for _, row in ipairs(themeRoster) do
+        local class = row[1]
+        if class ~= "MAGE" then
+            classCount = classCount + 1
+            for _, spec in ipairs(row[2]) do
+                specCount = specCount + 1
+                local definitions, seen, slots = definitionsFor(engine, class, spec[1]), {}, {}
+                for _, definition in ipairs(definitions) do
+                    truthy(not seen[definition.id], "stable family IDs unique within current specialization")
+                    seen[definition.id] = true
+                    truthy(not slots[definition.slot], "simultaneous abilities have independent preset slots")
+                    slots[definition.slot] = true
+                    for _, variant in ipairs(definition.variants or { definition }) do
+                        variants = variants + 1
+                        truthy(type(variant.spellID) == "number" and variant.spellID > 0, "real public ID exists")
+                        truthy(type(variant.spellName) == "string" and variant.spellName ~= "", "real public spell name exists")
+                        equal(variant.audit.build, 69933, "individual definition records audited target build")
+                        truthy(type(variant.audit.source) == "string" and variant.audit.source ~= "", "individual primary-data evidence recorded")
+                        if not variant.unsupportedReason then
+                            truthy(type(variant.audit.cooldownMS) == "number" and type(variant.audit.gcdMS) == "number",
+                                "supported variant has distinct ordinary cooldown and GCD metadata")
+                        end
+                    end
+                end
+                for _, id in ipairs(mobilityFamilies[class]) do truthy(seen[id], class .. " common family " .. id) end
+                for id, specs in pairs(specFamilies) do
+                    equal(seen[id] == true, specs[spec[1]] == true, "only current spec instantiates exclusive family " .. id)
+                end
+            end
+            local base = definitionsFor(engine, class, nil)
+            local seen = {}; for _, definition in ipairs(base) do seen[definition.id] = true end
+            for _, id in ipairs(mobilityFamilies[class]) do truthy(seen[id], "unselected spec retains class-common family") end
+            for id in pairs(specFamilies) do equal(seen[id], nil, "low-level unspecialized never instantiates spec-exclusive family") end
+        end
+    end
+    equal(classCount, 12, "12 concrete new class factories plus separately tested Mage")
+    equal(specCount, 37, "37 concrete non-Mage specializations plus three separately tested Mage")
+    equal(state.realReads, 0, "building audited definition metadata does not query skill state")
+    equal(addon:GetRuntimeLoadDiagnostics().allocatedBindings, 0, "factory metadata never creates native bindings")
+    print("OFFLINE-DEFINITION-MATRIX classes=" .. classCount .. ", specs=" .. specCount .. ", variant-occurrences=" .. variants)
+end)
+
+test("every non-Mage variant selects independently through learned state and native public cooldown paths", function()
+    local tested, unsupported = 0, 0
+    for _, row in ipairs(themeRoster) do
+        local class = row[1]
+        if class ~= "MAGE" then
+            local engine, _, _, addon, state = genericEngine({})
+            local allowed = {}
+            for _, spec in ipairs(row[2]) do
+                for _, definition in ipairs(definitionsFor(engine, class, spec[1])) do includeDefinitionIDs(allowed, definition) end
+            end
+            state.allowedSpellIDs = allowed
+            state.classToken = class
+            for _, spec in ipairs(row[2]) do
+                state.specID = spec[1]
+                for _, definition in ipairs(definitionsFor(engine, class, spec[1])) do
+                    for _, variant in ipairs(definition.variants or { definition }) do
+                        state.mobility.known, state.mobility.overrides, state.mobility.spells = { [variant.spellID] = true }, {}, {}
+                        if variant.onlyWhenBaseOverride then
+                            truthy(definition.baseSpellID, "conditional return declares its audited base family")
+                            state.mobility.known[definition.baseSpellID] = true
+                            state.mobility.overrides[definition.baseSpellID] = variant.spellID
+                        end
+                        local item = { cooldownStart = 91, cooldownDuration = 27 }
+                        if variant.audit.rechargeMS then item.charges, item.maxCharges, item.chargeStart, item.chargeDuration = 0, 3, 91, 27 end
+                        state.mobility.spells[variant.spellID] = item
+                        local beforeReads = #state.spellReads
+                        syncEvent(state, "PLAYER_ENTERING_WORLD")
+                        local entries = addon:GetMobilityEntries()
+                        equal(#entries, 1, "only one learned variant becomes active: " .. class .. "/" .. variant.spellID)
+                        equal(entries[1].spellID, variant.spellID, "effective selected identity preserved")
+                        equal(entries[1].id, definition.id, "replacement family keeps stable saved-position key")
+                        if variant.unsupportedReason then
+                            unsupported = unsupported + 1
+                            equal(addon:GetMobilityStatus(definition.id).status, "Unsupported", "blocked return-stage remains explicitly unsupported")
+                            equal(#state.spellReads, beforeReads, "unsupported mechanism makes no timer-state queries")
+                            equal(textFor(addon, definition.id), "", "unsupported mechanism cannot show invented countdown")
+                        else
+                            tested = tested + 1
+                            equal(addon:GetMobilityStatus(definition.id).status, "Depleted", "actual API fixture reports zero uses/cooldown")
+                            equal(textFor(addon, definition.id), "No " .. variant.spellName .. "\n18.0", "real object supplies arbitrary timer, not metadata duration")
+                            if item.charges then item.charges = 1 else item.cooldownDuration = 0 end
+                            syncEvent(state, "SPELL_UPDATE_CHARGES")
+                            equal(addon:GetMobilityStatus(definition.id).status, "Ready", "first recovery/actual reset hides active skill")
+                            equal(textFor(addon, definition.id), "", "ready variant removes existing native timer")
+                        end
+                        for i = beforeReads + 1, #state.spellReads do
+                            equal(state.spellReads[i].id, variant.spellID, "runtime cannot read unlearned or unrelated class spell")
+                        end
+                    end
+                end
+            end
+            equal(countKeys(addon.db.classes), 2, "only initial UNKNOWN and explicitly current class configs exist")
+        end
+    end
+    truthy(tested > 100 and unsupported > 0, "matrix exercises real supported variants and honest unsupported stages")
+    print("OFFLINE-VARIANT-MATRIX public-path-cases=" .. tested .. ", unsupported-stage-cases=" .. unsupported)
+end)
+
+test("every shipped generic charge gate uses its own audited metadata and opaque partial empty first-recovery cycle", function()
+    local engine, entry, _, addon, state = genericEngine({})
+    local seen, tested = {}, 0
+    for _, row in ipairs(themeRoster) do
+        if row[1] ~= "MAGE" then
+            for _, spec in ipairs(row[2]) do
+                for _, definition in ipairs(definitionsFor(engine, row[1], spec[1])) do
+                    for _, variant in ipairs(definition.variants or { definition }) do
+                        local rule = variant.chargeVisibility or definition.chargeVisibility
+                        if rule and not seen[variant.spellID] then
+                            seen[variant.spellID], tested = true, tested + 1
+                            equal(rule.baseCooldownMS, variant.audit.cooldownMS, "gate ordinary interval matches this variant's audit")
+                            equal(rule.baseGCDMS, variant.audit.gcdMS, "gate GCD metadata matches this variant's audit")
+                            truthy(rule.boundaryMS >= math.max(variant.audit.cooldownMS, variant.audit.categoryCooldownMS or 0),
+                                "gate excludes both ordinary and category interval metadata")
+                            state.allowedSpellIDs[variant.spellID] = true
+                            state.baseCooldowns[variant.spellID] = { rule.baseCooldownMS, rule.baseGCDMS }
+                            local item = { charges = 1, maxCharges = 3, chargeStart = 93, chargeDuration = 17,
+                                secretCharges = true, secretDuration = true, cooldownStart = 100, cooldownDuration = rule.boundaryMS / 1000 }
+                            state.mobility.spells[variant.spellID] = item
+                            local selected = copy(variant); selected.chargeVisibility = rule
+                            for _, depleted in ipairs({ false, true, false }) do
+                                item.charges = depleted and 0 or 1
+                                item.cooldownDuration = depleted and 17 or rule.boundaryMS / 1000
+                                local result = engine:ReadAbilityState(entry, selected)
+                                equal(result.status, "Native tracking", "per-ability gate never exposes Lua final visibility")
+                                addon:RenderLiveMobility(entry, selected.spellName, result.duration, result.visibility, selected.spellID)
+                                state:nativeTick()
+                                equal(textFor(addon, entry.id), depleted and ("No " .. selected.spellName .. "\n10.0") or "",
+                                    "partial hides, empty preserves seven-second-old recharge, first recovery hides")
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    truthy(tested >= 15, "concrete per-ability gates tested, not borrowed universal classifier")
+    equal(state.alphaReads + state.liveMeasurements, 0, "all native opaque gates are write-only display sinks")
+    print("OFFLINE-CHARGE-GATES unique-audited-ability-rules=" .. tested .. "; native semantic/client validation remains separate")
+end)
+
+test("Druid form replacements deduplicate native overrides and only Druid owns form-change monitoring", function()
+    local engine, _, _, addon, state = genericEngine({})
+    local allowed = {}
+    for _, definition in ipairs(definitionsFor(engine, "DRUID", 103)) do includeDefinitionIDs(allowed, definition) end
+    state.allowedSpellIDs, state.classToken, state.specID = allowed, "DRUID", 103
+    state.mobility.known = { [102401] = true, [49376] = true, [16979] = true }
+    state.mobility.overrides = { [102401] = 49376, [16979] = 49376 }
+    state.mobility.spells = { [49376] = { cooldownStart = 95, cooldownDuration = 15 }, [16979] = { cooldownStart = 97, cooldownDuration = 15 } }
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    equal(#addon:GetMobilityEntries(), 1, "base and current form are one family")
+    equal(addon:GetMobilityEntry().spellID, 49376, "native Cat override selected")
+    local frame = addon.reminderFrames.live.druid_wild_charge
+    truthy(addon:GetEventDiagnostics().perEvent.UPDATE_SHAPESHIFT_FORM, "only current Druid adds form identity event")
+    local before = #state.spellReads
+    state.mobility.overrides = { [102401] = 16979, [49376] = 16979 }
+    syncEvent(state, "UPDATE_SHAPESHIFT_FORM")
+    equal(addon:GetMobilityEntry().spellID, 16979, "form-change event selects native Bear override")
+    equal(#addon:GetMobilityEntries(), 1, "replacement does not duplicate family")
+    equal(addon.reminderFrames.live.druid_wild_charge, frame, "same family reuses one native frame")
+    equal(textFor(addon, "druid_wild_charge"), "No Wild Charge\n12.0", "replacement binds actual new form duration")
+    for i = before + 1, #state.spellReads do equal(state.spellReads[i].id, 16979, "old form is not queried after replacement") end
+    state.classToken, state.specID, state.allowedSpellIDs, state.mobility.known = "WARRIOR", 71, warriorIDs, {}
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    equal(addon:GetEventDiagnostics().perEvent.UPDATE_SHAPESHIFT_FORM, nil, "leaving Druid removes dedicated form listener")
+    equal(frame.durationBinding.enabled, false, "leaving class disables old form binding")
+    local reads = #state.knownReads
+    syncEvent(state, "UPDATE_SHAPESHIFT_FORM")
+    equal(#state.knownReads, reads, "other class performs no form-event roster scan")
+end)
+
+test("Warrior repeated spec changes detach exclusive skills and keep frames bindings and listener counts bounded", function()
+    local _, addon, state = warriorLogin({ [100] = { charges = 0, maxCharges = 1, chargeStart = 93, chargeDuration = 20 },
+        [6544] = { charges = 0, maxCharges = 1, chargeStart = 94, chargeDuration = 45 },
+        [3411] = { charges = 1, maxCharges = 1 }, [385952] = { cooldownStart = 98, cooldownDuration = 45 } },
+        { [100] = true, [6544] = true, [3411] = true, [385952] = true })
+    equal(#addon:GetMobilityEntries(), 3, "Arms cannot activate learned Protection-only entry")
+    options(addon)
+    state.specID = 73; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(#addon:GetMobilityEntries(), 4, "Protection activates its actual exclusive skill")
+    local exclusive = addon.reminderFrames.live.warrior_shield_charge
+    local resources, report, saved = resourceCounts(state), addon:GetRuntimeLoadDiagnostics(), copy(addon:GetMobilityConfig())
+    for _ = 1, 12 do
+        for _, spec in ipairs({ 71, 72, 73 }) do
+            state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+            equal(exclusive.durationBinding.enabled, spec == 73, "spec-exclusive binding active only in current spec")
+            equal(#addon:GetMobilityEntries(), spec == 73 and 4 or 3, "current spec activity, not all spec scan")
+        end
+    end
+    same(resourceCounts(state), resources, "36 warmed spec switches allocate no new frames or native widgets")
+    equal(addon:GetRuntimeLoadDiagnostics().allocatedBindings, report.allocatedBindings, "bindings stay bounded by actual family IDs")
+    same(addon:GetEventDiagnostics(), report.events, "repeated spec switching does not accumulate listeners")
+    same(addon:GetMobilityConfig(), saved, "spec changes never rebuild class-shared settings")
+    equal(state.liveMeasurements + state.alphaReads, 0, "switch lifecycle never inspects opaque display values")
+end)
+
+local function selectGenericClass(class, spec, known, spells, overrides)
+    local engine, _, _, addon, state = genericEngine({})
+    local allowed = {}
+    for _, definition in ipairs(definitionsFor(engine, class, spec)) do includeDefinitionIDs(allowed, definition) end
+    state.allowedSpellIDs, state.classToken, state.specID = allowed, class, spec
+    state.mobility.known, state.mobility.spells, state.mobility.overrides = known, spells, overrides or {}
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    return addon, state, engine
+end
+
+test("free-return talents stay explicitly unsupported without false exhaustion or queries and recover when removed", function()
+    for _, fixture in ipairs({
+        { class = "ROGUE", spec = 261, id = 36554, talent = 454433, family = "rogue_shadowstep" },
+        { class = "ROGUE", spec = 260, id = 195457, talent = 454433, family = "rogue_grappling_hook" },
+        { class = "EVOKER", spec = 1467, id = 357210, talent = 1266151, family = "evoker_deep_breath" },
+    }) do
+        local addon, state = selectGenericClass(fixture.class, fixture.spec, { [fixture.id] = true },
+            { [fixture.id] = { charges = 0, maxCharges = 1, chargeStart = 90, chargeDuration = 20 } })
+        equal(addon:GetMobilityStatus(fixture.family).status, "Depleted", "ordinary learned form reads real depletion")
+        local frame, saved = addon.reminderFrames.live[fixture.family], copy(addon:GetMobilityConfig())
+        state.mobility.known[fixture.talent] = true
+        local reads = #state.spellReads
+        syncEvent(state, "TRAIT_CONFIG_UPDATED")
+        equal(addon:GetMobilityStatus(fixture.family).status, "Unsupported", "known conditional-free-return talent has exact blocker")
+        equal(#state.spellReads, reads, "no base cooldown queried as substitute for free return availability")
+        equal(frame.durationBinding.enabled, false, "obsolete outbound timer detached")
+        equal(textFor(addon, fixture.family), "", "no misleading No-skill reminder during unsupported mechanism")
+        options(addon)
+        truthy(addon:SetPreview("single", fixture.family), "clearly labeled external sample remains usable for styling")
+        addon:StopPreview()
+        equal(addon:GetMobilityStatus(fixture.family).status, "Unsupported", "preview never upgrades unsupported live status")
+        state.mobility.known[fixture.talent] = nil
+        syncEvent(state, "TRAIT_CONFIG_UPDATED")
+        equal(addon:GetMobilityStatus(fixture.family).status, "Depleted", "removing blocked talent resynchronizes current native state")
+        same(addon:GetMobilityConfig(), saved, "mechanism transition never clears saved configuration")
+    end
+end)
+
+test("temporary return-stage overrides noticed on cooldown events never leave stale outbound depletion", function()
+    local addon, state = selectGenericClass("MONK", 269, { [101545] = true, [115057] = true },
+        { [101545] = { cooldownStart = 94, cooldownDuration = 30 }, [115057] = { cooldownStart = 100, cooldownDuration = 0 } },
+        { [115057] = 101545 })
+    equal(addon:GetMobilityStatus("monk_flying_serpent_kick").status, "Depleted", "outbound learned stage initially active")
+    state.mobility.overrides = { [101545] = 115057 }
+    local before = #state.spellReads
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(textFor(addon, "monk_flying_serpent_kick"), "", "cooldown-only replacement immediately clears stale outbound alert")
+    equal(addon:GetMobilityStatus("monk_flying_serpent_kick").status, "Unsupported", "current landing-stage blocker is reported")
+    equal(#state.spellReads, before, "return stage does not query old outbound or landing cooldown as exhaustion")
+    state.mobility.overrides = { [115057] = 101545 }
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(addon:GetMobilityStatus("monk_flying_serpent_kick").status, "Depleted", "cooldown-only return to outbound restores monitoring")
+    equal(textFor(addon, "monk_flying_serpent_kick"), "No Flying Serpent Kick\n24.0", "restore uses actual existing timer")
+    state.mobility.overrides[101545] = 999999
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(textFor(addon, "monk_flying_serpent_kick"), "", "unmapped transient override cannot show stale timer")
+    local current = addon:GetMobilityStatuses()[1]
+    truthy(current.status == "Unsupported" or current.status == "Unknown", "unmapped current stage has honest public diagnostic")
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(addon.mobilityCooldownWatching, true, "temporarily unresolved learned family retains bounded event recovery")
+    state.mobility.overrides = {}
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(addon:GetMobilityStatus("monk_flying_serpent_kick").status, "Depleted", "native base identity wins when temporary return ends")
+    equal(textFor(addon, "monk_flying_serpent_kick"), "No Flying Serpent Kick\n24.0", "unknown transient stage recovers without talent event or polling")
+end)
+
+test("conditional returns cannot activate from learned spell alone and shared Recall never invents its source", function()
+    local addon, state = selectGenericClass("EVOKER", 1468, { [371838] = true }, {})
+    equal(#addon:GetMobilityEntries(), 0, "learned shared return without native base override cannot claim either flight")
+    equal(addon:GetRuntimeLoadDiagnostics().activeBindings, 0, "source-unknown return cannot create a cooldown timer")
+    state.mobility.known[359816] = true
+    state.mobility.overrides[359816] = 371838
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(#addon:GetMobilityEntries(), 1, "native Dream Flight override resolves exactly one return family")
+    equal(addon:GetMobilityEntry().id, "evoker_dream_flight", "known native family identity retains Dream Flight position")
+    equal(addon:GetMobilityStatus("evoker_dream_flight").status, "Unsupported", "return mechanism still honestly lacks native depletion semantics")
+    equal(state.realReads, 0, "no shared-return cooldown or unrelated Deep Breath query")
+    state.mobility.spells[359816] = { cooldownStart = 93, cooldownDuration = 120 }
+    state.mobility.overrides = {}
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(addon:GetMobilityEntry().spellID, 359816, "current native base override takes precedence despite learned Recall")
+    equal(textFor(addon, "evoker_dream_flight"), "No Dream Flight\n113.0", "restored native flight starts no simulated timer")
+end)
+
+test("temporary restricted active identity clears its timer and recovers through existing cooldown subscriptions", function()
+    local addon, state = selectGenericClass("MONK", 269, { [101545] = true },
+        { [101545] = { cooldownStart = 95, cooldownDuration = 30 } })
+    local frame = addon.reminderFrames.live.monk_flying_serpent_kick
+    state.mobility.overrides[101545] = secret(115057)
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(textFor(addon, "monk_flying_serpent_kick"), "", "restricted current override cannot reuse previous identity")
+    equal(frame.durationBinding.enabled, false, "restricted identity detaches native timer")
+    equal(addon:GetMobilityStatus().status, "Restricted", "opaque identity has explicit safe diagnostic")
+    state.mobility.overrides = {}
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(textFor(addon, "monk_flying_serpent_kick"), "No Flying Serpent Kick\n25.0", "public identity recovery resumes current real state")
+    equal(#state.errors, 0, "restricted override never enters comparison arithmetic or string operations")
+end)
+
+test("authoritative unlearned base override cannot leave one old learned DH variant falsely active", function()
+    local addon, state = selectGenericClass("DEMONHUNTER", 577, { [195072] = true },
+        { [195072] = { charges = 0, maxCharges = 1, chargeStart = 96, chargeDuration = 10 } },
+        { [344865] = 195072 })
+    equal(addon:GetMobilityEntry().spellID, 195072, "learned spec variant resolves from unlearned generic base")
+    equal(textFor(addon, "demonhunter_movement"), "No Fel Rush\n6.0", "initial real current variant timer")
+    for _, step in ipairs({ { 999999, "Unsupported" }, { 427785, "Unknown" } }) do
+        state.mobility.overrides[344865] = step[1]
+        local reads = #state.spellReads
+        syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+        equal(textFor(addon, "demonhunter_movement"), "", "changed base cannot fall back to old variant self-override")
+        equal(addon:GetMobilityStatus().status, step[2], "unknown definition vs mapped unlearned replacement has exact diagnostic")
+        equal(#state.spellReads, reads, "stale former variant never reaches cooldown engine")
+        equal(addon.mobilityCooldownWatching, true, "temporarily unresolved family retains bounded event recovery")
+    end
+    state.mobility.overrides[344865] = 195072
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(addon:GetMobilityEntry().spellID, 195072, "authoritative base can restore supported current variant")
+    equal(textFor(addon, "demonhunter_movement"), "No Fel Rush\n6.0", "real original timer resumes without manual state")
+end)
+
+test("Mage additional conditional returns remain honest unsupported entries and cannot replace tested Blink Shimmer", function()
+    local _, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 95, chargeDuration = 20, secretCharges = true,
+            secretDuration = true, cooldownStart = 100, cooldownDuration = 20 })
+    local main = addon:GetMobilityEntry()
+    local frame = currentLive(addon)
+    state.mobility.known[342245], state.mobility.known[389713] = true, true
+    state.mobility.overrides = { [1953] = 212653 }
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(addon:GetMobilityEntry(), main, "existing Mage mobility compatibility entry remains first")
+    equal(currentLive(addon), frame, "existing tested Mage native frame reused")
+    equal(#addon:GetMobilityEntries(), 3, "Mage primary plus two explicitly conditional return families")
+    equal(addon:GetMobilityStatus("mage_alter_time").status, "Unsupported", "Alter Time cannot use initial cast cooldown as return availability")
+    equal(addon:GetMobilityStatus("mage_reflection").status, "Unsupported", "Reflection diagnostic uses target build identity")
+    equal(nativeText(addon), "No Shimmer\n15.0", "new definitions cannot overwrite accepted secret Shimmer pipeline")
+    for _, query in ipairs(state.spellReads) do
+        truthy(query.id ~= 342245 and query.id ~= 342247 and query.id ~= 389713, "blocked returns never read misleading duration")
+    end
+    state.mobility.known[342247] = true; state.mobility.overrides[342245] = 342247
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(addon:GetMobilityStatus("mage_alter_time").status, "Unsupported", "Alter Time return stage retains exact blocker")
+    equal(#addon:GetMobilityEntries(), 3, "replacement does not duplicate Alter Time family")
+    options(addon); addon:SetPreview("single", "mage_reflection")
+    equal(nativeText(addon), "No Shimmer\n15.0", "preview of separate return family cannot hide actual Shimmer")
+    addon:StopPreview(); state:nativeTick()
+    equal(nativeText(addon), "No Shimmer\n15.0", "stopping sample preserves primary real countdown")
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

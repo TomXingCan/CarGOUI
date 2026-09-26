@@ -1,8 +1,8 @@
 ## Interface: 120100
 ## Title: CarGOUI
-## Notes: Mage Blink/Shimmer mobility reminders, settings and separate simulated previews.
+## Notes: Class Mobility cooldown reminders, settings and separate simulated previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.10
+## Version: 0.1.0-alpha.11
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua

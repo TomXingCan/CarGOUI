@@ -10,9 +10,16 @@ end
 function addon:GetRuntimeLoadDiagnostics()
     local result = { modules = self:GetModuleLoadReport(), events = self:GetEventDiagnostics(),
         liveFrames = 0, previewFrames = 0, allocatedBindings = 0, activeBindings = 0,
-        activeSkills = self.mobilityTracking and self.mobilityState and self.mobilityState.spellID and 1 or 0,
+        activeSkills = 0, unavailableSkills = 0,
         pendingTasks = self.mobilityPending and 1 or 0,
         previewMode = self.previewState and self.previewState.mode or "off" }
+    for _, state in ipairs(self.mobilityStates or {}) do
+        if self.mobilityTracking and state.entry and state.spellID then
+            if state.status == "Restricted" or state.status == "Unsupported" or state.status == "Unknown" then
+                result.unavailableSkills = result.unavailableSkills + 1
+            else result.activeSkills = result.activeSkills + 1 end
+        end
+    end
     for channel, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
             if channel == "live" then result.liveFrames = result.liveFrames + 1
@@ -54,7 +61,7 @@ function addon:GetLoadDiagnosticsText()
     table.sort(eventNames)
     return table.concat({
         "Files: CarGOUI loaded; CarGOUI_Data " .. modules.fileStatus,
-        "Data TOC code files loaded=" .. modules.loadedDataFiles .. "; class-definition files=" .. modules.loadedClassFiles,
+        "Loaded Data package TOC inventory: code files=" .. modules.loadedDataFiles .. "; class-definition files=" .. modules.loadedClassFiles,
         "Registered adapter definitions=" .. modules.registeredAdapters
             .. "; selected adapter=" .. Public(modules.activeAdapterClass),
         "Retired CarGOUI_Mage: " .. ((modules.retiredMageLoaded or modules.retiredMageRegistered)
@@ -66,7 +73,8 @@ function addon:GetLoadDiagnosticsText()
         "Loading boundary: every file listed in CarGOUI_Data.toc loads together; class subdirectories are not independent LoD addons.",
         "Configuration loaded: " .. modules.configuration,
         "Configuration access: only current class Mobility / requested current spec Proc is normalized; legacy backup remains loaded.",
-        "Runtime: active skills=" .. report.activeSkills .. ", pending event tasks=" .. report.pendingTasks,
+        "Runtime: active skills=" .. report.activeSkills .. ", unavailable selected skills=" .. report.unavailableSkills
+            .. ", pending event tasks=" .. report.pendingTasks,
         "Subscriptions: native events=" .. events.events .. ", callbacks=" .. events.callbacks,
         "Subscriptions by event: " .. table.concat(eventNames, ", "),
         "Cached frames (may be inactive): live=" .. report.liveFrames .. ", preview=" .. report.previewFrames,

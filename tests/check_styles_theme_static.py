@@ -47,9 +47,14 @@ assert 'C_AddOns.LoadAddOn("CarGOUI_Data")' in loader
 assert not re.search(r'C_AddOns\.LoadAddOn\("CarGOUI_Mage"\)', loader)
 data_entries = [line.strip().replace("\\", "/") for line in mage_toc.splitlines()
                 if line.strip() and not line.strip().startswith("#")]
-assert data_entries == ["Bootstrap.lua", "Classes/Mage/Bootstrap.lua", "Classes/Mage/MobilityEntries.lua",
-                        "Classes/Mage/PreviewEntries.lua", "Classes/Mage/SpellState.lua",
-                        "Classes/Mage/Register.lua", "Complete.lua"]
+assert len(data_entries) == len(set(data_entries)), "Data TOC has duplicate business files"
+assert data_entries[0] == "Bootstrap.lua" and data_entries[-1] == "Complete.lua", "Registration becomes complete only after all declarations"
+actual_data_files = sorted(path.relative_to(mage_root).as_posix() for path in mage_root.rglob("*.lua"))
+assert sorted(data_entries) == actual_data_files, "Data TOC and actual shipped business files must match exactly"
+for name in data_entries:
+    path = (mage_root / name).resolve()
+    assert path.is_relative_to(mage_root.resolve()) and path.suffix == ".lua", "Unsafe business file declaration"
+assert "Classes/Mage/SpellState.lua" in data_entries, "Validated Mage spell reader must remain shipped"
 assert "RegisterClassAdapter" in loader and "activeClassAdapter" in loader
 assert not (root / "Modules/CarGOUI_Mage/CarGOUI_Mage.toc").exists()
 print("PASS One native Data package registers isolated adapters and distinguishes loaded files from current activation")
