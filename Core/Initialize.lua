@@ -16,7 +16,7 @@ function addon:Enable()
     self:CreateDisplay()
     self:ApplySettings()
     self.enabled = true
-    self:Print("Alpha 0.1 loaded. Type /cui for settings and simulated Test Mode.")
+    self:Print("Alpha 0.1 loaded. Type /cui for Mobility settings and separate Test Mode.")
 end
 
 local function OnPlayerLogin(self)

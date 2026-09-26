@@ -46,6 +46,7 @@ function addon:UpdatePreviewGuidance(frame, entry, enabled)
         return
     end
     local guide = frame.guidance or CreateGuidance(frame, entry)
+    guide.label:SetText("TEST: " .. entry.label)
     -- Typography scaling must not change the size of the stock region guide.
     guide:SetScale(1 / self.db.scale)
     guide:ClearAllPoints()
@@ -71,6 +72,11 @@ local function OnSpecializationChanged(self, _, unit)
     if self.RefreshOptions then self:RefreshOptions() end
 end
 
+local function OnPreviewCombat(self)
+    self:StopPreview()
+    if self.RefreshMobilityOptions then self:RefreshMobilityOptions() end
+end
+
 function addon:GetPreviewState()
     return self.previewState
 end
@@ -82,6 +88,9 @@ function addon:StopPreview()
         if frame.guidance then frame.guidance:Hide() end
     end
     self:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnSpecializationChanged)
+    self:UnregisterEvent("PLAYER_REGEN_DISABLED", OnPreviewCombat)
+    -- Re-query the live APIs, not a pre-preview snapshot. Options may be closed.
+    if self.RefreshMobility then self:RefreshMobility() end
 end
 
 function addon:RefreshPreview()
@@ -108,10 +117,14 @@ function addon:RefreshPreview()
             self:RenderReminder(frame, entry, entry.sample, true)
         end
     end
+    if self.RenderMobilityState then self:RenderMobilityState() end
 end
 
 function addon:SetPreview(mode, entryId)
     if mode == "off" then self:StopPreview(); return true end
+    if InCombatLockdown() then
+        return false, "Test Mode is unavailable in combat. Live Mobility remains active."
+    end
     if mode ~= "single" and mode ~= "all" then
         return false, "Choose a valid Test Mode."
     end
@@ -125,6 +138,7 @@ function addon:SetPreview(mode, entryId)
     end
     self.previewState.mode, self.previewState.entryId = mode, entry.id
     self:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnSpecializationChanged)
+    self:RegisterEvent("PLAYER_REGEN_DISABLED", OnPreviewCombat)
     self:RefreshPreview()
     return true
 end

@@ -13,6 +13,7 @@ end
 -- The same validators normalize saved data and accept edits from both UI and slash commands.
 local settingsSchema = {
     enabled = BooleanSetting,
+    mobility = { enabled = BooleanSetting },
     position = {
         x = NumberSetting(addon.limits.offset, "X offset must be a number from -10000 to 10000."),
         y = NumberSetting(addon.limits.offset, "Y offset must be a number from -10000 to 10000."),

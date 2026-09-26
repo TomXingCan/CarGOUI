@@ -49,6 +49,12 @@ addon.previewEntries = {
     Proc(64, "mage_frost_brain_freeze_top", "Brain Freeze - top region", 190446, 450930, "TOP"),
 }
 
+-- Additive configuration ID for players who have not selected a specialization.
+local lowLevel = Mobility(nil, "unspecialized")
+lowLevel.id = "mage_unspecialized_mobility"
+lowLevel.label = "Blink / Shimmer - mobility sample"
+addon.previewEntries[#addon.previewEntries + 1] = lowLevel
+
 function addon:GetPreviewEntries()
     local _, class = UnitClass("player")
     local api = C_SpecializationInfo
@@ -59,7 +65,18 @@ function addon:GetPreviewEntries()
     local result = {}
     for _, entry in ipairs(self.previewEntries) do
         if entry.class == class and entry.specID == specID then
-            result[#result + 1] = entry
+            if entry.kind == "mobility" then
+                -- The sample remains fixed, but its static name follows identification.
+                local status = self.GetMobilityStatus and self:GetMobilityStatus()
+                local name = status and status.spellName or "Shimmer"
+                local sample = {}
+                for key, value in pairs(entry) do sample[key] = value end
+                sample.label = name .. " - mobility sample"
+                sample.sample = { message = "No " .. name, timer = "8.0" }
+                result[#result + 1] = sample
+            else
+                result[#result + 1] = entry
+            end
         end
     end
     return result

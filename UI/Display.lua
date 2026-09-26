@@ -48,7 +48,7 @@ end
 -- Shared rendering boundary for sample state now and real reminder state later.
 -- The caller owns content; this function never queries or stores live state.
 -- Proc output is only a timer. Labels/textures/crosshairs belong to Test Mode.
-function addon:RenderReminder(frame, entry, content, testMode)
+function addon:LayoutReminder(frame, entry)
     local db = self.db
     local setting = db.reminders and db.reminders[entry.id]
     local position = setting and setting.position or { x = 0, y = 0 }
@@ -59,6 +59,11 @@ function addon:RenderReminder(frame, entry, content, testMode)
     frame:SetPoint("CENTER", UIParent, "CENTER", x / db.scale, y / db.scale)
 
     self:ApplyFontSettings(frame.text)
+end
+
+function addon:RenderReminder(frame, entry, content, testMode)
+    self:LayoutReminder(frame, entry)
+    local db = self.db
     local text = content.timer or ""
     if entry.kind == "mobility" and content.message then
         text = content.message .. "\n" .. text
@@ -74,5 +79,53 @@ end
 
 function addon:ApplySettings()
     if not self.db then return end
+    if self.ConfigureMobility then self:ConfigureMobility() end
     if self.RefreshPreview then self:RefreshPreview() end
+end
+
+-- Live durations never enter RenderReminder's Lua string/measurement path.
+-- The native binding owns all time sampling, formatting and expiration text.
+function addon:RenderLiveMobility(entry, spellName, duration)
+    local frame = self:AcquireReminderFrame(entry, "live")
+    frame.mobilityOwned = true
+    self:LayoutReminder(frame, entry)
+    local size = self.db.font.size
+    frame:SetSize(size * 16, size * 3)
+    frame.text:SetSize(size * 16, size * 3)
+    if not frame.durationBinding then
+        frame.durationBinding = C_DurationUtil.CreateDurationTextBinding()
+    end
+    if not self.mobilityFormatter then
+        self.mobilityFormatter = C_StringUtil.CreateNumericRuleFormatter()
+        self.mobilityFormatter:AddBreakpoint({ threshold = 0, step = 0.1,
+            rounding = Enum.NumericRuleFormatRounding.Up, format = "%.1f" })
+    end
+    local binding = frame.durationBinding
+    binding:SetFontString(frame.text)
+    binding:SetTextFormat("No " .. spellName .. "\n{}", {
+        { property = Enum.DurationTextBindingProperty.RemainingDuration, formatter = self.mobilityFormatter },
+    })
+    binding:SetTimeModifier(Enum.DurationTimeModifier.RealTime)
+    binding:SetUpdateInterval(0.1)
+    binding:SetExpiredText("")
+    binding:SetZeroDurationText("")
+    binding:SetDuration(duration)
+    binding:Enable()
+    binding:UpdateFontString()
+    frame:Show()
+    return frame
+end
+
+function addon:HideLiveMobility()
+    for _, frame in pairs(self.reminderFrames and self.reminderFrames.live or {}) do
+        if frame.mobilityOwned then
+            frame:Hide()
+            if frame.durationBinding then
+                frame.durationBinding:Disable()
+                frame.durationBinding:SetToDefaults()
+            end
+            -- Overwrite rather than inspect any text supplied by the engine.
+            frame.text:SetText("")
+        end
+    end
 end

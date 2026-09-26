@@ -47,6 +47,7 @@ end
 local function ClearEdits(panel)
     panel.positionDirty = false
     panel.entryPositionDirty = false
+    panel.mobilityPositionDirty = false
     for _, edit in ipairs(panel.editBoxes) do
         edit.dirty = false
         edit:ClearFocus()
@@ -128,6 +129,19 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
             end
         end
     end
+    function dropdown:SetEntryLabel(value, label)
+        for _, entry in ipairs(entries) do
+            if entry.value == value then
+                if entry.label == label then return end
+                entry.label = label
+                for _, choice in ipairs(self.choices) do
+                    if choice.value == value then choice:SetText(label); break end
+                end
+                if self.value == value then self:SetText(label .. "  v") end
+                return
+            end
+        end
+    end
     function dropdown:FilterChoices(allowed)
         local count = 0
         for _, choice in ipairs(self.choices) do
@@ -198,6 +212,121 @@ local function SetSlider(slider, value)
     end
 end
 
+local function InCombat()
+    return InCombatLockdown and InCombatLockdown() or false
+end
+
+local function SetPublicText(control, text)
+    if control:GetText() ~= text then control:SetText(text) end
+end
+
+local function RefreshPreviewControls(panel)
+    local controls, selected, combat = panel.controls, panel.selectedPreviewEntry, InCombat()
+    controls.previewSingle:SetEnabled(selected ~= nil and not combat)
+    controls.previewAll:SetEnabled(selected ~= nil and not combat)
+    local state = addon.previewState
+    local mode = state and state.mode or "off"
+    controls.previewStop:SetEnabled(mode ~= "off")
+    SetPublicText(panel.previewStatus, combat and L.previewCombat or (not selected and L.noEntries
+        or (mode == "off" and L.previewOff or (not addon.db.enabled and L.previewHidden
+        or string.format(L.previewRunning, mode == "all" and "all defined entries for this spec" or "selected entry")))))
+end
+
+-- This method is safe to call from a state-change event: it only updates public
+-- Mobility labels and existing controls, never the title, layout or other pages.
+function addon:RefreshMobilityOptions()
+    local panel = self.optionsFrame
+    if not panel or not panel:IsShown() then return end
+    local controls = panel.controls
+    local state = self.GetMobilityStatus and self:GetMobilityStatus() or { status = "Unsupported" }
+    local entry = self.GetMobilityEntry and self:GetMobilityEntry() or nil
+    local id = entry and entry.id
+    if panel.mobilityEntryId ~= id then
+        panel.mobilityEntryId = id
+        panel.mobilityPositionDirty = false
+        controls.mobilityX:ClearFocus()
+        controls.mobilityY:ClearFocus()
+    end
+    controls.mobilityEnabled:SetChecked(self.db.mobility.enabled)
+    local spellName = state.spellName or L.mobilityNoSpell
+    SetPublicText(panel.mobilitySpell, string.format(L.mobilitySpell, spellName))
+    if id and state.spellName then
+        controls.previewEntry:SetEntryLabel(id, state.spellName .. " - mobility sample")
+    end
+    local reason = state.reason or ""
+    if not self.db.enabled then reason = L.mobilityDisabled end
+    SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, state.status or "Unknown") .. "\n" .. reason)
+    local position = id and self.db.reminders[id] and self.db.reminders[id].position
+    controls.mobilityX:SetEnabled(position ~= nil)
+    controls.mobilityY:SetEnabled(position ~= nil)
+    if not panel.mobilityPositionDirty then
+        SetPublicText(controls.mobilityX, position and string.format("%g", position.x) or "")
+        SetPublicText(controls.mobilityY, position and string.format("%g", position.y) or "")
+    end
+    local combat = InCombat()
+    controls.mobilityPreview:SetEnabled(id ~= nil and state.spellID ~= nil and not combat)
+    controls.mobilityStop:SetEnabled(self.previewState and self.previewState.mode ~= "off")
+    SetPublicText(panel.mobilityPreviewNote, combat and L.previewCombat or "TEST uses fixed samples, never live timing.")
+    RefreshPreviewControls(panel)
+end
+
+function addon:ShowMobilityDiagnostics()
+    local panel = self.optionsFrame
+    if not panel or not panel:IsShown() then return end
+    local dialog = panel.diagnosticsFrame
+    if not dialog then
+        dialog = CreateFrame("Frame", nil, panel, "BackdropTemplate")
+        dialog:Hide()
+        dialog:SetSize(660, 430)
+        dialog:SetPoint("CENTER", panel, "CENTER", 0, 0)
+        dialog:SetFrameLevel(panel:GetFrameLevel() + 30)
+        dialog:EnableMouse(true)
+        Backdrop(dialog, 0.045, 0.06, 0.075)
+        Label(dialog, L.diagnosticsTitle, 20, -16, 620, 24, "GameFontNormalLarge")
+        Label(dialog, L.diagnosticsHint, 20, -48, 620, 36)
+        local scroll = CreateFrame("ScrollFrame", nil, dialog, "UIPanelScrollFrameTemplate")
+        scroll:SetPoint("TOPLEFT", dialog, "TOPLEFT", 20, -88)
+        scroll:SetSize(594, 288)
+        local edit = CreateFrame("EditBox", nil, scroll)
+        edit:SetSize(588, 288)
+        edit:SetMultiLine(true)
+        edit:SetAutoFocus(false)
+        edit:SetMaxLetters(0)
+        edit:SetFontObject("ChatFontNormal")
+        edit:SetTextInsets(4, 4, 4, 4)
+        edit:SetJustifyH("LEFT")
+        edit:SetJustifyV("TOP")
+        scroll:SetScrollChild(edit)
+        dialog.editBox = edit
+        edit:SetScript("OnEscapePressed", function() dialog:Hide() end)
+        edit:SetScript("OnTextChanged", function(self, userInput)
+            -- Read-only snapshot while retaining normal selection and Ctrl+C.
+            if userInput then self:SetText(dialog.snapshot or ""); self:HighlightText() end
+        end)
+        local function RefreshSnapshot()
+            dialog.snapshot = addon.GetMobilityDiagnostics and addon:GetMobilityDiagnostics() or L.diagnosticsUnavailable
+            local _, lines = string.gsub(dialog.snapshot, "\n", "")
+            edit:SetHeight(math.max(288, (lines + 1) * 20))
+            edit:SetText(dialog.snapshot)
+            edit:SetFocus()
+            edit:HighlightText()
+        end
+        dialog.RefreshSnapshot = RefreshSnapshot
+        dialog.refresh = Button(dialog, L.diagnosticsRefresh, 20, -386, 160, RefreshSnapshot)
+        dialog.selectAll = Button(dialog, L.diagnosticsSelect, 192, -386, 140, function()
+            edit:SetFocus(); edit:HighlightText()
+        end)
+        dialog.close = Button(dialog, L.close, 520, -386, 120, function() dialog:Hide() end)
+        dialog:SetScript("OnHide", function() edit:ClearFocus() end)
+        panel.diagnosticsFrame = dialog
+    end
+    CloseMenus(panel)
+    -- Copying diagnostics should not discard numbers the user is still editing.
+    for _, edit in ipairs(panel.editBoxes) do edit:ClearFocus() end
+    dialog:Show()
+    dialog.RefreshSnapshot()
+end
+
 function addon:RefreshOptions()
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() then return end
@@ -229,8 +358,6 @@ function addon:RefreshOptions()
     local selected = panel.selectedPreviewEntry
     controls.previewEntry:FilterChoices(allowed)
     controls.previewEntry:SelectValue(selected)
-    controls.previewSingle:SetEnabled(selected ~= nil)
-    controls.previewAll:SetEnabled(selected ~= nil)
     controls.entryReset:SetEnabled(selected ~= nil)
     if selected then controls.entryX:Enable(); controls.entryY:Enable()
     else controls.entryX:Disable(); controls.entryY:Disable() end
@@ -239,12 +366,7 @@ function addon:RefreshOptions()
         controls.entryX:SetText(position and string.format("%g", position.x) or "")
         controls.entryY:SetText(position and string.format("%g", position.y) or "")
     end
-    local state = self.previewState
-    local mode = state and state.mode or "off"
-    controls.previewStop:SetEnabled(mode ~= "off")
-    panel.previewStatus:SetText(not selected and L.noEntries or (mode == "off" and L.previewOff
-        or (not db.enabled and L.previewHidden or string.format(L.previewRunning,
-            mode == "all" and "all defined entries for this spec" or "selected entry"))))
+    self:RefreshMobilityOptions()
 end
 
 function addon:ApplyOptionsPosition(force)
@@ -275,6 +397,7 @@ function addon:SelectOptionsCategory(key)
     local panel = self.optionsFrame
     if not panel or not panel.pages[key] then return end
     CloseMenus(panel)
+    if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
     ClearEdits(panel)
     CancelReset(panel)
     panel.activeCategory = key
@@ -294,6 +417,10 @@ local function OnOptionsSpecializationChanged(self, _, unit)
     if unit and unit ~= "player" then return end
     CloseMenus(self.optionsFrame)
     self:RefreshOptions()
+end
+
+local function OnOptionsCombatChanged(self)
+    self:RefreshMobilityOptions()
 end
 
 function addon:CreateOptions()
@@ -324,7 +451,7 @@ function addon:CreateOptions()
     divider:SetPoint("TOPLEFT", panel, "TOPLEFT", 192, -82)
     divider:SetSize(1, 380)
 
-    for _, key in ipairs({ "general", "typography", "preview" }) do
+    for _, key in ipairs({ "general", "typography", "preview", "mobility" }) do
         local page = CreateFrame("Frame", nil, panel)
         page:SetPoint("TOPLEFT", panel, "TOPLEFT", 216, -88)
         page:SetSize(480, 374)
@@ -471,15 +598,65 @@ function addon:CreateOptions()
     Label(page, L.entryHint, 0, -266, 470, 44)
     panel.previewStatus = Label(page, "", 0, -324, 470, 48)
 
+    local mobility = panel.pages.mobility
+    panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,
+        function(value) return { mobility = { enabled = value } } end)
+    panel.mobilitySpell = Label(mobility, "", 0, -72, 470, 22, "GameFontNormal")
+    panel.mobilityStatus = Label(mobility, "", 0, -98, 470, 48)
+    Label(mobility, L.mobilityPosition, 0, -152, 470, 22)
+    Label(mobility, L.entryX, 0, -178, 226, 22, "GameFontNormal")
+    Label(mobility, L.entryY, 248, -178, 226, 22, "GameFontNormal")
+    panel.controls.mobilityX = EditBox(panel, mobility, 0, -202, 226)
+    panel.controls.mobilityY = EditBox(panel, mobility, 248, -202, 226)
+    local function CommitMobilityPosition()
+        local id = panel.mobilityEntryId
+        if not id then return end
+        local x, y = tonumber(panel.controls.mobilityX:GetText()), tonumber(panel.controls.mobilityY:GetText())
+        panel.mobilityPositionDirty = false
+        if Submit(panel, { reminders = { [id] = { position = { x = x or false, y = y or false } } } }, L.invalidPosition) then
+            panel.controls.mobilityX:ClearFocus()
+            panel.controls.mobilityY:ClearFocus()
+        else panel.mobilityPositionDirty = true end
+    end
+    for _, edit in ipairs({ panel.controls.mobilityX, panel.controls.mobilityY }) do
+        edit:SetScript("OnEnterPressed", CommitMobilityPosition)
+        edit:SetScript("OnTextChanged", function(_, userInput)
+            if userInput and not panel.refreshing then panel.mobilityPositionDirty = true end
+        end)
+    end
+    panel.controls.mobilityGeneral = Button(mobility, L.mobilityGeneral, 0, -242, 226,
+        function() addon:SelectOptionsCategory("general") end)
+    panel.controls.mobilityTypography = Button(mobility, L.mobilityTypography, 248, -242, 226,
+        function() addon:SelectOptionsCategory("typography") end)
+    panel.controls.mobilityPreview = Button(mobility, L.mobilityPreview, 0, -282, 226, function()
+        local entry = addon.GetMobilityEntry and addon:GetMobilityEntry()
+        local ok, message = false, L.mobilityNoSpell
+        if entry then ok, message = addon:SetPreview("single", entry.id) end
+        addon:RefreshMobilityOptions()
+        if ok == false then Feedback(panel, message or L.noEntries, true) end
+    end)
+    panel.controls.mobilityStop = Button(mobility, L.previewStop, 248, -282, 226, function()
+        addon:StopPreview()
+        addon:RefreshMobilityOptions()
+    end)
+    panel.controls.mobilityDiagnostics = Button(mobility, L.mobilityDiagnostics, 0, -326, 200,
+        function() addon:ShowMobilityDiagnostics() end)
+    panel.mobilityPreviewNote = Label(mobility, "", 220, -326, 254, 46)
+
     panel:SetScript("OnShow", function()
         -- Re-evaluate only when opened; no frame or timer keeps the panel updating.
         panel:SetScale(math.min(1, UIParent:GetWidth() / 752, UIParent:GetHeight() / 592))
         addon:ApplyOptionsPosition(true)
         addon:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
+        addon:RegisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
+        addon:RegisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
     panel:SetScript("OnHide", function()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
+        addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
+        addon:UnregisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)
+        if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
         addon:StopPreview()
         addon:StopTitleAnimation()
         addon:SaveOptionsPosition()

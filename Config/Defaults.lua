@@ -1,8 +1,9 @@
 local _, addon = ...
 
 addon.defaults = {
-    schemaVersion = 2,
+    schemaVersion = 3,
     enabled = true,
+    mobility = { enabled = true },
     position = { x = 0, y = 0 },
     font = {
         face = "Fonts\\FRIZQT__.ttf",

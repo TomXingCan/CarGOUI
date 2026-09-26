@@ -51,6 +51,29 @@ local function same(actual, expected, label)
     end
 end
 
+-- Lua 5.1 cannot reproduce WoW's secret primitives or taint rules. Tokens catch
+-- accidental string/arithmetic/ordering use; native mocks alone can unwrap them.
+-- In particular Lua truth tests and unlike-type equality are not interceptable.
+local secretValues = setmetatable({}, { __mode = "k" })
+local function secret(value)
+    local function forbidden() error("Attempt to inspect an opaque secret token", 2) end
+    local token = setmetatable({}, { __tostring = forbidden, __add = forbidden,
+        __sub = forbidden, __mul = forbidden, __div = forbidden, __mod = forbidden,
+        __pow = forbidden, __unm = forbidden, __lt = forbidden, __le = forbidden,
+        __concat = forbidden, __eq = forbidden })
+    secretValues[token] = { value }
+    return token
+end
+
+local function isSecret(value)
+    return type(value) == "table" and secretValues[value] ~= nil
+end
+
+local function nativeValue(value)
+    if isSecret(value) then return secretValues[value][1] end
+    return value
+end
+
 local function setup(saved, loggedIn, client)
     client = client or {}
     local env = setmetatable({}, { __index = _G })
@@ -68,7 +91,9 @@ local function setup(saved, loggedIn, client)
     local state = { frames = {}, errors = {}, messages = {}, loggedIn = loggedIn or false,
         fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, masks = {}, fontStrings = {},
         specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0,
-        inCombat = client.inCombat or false }
+        inCombat = client.inCombat or false, clock = 100, pendingTimers = {},
+        bindings = {}, formatters = {}, spellReads = {}, liveMeasurements = 0 }
+    if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
         state.messages[#state.messages + 1] = message
@@ -80,6 +105,8 @@ local function setup(saved, loggedIn, client)
     env.InCombatLockdown = function() return state.inCombat end
     env.GetBuildInfo = function() return "12.1.0", "99999", "Sep 26 2026", 120100 end
     env.GetLocale = function() return client.locale or "enUS" end
+    env.GetTime = function() return state.clock end
+    env.issecretvalue = isSecret
     env.UnitClass = function() return state.classToken, state.classToken, state.classToken == "MAGE" and 8 or 1 end
     env.GetSpecialization = function() return state.specID and 2 or nil end
     env.GetSpecializationInfo = function() return state.specID, "Mock specialization" end
@@ -92,9 +119,177 @@ local function setup(saved, loggedIn, client)
     env.C_UnitAuras = { GetPlayerAuraBySpellID = noRealRead, GetAuraDataByIndex = noRealRead,
         GetAuraDataBySpellName = noRealRead }
     env.C_Spell = { GetSpellCooldown = noRealRead, GetSpellCharges = noRealRead }
-    env.C_Timer = { After = function() error("Options must not schedule polling timers") end,
-        NewTicker = function() error("Options must not schedule polling tickers") end,
-        NewTimer = function() error("Options must not schedule polling timers") end }
+    env.C_Timer = { After = function() error("No untracked scheduled work") end,
+        NewTicker = function() error("Mobility and Options must not schedule polling tickers") end,
+        NewTimer = function(delay, callback)
+            equal(delay, 0, "only next-tick event coalescing timers are permitted")
+            local timer = { callback = callback, cancelled = false }
+            function timer:Cancel() self.cancelled = true end
+            function timer:IsCancelled() return self.cancelled end
+            state.pendingTimers[#state.pendingTimers + 1] = timer
+            state.timers = state.timers + 1
+            return timer
+        end }
+    function state:flushTimers()
+        local pending = self.pendingTimers
+        self.pendingTimers = {}
+        for _, timer in ipairs(pending) do
+            if not timer.cancelled then timer.callback(); timer.cancelled = true end
+        end
+        equal(#self.pendingTimers, 0, "event merge callback never schedules a polling retry")
+    end
+    function state:activeTimers()
+        local count = 0
+        for _, timer in ipairs(self.pendingTimers) do
+            if not timer.cancelled then count = count + 1 end
+        end
+        return count
+    end
+
+    local durations = setmetatable({}, { __mode = "k" })
+    local durationMethods = {}
+    function durationMethods:IsZero()
+        local item = assert(durations[self], "duration handle")
+        local value = item.total <= 0
+        return item.secret and secret(value) or value
+    end
+    function durationMethods:HasSecretValues() return durations[self].secret or false end
+    function durationMethods:IsActive()
+        local item = durations[self]
+        local value = item.total > 0 and state.clock >= item.start
+            and state.clock < item.start + item.total / item.rate
+        return item.secret and secret(value) or value
+    end
+    function durationMethods:GetRemainingDuration()
+        error("Live Lua must not calculate or read native remaining time")
+    end
+    function state:duration(start, total, restricted, rate)
+        local handle = setmetatable({}, { __index = durationMethods })
+        durations[handle] = { start = start or 0, total = total or 0,
+            secret = restricted or false, rate = rate or 1 }
+        return handle
+    end
+
+    env.Enum = { DurationTextBindingProperty = { RemainingDuration = 0 },
+        DurationTimeModifier = { RealTime = 0, BaseTime = 1 },
+        NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 },
+        SpellBookSpellBank = { Player = 0, Pet = 1 } }
+    env.C_StringUtil = { CreateNumericRuleFormatter = function()
+        local formatter = { breakpoints = {} }
+        function formatter:AddBreakpoint(item) self.breakpoints[#self.breakpoints + 1] = item end
+        function formatter:SetBreakpoints(items) self.breakpoints = items end
+        state.formatters[#state.formatters + 1] = formatter
+        return formatter
+    end }
+    env.C_DurationUtil = { CreateDurationTextBinding = function()
+        local binding = { enabled = false }
+        function binding:SetFontString(value) self.fontString = value; value.nativeDurationText = true end
+        function binding:SetTextFormat(value, components) self.format, self.components = value, components end
+        function binding:SetFormatter(value) self.formatter = value end
+        function binding:SetTimeModifier(value) self.modifier = value end
+        function binding:SetUpdateInterval(value) self.interval = value end
+        function binding:SetExpiredText(value) self.expiredText = value end
+        function binding:SetZeroDurationText(value) self.zeroText = value end
+        function binding:SetDuration(value)
+            truthy(durations[value], "SetDuration requires an ordinary opaque duration handle, never nil")
+            self.duration = value
+        end
+        function binding:SetEnabled(value)
+            equal(type(value), "boolean", "binding enablement is public lifecycle state")
+            self.enabled = value
+        end
+        function binding:Enable() self:SetEnabled(true) end
+        function binding:Disable() self:SetEnabled(false) end
+        function binding:SetToDefaults()
+            self.enabled, self.duration, self.fontString = false, nil, nil
+            self.format, self.components, self.formatter = nil, nil, nil
+            self.expiredText, self.zeroText = nil, nil
+        end
+        function binding:UpdateFontString()
+            local item, text = self.duration and durations[self.duration], ""
+            if item then
+                local remaining = math.max(0, (item.start + item.total / item.rate) - state.clock)
+                if item.total <= 0 then text = self.zeroText or ""
+                elseif remaining <= 0 then text = self.expiredText or ""
+                else
+                    local formatter = self.formatter or self.components and self.components[1].formatter
+                    local rule = formatter and formatter.breakpoints[1]
+                    local value = remaining
+                    if rule and rule.step then
+                        if rule.rounding == env.Enum.NumericRuleFormatRounding.Up then
+                            value = math.ceil(value / rule.step - 0.000000001) * rule.step
+                        else value = math.floor(value / rule.step + 0.5) * rule.step end
+                    end
+                    local number = string.format(rule and rule.format or "%.1f", value)
+                    text = (self.format or "{}"):gsub("{}", number)
+                end
+            end
+            if self.fontString then
+                -- Native code writes without invoking any addon Lua text path.
+                self.fontString.nativeRenderedText = text
+                self.fontString.textValue = item and item.secret and secret(text) or text
+            end
+        end
+        state.bindings[#state.bindings + 1] = binding
+        return binding
+    end }
+    if client.nativeBindingUnavailable then env.C_DurationUtil = nil end
+    function state:nativeTick()
+        for _, binding in ipairs(self.bindings) do
+            if binding.enabled then binding:UpdateFontString() end
+        end
+    end
+    function state:advance(seconds) self.clock = self.clock + seconds; self:nativeTick() end
+
+    if client.mobility then
+        state.mobility = client.mobility
+        state.mobility.known = state.mobility.known or { [1953] = true }
+        state.mobility.spells = state.mobility.spells or {}
+        local function spellData(id, api)
+            truthy(id == 1953 or id == 212653, "live runtime only queries supported Mage spell IDs")
+            state.realReads = state.realReads + 1
+            state.spellReads[#state.spellReads + 1] = { id = id, api = api }
+            return state.mobility.spells[id]
+        end
+        env.C_SpellBook = { IsSpellKnown = function(id)
+            truthy(id == 1953 or id == 212653, "learning queries stay inside supported spell IDs")
+            return state.mobility.known[id] or false
+        end }
+        env.C_Spell.GetOverrideSpell = function(id)
+            truthy(id == 1953 or id == 212653, "override query scope")
+            return state.mobility.override or id
+        end
+        env.C_Spell.GetSpellCharges = function(id)
+            local item = spellData(id, "charges")
+            if not item or item.unavailable or item.charges == nil then return nil end
+            return { currentCharges = item.secretCharges and secret(item.charges) or item.charges,
+                maxCharges = item.maxCharges or 2, isActive = item.charges < (item.maxCharges or 2),
+                cooldownStartTime = item.secretDuration and secret(item.chargeStart or 0) or item.chargeStart or 0,
+                cooldownDuration = item.secretDuration and secret(item.chargeDuration or 0) or item.chargeDuration or 0,
+                chargeModRate = item.secretDuration and secret(item.rate or 1) or item.rate or 1 }
+        end
+        env.C_Spell.GetSpellCooldown = function(id)
+            local item = spellData(id, "cooldown")
+            if not item or item.unavailable then return nil end
+            local start, duration = item.cooldownStart or 0, item.cooldownDuration or 0
+            return { startTime = item.secretDuration and secret(start) or start,
+                duration = item.secretDuration and secret(duration) or duration,
+                modRate = item.secretDuration and secret(item.rate or 1) or item.rate or 1,
+                isEnabled = true, isActive = duration > 0, isOnGCD = item.isOnGCD or false }
+        end
+        env.C_Spell.GetSpellChargeDuration = function(id)
+            local item = spellData(id, "charge-duration")
+            if not item or item.unavailable or item.durationUnavailable or item.charges == nil then return nil end
+            return state:duration(item.chargeStart, item.chargeDuration, item.secretDuration, item.rate)
+        end
+        env.C_Spell.GetSpellCooldownDuration = function(id, ignoreGCD)
+            equal(ignoreGCD, true, "native spell cooldown queries must exclude GCD")
+            local item = spellData(id, "cooldown-duration")
+            if not item or item.unavailable or item.durationUnavailable then return nil end
+            return state:duration(item.cooldownStart, item.isOnGCD and 0 or item.cooldownDuration,
+                item.secretDuration, item.rate)
+        end
+    end
 
     local object = {}
     function object:GetName() return self.name end
@@ -106,6 +301,10 @@ local function setup(saved, loggedIn, client)
     function object:ClearAllPoints() self.point = nil end
     function object:GetPoint() return unpack(self.point or {}) end
     function object:SetAllPoints(relative) self.allPoints = relative or self.parent end
+    function object:SetScrollChild(child) self.scrollChild = child end
+    function object:SetVerticalScroll(value) self.verticalScroll = value end
+    function object:GetVerticalScroll() return self.verticalScroll or 0 end
+    function object:GetVerticalScrollRange() return self.scrollChild and math.max(0, self.scrollChild:GetHeight() - self:GetHeight()) or 0 end
     function object:SetSize(width, height) self.width, self.height = width, height end
     function object:SetWidth(width) self.width = width end
     function object:SetHeight(height) self.height = height end
@@ -189,15 +388,24 @@ local function setup(saved, loggedIn, client)
     function object:SetText(text)
         requireFont(self)
         self.textValue = text
+        if self.nativeDurationText then self.nativeRenderedText = text end
         state.textWrites = state.textWrites + 1
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
     end
     function object:GetText() return self.textValue end
     function object:GetStringWidth()
+        if self.nativeDurationText then
+            state.liveMeasurements = state.liveMeasurements + 1
+            error("Live native timer text width must never be inspected")
+        end
         requireFont(self)
         return #tostring(self.textValue or "") * (self.font and self.font[2] or 24) * 0.6
     end
     function object:GetStringHeight()
+        if self.nativeDurationText then
+            state.liveMeasurements = state.liveMeasurements + 1
+            error("Live native timer text height must never be inspected")
+        end
         requireFont(self)
         return self.font and self.font[2] or 24
     end
@@ -379,6 +587,7 @@ local function setup(saved, loggedIn, client)
         end
     end
     local addon = {}
+    state.addon = addon
     for _, file in ipairs(files) do
         local chunk = assert(loadfile(root .. "/" .. file))
         setfenv(chunk, env)
@@ -431,7 +640,7 @@ test("fresh install initializes once and waits for PLAYER_LOGIN", function()
     state:fire("ADDON_LOADED", "CarGOUI")
     truthy(addon.initialized, "own ADDON_LOADED initializes")
     equal(addon.db, env.CarGOUIDB, "saved variables reference")
-    equal(addon.db.schemaVersion, 2, "schema version migrated")
+    equal(addon.db.schemaVersion, 3, "schema version migrated")
     equal(addon.frame, nil, "display before login")
     equal(env.SLASH_CARGOUI1, "/cui", "primary slash")
     equal(env.SLASH_CARGOUI2, "/cargoui", "compatibility slash")
@@ -795,7 +1004,7 @@ test("categories expose working pages and disable unfinished features", function
     local panel = options(addon)
     local found = {}
     for _, category in ipairs(panel.categories) do found[category.key] = category end
-    for _, key in ipairs({ "general", "typography", "preview" }) do
+    for _, key in ipairs({ "general", "typography", "mobility", "preview" }) do
         truthy(found[key] and found[key]:IsEnabled(), key .. " category enabled")
         truthy(panel.pages[key], key .. " page exists")
         found[key]:Click()
@@ -804,7 +1013,7 @@ test("categories expose working pages and disable unfinished features", function
             if other ~= key then equal(page:IsShown(), false, "other pages hidden") end
         end
     end
-    for _, key in ipairs({ "mobility", "proc", "themes", "importExport" }) do
+    for _, key in ipairs({ "proc", "themes", "importExport" }) do
         local button = found[key]
         truthy(button, key .. " future category visible")
         equal(button:IsEnabled(), false, key .. " future category disabled")
@@ -1155,7 +1364,8 @@ test("preview catalog separates Mage specs and gives each Proc region its own an
 end)
 
 test("external single/all preview renders fixed samples and cleans up on stop and close", function()
-    local env, addon, state = login(nil)
+    -- Isolate preview-owned subscriptions; live ownership is covered below.
+    local env, addon, state = login({ mobility = { enabled = false } })
     equal(countKeys(visiblePreviews(addon)), 0, "no samples at login")
     local panel, controls = options(addon)
     equal(panel.previewFrame, nil, "obsolete static in-panel preview removed")
@@ -1366,12 +1576,17 @@ local function brandAsset(texture)
 end
 
 local function combatSubscriptions(state, expected)
+    -- Options and live Mobility now also own combat callbacks on the shared
+    -- event frame. Check branding's ownership without requiring those owners
+    -- to unregister their still-needed callbacks.
+    equal(not not state.addon.optionsFrame.brandingCombatEvents, expected > 0,
+        "branding combat listener ownership")
     for _, event in ipairs({ "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED" }) do
         local count = 0
         for _, frame in ipairs(state.frames) do
             if frame:IsEventRegistered(event) then count = count + 1 end
         end
-        equal(count, expected, event .. " listener lifetime")
+        if expected > 0 then equal(count, 1, event .. " shared frame subscription") end
     end
 end
 
@@ -1542,7 +1757,11 @@ test("branding callbacks stay isolated and ordinary settings do not resize or re
     addon.RefreshOptions = function(self, ...) panelRefreshes = panelRefreshes + 1; return refreshOptions(self, ...) end
     addon.RefreshPreview = function(self, ...) previewRefreshes = previewRefreshes + 1; return refreshPreview(self, ...) end
     addon.RenderReminder = function(self, ...) renders = renders + 1; return renderReminder(self, ...) end
-    local fontWrites, textWrites = state.fontWrites, state.textWrites
+    local fontWrites = state.fontWrites
+    local brandText = {}
+    for _, fontString in ipairs(state.fontStrings) do
+        if descendantOf(fontString, header) then brandText[fontString] = fontString:GetText() end
+    end
     for _, event in ipairs({ "OnLoop", "OnFinished" }) do
         if group:GetScript(event) then group:GetScript(event)(group) end
     end
@@ -1552,7 +1771,9 @@ test("branding callbacks stay isolated and ordinary settings do not resize or re
     equal(previewRefreshes, 0, "animation/combat callbacks never refresh simulated reminders")
     equal(renders, 0, "animation/combat callbacks never render reminder content")
     equal(state.fontWrites, fontWrites, "branding callbacks never recreate fonts")
-    equal(state.textWrites, textWrites, "branding callbacks never rewrite text")
+    for fontString, text in pairs(brandText) do
+        equal(fontString:GetText(), text, "branding callbacks never rewrite title text")
+    end
     equal(state.realReads, 0, "decorative combat handling never reads skill or aura state")
 end)
 
@@ -1603,6 +1824,521 @@ test("branding theme accents preserve artwork identity and never mutate reminder
     equal(group.plays, plays, "theme changes do not restart sweep")
     same(resourceCounts(state), resources, "theme changes allocate no new objects")
     same(addon.db, saved, "branding accent never modifies reminder settings")
+end)
+
+local function mobilityLogin(spellID, data, client, saved)
+    client = client or {}
+    client.mobility = { known = { [1953] = true, [212653] = spellID == 212653 },
+        override = spellID, spells = { [spellID] = data } }
+    return login(saved, false, client)
+end
+
+local function currentLive(addon)
+    local entry = addon:GetMobilityEntry()
+    return entry and addon.reminderFrames.live and addon.reminderFrames.live[entry.id]
+end
+
+local function nativeText(addon)
+    local frame = currentLive(addon)
+    -- Test-only native render observation; addon code must never read this back.
+    if not frame or not frame:IsVisible() then return "" end
+    return frame.text.nativeRenderedText or ""
+end
+
+local function mobilityStatus(addon, expected)
+    equal(addon:GetMobilityStatus().status, expected, "public Mobility status")
+end
+
+local function syncEvent(state, event, ...)
+    state:fire(event, ...)
+    state:flushTimers()
+    state:nativeTick()
+    equal(#state.errors, 0, "event sync errors")
+end
+
+test("live Shimmer 2 to 1 stays hidden, 1 to 0 shows next recharge, and 0 to 1 hides", function()
+    local data = { charges = 2, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    mobilityStatus(addon, "Ready")
+    equal(nativeText(addon), "", "two charges stay hidden with Options closed")
+    equal(addon.optionsFrame, nil, "live runtime does not create Options")
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    mobilityStatus(addon, "Ready")
+    equal(nativeText(addon), "", "one available charge stays hidden while another is recharging")
+    state:advance(7)
+    data.charges = 0
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    mobilityStatus(addon, "Depleted")
+    equal(nativeText(addon), "No Shimmer\n13.0", "last use retains the recharge already in progress")
+    state:advance(1.5)
+    equal(nativeText(addon), "No Shimmer\n11.5", "native clock updates genuine remaining duration")
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    mobilityStatus(addon, "Ready")
+    equal(nativeText(addon), "", "one restored charge hides immediately before full recharge")
+    equal(currentLive(addon).durationBinding.enabled, false, "ready stops native text updates")
+    equal(currentLive(addon).durationBinding.duration, nil, "ready detaches opaque duration")
+    equal(addon.previewState.mode, "off", "real reminder never starts simulation")
+end)
+
+test("native Blink cooldown ignores GCD and unrelated unusability", function()
+    local data = { cooldownStart = 100, cooldownDuration = 1.5, isOnGCD = true }
+    local env, addon, state = mobilityLogin(1953, data)
+    env.C_Spell.IsSpellUsable = function() error("Usability is not depletion") end
+    mobilityStatus(addon, "Ready")
+    equal(nativeText(addon), "", "GCD-only never renders a reminder")
+    data.isOnGCD, data.cooldownDuration = false, 15
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(nativeText(addon), "No Blink\n15.0", "non-charge spell own cooldown is native")
+    state:advance(4)
+    equal(nativeText(addon), "No Blink\n11.0", "non-charge timer advances")
+    data.cooldownStart, data.cooldownDuration = 0, 0
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    mobilityStatus(addon, "Ready")
+    equal(nativeText(addon), "", "spell ready hides independently of mana/silence/range")
+end)
+
+test("single-charge and larger charge capacities use current client values", function()
+    for _, maximum in ipairs({ 1, 3 }) do
+        local data = { charges = maximum, maxCharges = maximum, chargeStart = 100, chargeDuration = 12 }
+        local _, addon, state = mobilityLogin(1953, data)
+        equal(nativeText(addon), "", "any positive capacity starts ready")
+        data.charges = 0
+        syncEvent(state, "SPELL_UPDATE_CHARGES")
+        equal(nativeText(addon), "No Blink\n12.0", "zero of actual capacity renders")
+        data.charges = 1
+        syncEvent(state, "SPELL_UPDATE_CHARGES")
+        equal(nativeText(addon), "", "one restored charge hides for every capacity")
+    end
+end)
+
+test("learn and unlearn Shimmer resolves one actual spell without resetting saved positions", function()
+    local blink = { cooldownStart = 100, cooldownDuration = 15 }
+    local _, addon, state = mobilityLogin(1953, blink)
+    local id = addon:GetMobilityEntry().id
+    addon:UpdateSettings({ reminders = { [id] = { position = { x = 87, y = -21 } } } })
+    local frame = currentLive(addon)
+    equal(nativeText(addon), "No Blink\n15.0", "known Blink is monitored")
+    state.mobility.known[212653] = true
+    state.mobility.override = 212653
+    state.mobility.spells[212653] = { charges = 0, maxCharges = 2, chargeStart = 98, chargeDuration = 20 }
+    syncEvent(state, "SPELLS_CHANGED")
+    equal(addon:GetMobilityStatus().spellID, 212653, "learned effective Shimmer replaces Blink")
+    equal(nativeText(addon), "No Shimmer\n18.0", "replacement uses its own real duration")
+    equal(currentLive(addon), frame, "mutually exclusive skills reuse one configured region")
+    equal(addon:GetMobilityEntry().id, id, "replacement preserves compatibility ID")
+    same(addon.db.reminders[id].position, { x = 87, y = -21 }, "replacement preserves configured position")
+    local before = #state.spellReads
+    addon:RefreshMobility()
+    for index = before + 1, #state.spellReads do
+        equal(state.spellReads[index].id, 212653, "only active Shimmer cooldown is read")
+    end
+    state.mobility.known[212653], state.mobility.override = false, 1953
+    syncEvent(state, "PLAYER_TALENT_UPDATE")
+    equal(addon:GetMobilityStatus().spellID, 1953, "removing Shimmer restores learned Blink")
+    equal(currentLive(addon), frame, "return to Blink reuses frame")
+end)
+
+test("all Mage specs and unspecialized low-level Mage retain independent compatibility IDs", function()
+    local data = { charges = 0, maxCharges = 1, chargeStart = 100, chargeDuration = 11 }
+    local _, addon, state = mobilityLogin(1953, data, { specID = false })
+    equal(addon:GetMobilityEntry().id, "mage_unspecialized_mobility", "no-spec Mage gets additive default ID")
+    equal(nativeText(addon), "No Blink\n11.0", "no specialization is required for learned Blink")
+    local expected = { [62] = "mage_arcane_shimmer", [63] = "mage_fire_shimmer", [64] = "mage_frost_shimmer" }
+    for _, spec in ipairs({ 62, 63, 64 }) do
+        state.specID = spec
+        syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        equal(addon:GetMobilityEntry().id, expected[spec], "old specialization position ID retained")
+        equal(nativeText(addon), "No Blink\n11.0", "current spell does not depend on preview catalog name")
+        local shown = 0
+        for _, frame in pairs(addon.reminderFrames.live) do if frame:IsShown() then shown = shown + 1 end end
+        equal(shown, 1, "specialization switch leaves only one live frame visible")
+    end
+    local reads = state.realReads
+    state:fire("PLAYER_SPECIALIZATION_CHANGED", "party1")
+    equal(state:activeTimers(), 0, "unrelated unit does not schedule own-spec sync")
+    equal(state.realReads, reads, "unrelated spec event does not query spell APIs")
+end)
+
+test("inconsistent replacement states fail closed and active Preview follows confirmed spell changes", function()
+    local _, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 })
+    state.mobility.spells[1953] = { cooldownStart = 100, cooldownDuration = 15 }
+    local panel = options(addon)
+    local entry = addon:GetMobilityEntry()
+    addon:UpdateSettings({ reminders = { [entry.id] = { position = { x = 54, y = -23 } } } })
+    addon:SetPreview("single", entry.id)
+    local sample = addon.previewFrames[entry.id]
+    equal(sample.text:GetText(), "No Shimmer\n8.0", "sample starts with confirmed Shimmer")
+    state.mobility.known[212653], state.mobility.override = false, 1953
+    syncEvent(state, "PLAYER_TALENT_UPDATE")
+    equal(sample.text:GetText(), "No Blink\n8.0", "active sample updates after effective skill changes")
+    truthy(sample.guidance.label:GetText():find("Blink", 1, true), "TEST guidance uses new skill name")
+    equal(nativeText(addon), "", "replacement live remains suppressed by matching preview")
+    same(addon.db.reminders[entry.id].position, { x = 54, y = -23 }, "active replacement preserves region settings")
+    state.mobility.known[212653], state.mobility.override = true, 1953
+    syncEvent(state, "SPELLS_CHANGED")
+    mobilityStatus(addon, "Unknown")
+    equal(nativeText(addon), "", "inconsistent learned Shimmer plus effective Blink is not guessed")
+    state.mobility.override = 999999
+    syncEvent(state, "SPELLS_CHANGED")
+    mobilityStatus(addon, "Unsupported")
+    equal(nativeText(addon), "", "unsupported replacement is not read as a supported spell")
+    state.mobility.override = 212653
+    syncEvent(state, "TRAIT_CONFIG_UPDATED", 1)
+    equal(sample.text:GetText(), "No Shimmer\n8.0", "confirmed return updates active preview again")
+    addon:StopPreview()
+    equal(nativeText(addon), "No Shimmer\n20.0", "confirmed live state resumes after preview")
+    equal(#state.errors, 0, "replacement transition never raises an error")
+end)
+
+test("unlearned and unsupported characters do not manufacture live reminders", function()
+    local env, addon, state = mobilityLogin(1953, { cooldownStart = 100, cooldownDuration = 15 })
+    state.mobility.known[1953] = false
+    syncEvent(state, "SPELLS_CHANGED")
+    mobilityStatus(addon, "Not learned")
+    equal(nativeText(addon), "", "spell data existence is not evidence of learning")
+    local reads = state.realReads
+    addon:RefreshMobility()
+    equal(state.realReads, reads, "unlearned spell does not query cooldowns")
+    local _, other, unsupported = mobilityLogin(1953, { cooldownDuration = 15 }, { classToken = "WARRIOR" })
+    mobilityStatus(other, "Unsupported")
+    equal(unsupported.realReads, 0, "unsupported class never queries Mage state")
+    equal(unsupported:activeTimers(), 0, "unsupported class schedules no updates")
+    equal(other.mobilityTracking, false, "unsupported class runtime is inactive")
+    env.C_SpellBook.IsSpellKnown = function() return secret(true) end
+    addon:RefreshMobility()
+    mobilityStatus(addon, "Restricted")
+    equal(nativeText(addon), "", "secret learning state is not branched on")
+end)
+
+test("world entry reload resurrection and reset resynchronize current real API snapshots", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 92, chargeDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    equal(nativeText(addon), "No Shimmer\n12.0", "login restores an already-running cooldown")
+    local _, reload, reloadedState = mobilityLogin(212653, copy(data), nil, copy(addon.db))
+    equal(nativeText(reload), "No Shimmer\n12.0", "reload does not restart the timer")
+    for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "PLAYER_DEAD", "PLAYER_ALIVE", "PLAYER_UNGHOST" }) do
+        data.charges = 1
+        syncEvent(state, event, true, false)
+        equal(nativeText(addon), "", "restored availability wins during " .. event)
+        data.charges, data.chargeStart = 0, 95
+        syncEvent(state, event, false, false)
+        equal(nativeText(addon), "No Shimmer\n15.0", "current state restored during " .. event)
+    end
+    data.charges = 2
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "early reset hides without waiting for old native expiry")
+    equal(#reloadedState.errors, 0, "reloaded native display has no mock errors")
+end)
+
+test("Preview suppresses matching live output while background synchronization continues", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    local panel, controls = options(addon)
+    local entry = addon:GetMobilityEntry()
+    truthy(addon:SetPreview("single", entry.id), "matching external preview starts")
+    equal(nativeText(addon), "", "matching live reminder is suppressed")
+    equal(currentLive(addon).durationBinding.enabled, false, "suppression stops native binding updates")
+    local sample = addon.previewFrames[entry.id]
+    equal(sample.text:GetText(), "No Shimmer\n8.0", "sample remains explicitly fixed and separate")
+    truthy(sample.guidance.label:GetText():find("TEST", 1, true), "sample label clearly marks TEST")
+    local reads = state.realReads
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    truthy(state.realReads > reads, "preview never stops live state synchronization")
+    mobilityStatus(addon, "Ready")
+    equal(sample.text:GetText(), "No Shimmer\n8.0", "live transition never changes sample content")
+    data.charges, data.chargeStart = 0, 95
+    addon:StopPreview()
+    equal(nativeText(addon), "No Shimmer\n15.0", "stop queries current state rather than restoring a stale snapshot")
+    truthy(addon:SetPreview("all"), "all-preview starts")
+    equal(nativeText(addon), "", "all-preview suppresses matching live output")
+    controls.close:Click()
+    equal(addon.previewState.mode, "off", "closing Options stops only simulation")
+    equal(nativeText(addon), "No Shimmer\n15.0", "closing Options restores independent live reminder")
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "closed Options still reacts to recovery")
+end)
+
+test("combat ends simulated previews blocks restart and preserves real Mobility", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    local panel, controls = options(addon)
+    truthy(addon:SetPreview("all"), "out-of-combat sample can start")
+    syncEvent(state, "PLAYER_REGEN_DISABLED")
+    equal(addon.previewState.mode, "off", "combat stops Test Mode")
+    equal(countKeys(visiblePreviews(addon)), 0, "combat hides every TEST sample")
+    equal(nativeText(addon), "No Shimmer\n20.0", "real timer remains available in combat")
+    equal(panel.titleAnimation:IsPlaying(), false, "existing combat-static branding remains")
+    local ok, message = addon:SetPreview("all")
+    equal(ok, false, "combat rejects restarting samples")
+    truthy(message:find("combat", 1, true), "blocked preview explains combat restriction")
+    equal(controls.mobilityPreview:IsEnabled(), false, "Mobility Preview control disabled in combat")
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "combat charge recovery hides normally")
+    syncEvent(state, "PLAYER_REGEN_ENABLED")
+    equal(addon.previewState.mode, "off", "leaving combat never silently restarts samples")
+    truthy(panel.titleAnimation:IsPlaying(), "existing title resumes when eligible")
+end)
+
+test("live and preview share saved layout and style without resetting schema-2 coordinates", function()
+    local saved = { schemaVersion = 2, position = { x = 30, y = -15 }, scale = 1.25,
+        font = { face = "Fonts\\FRIZQT__.ttf", size = 31, outline = "THICKOUTLINE" },
+        options = { position = { x = 119, y = -38 }, animatedTitle = false },
+        reminders = { mage_arcane_shimmer = { position = { x = 11, y = 12 } },
+            mage_fire_shimmer = { position = { x = 21, y = 22 } },
+            mage_frost_shimmer = { position = { x = 31, y = 32 } },
+            mage_fire_hot_streak_left = { position = { x = 77, y = -18 } } } }
+    local old = copy(saved)
+    local env, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }, nil, saved)
+    equal(addon.db, saved, "migration retains SavedVariables identity")
+    equal(addon.db.schemaVersion, 3, "additive schema upgrade")
+    for id, record in pairs(old.reminders) do same(addon.db.reminders[id], record, "existing region remains " .. id) end
+    same(addon.db.options.position, old.options.position, "window position remains saved")
+    same(addon.db.position, old.position, "global position remains saved")
+    local live, entry = currentLive(addon), addon:GetMobilityEntry()
+    reminderAnchor(live, entry, addon, env)
+    same(live.text.font, { "Fonts\\FRIZQT__.ttf", 31, "THICKOUTLINE" }, "live typography uses shared setting")
+    local point, scale = copy(live.point), live:GetScale()
+    local panel = options(addon)
+    addon:SetPreview("single", entry.id)
+    local preview = addon.previewFrames[entry.id]
+    same(preview.point, point, "preview and live use same fixed saved anchor")
+    equal(preview:GetScale(), scale, "preview and live use same scale")
+    same(preview.text.font, live.text.font, "preview and live share typography")
+    addon:StopPreview()
+    addon:UpdateSettings({ font = { size = 38 }, scale = 1.5 })
+    same(live.text.font, { "Fonts\\FRIZQT__.ttf", 38, "THICKOUTLINE" }, "live font changes apply immediately")
+    reminderAnchor(live, entry, addon, env)
+    equal(state.liveMeasurements, 0, "live text geometry is never measured")
+end)
+
+test("Mobility Options edits apply on Enter and expose working preview and copyable diagnostics", function()
+    local _, addon, state = mobilityLogin(1953, { cooldownStart = 100, cooldownDuration = 15 })
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("mobility")
+    truthy(panel.pages.mobility:IsShown(), "Mobility is a working category")
+    equal(controls.mobilityEnabled:GetChecked(), true, "Mobility defaults enabled")
+    truthy(panel.mobilitySpell:GetText():find("Blink", 1, true), "detected current spell displayed read-only")
+    local id = addon:GetMobilityEntry().id
+    typeText(controls.mobilityX, "45.5")
+    typeText(controls.mobilityY, "-72")
+    equal(addon.db.reminders[id].position.x, 0, "position waits for Enter")
+    controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
+    same(addon.db.reminders[id].position, { x = 45.5, y = -72 }, "Enter commits both coordinates atomically")
+    controls.mobilityTypography:Click()
+    truthy(panel.pages.typography:IsShown(), "Typography shortcut works")
+    addon:SelectOptionsCategory("mobility")
+    controls.mobilityPreview:Click()
+    equal(addon.previewState.entryId, id, "corresponding skill preview starts")
+    controls.mobilityStop:Click()
+    equal(nativeText(addon), "No Blink\n15.0", "Stop Preview resumes live")
+    controls.mobilityDiagnostics:Click()
+    truthy(panel.diagnosticsFrame and panel.diagnosticsFrame:IsShown(), "diagnostic copy window opens")
+    controls.mobilityEnabled:Click()
+    mobilityStatus(addon, "Disabled")
+    equal(nativeText(addon), "", "module checkbox immediately hides live")
+    controls.mobilityEnabled:Click()
+    equal(nativeText(addon), "No Blink\n15.0", "reenabling queries current state")
+    panel:Hide()
+    equal(panel.diagnosticsFrame:IsShown(), false, "closing Options hides diagnostic popup")
+    equal(#state.errors, 0, "Mobility controls produce no mock errors")
+end)
+
+test("Mobility pending edits survive live refresh and diagnostic copying but invalid pairs stay atomic", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("mobility")
+    local id = addon:GetMobilityEntry().id
+    typeText(controls.mobilityX, "47")
+    typeText(controls.mobilityY, "-65")
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(controls.mobilityX:GetText(), "47", "event refresh preserves pending X")
+    equal(controls.mobilityY:GetText(), "-65", "event refresh preserves pending Y")
+    controls.mobilityDiagnostics:Click()
+    local dialog = panel.diagnosticsFrame
+    equal(controls.mobilityX:GetText(), "47", "copy dialog preserves unsaved X")
+    equal(controls.mobilityY:GetText(), "-65", "copy dialog preserves unsaved Y")
+    local snapshot = dialog.editBox:GetText()
+    typeText(dialog.editBox, "overwrite")
+    equal(dialog.editBox:GetText(), snapshot, "diagnostic snapshot permits selection but refuses user editing")
+    dialog.close:Click()
+    controls.mobilityY:GetScript("OnEnterPressed")(controls.mobilityY)
+    same(addon.db.reminders[id].position, { x = 47, y = -65 }, "Enter after copying commits original pending pair")
+    typeText(controls.mobilityX, "invalid")
+    typeText(controls.mobilityY, "19")
+    controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
+    same(addon.db.reminders[id].position, { x = 47, y = -65 }, "invalid X does not partially commit Y")
+    truthy(panel.feedback:GetText() ~= "", "invalid pair has visible feedback")
+    panel:Hide()
+    addon:ToggleOptions()
+    equal(tonumber(controls.mobilityX:GetText()), 47, "closing discards invalid pending X")
+    equal(tonumber(controls.mobilityY:GetText()), -65, "closing discards pending Y")
+    equal(#state.errors, 0, "copy and edit flow raises no errors")
+end)
+
+test("restricted charge count fails closed but secret timing uses native display when zero is public", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20, secretCharges = true }
+    local _, addon, state = mobilityLogin(212653, data)
+    mobilityStatus(addon, "Restricted")
+    equal(nativeText(addon), "", "opaque charge count never implies exhausted or ready")
+    truthy(addon:GetMobilityStatus().reason:find("currentCharges", 1, true), "precise restricted gate is reported")
+    data.secretCharges, data.secretDuration = false, true
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    mobilityStatus(addon, "Depleted")
+    equal(nativeText(addon), "No Shimmer\n16.0", "ordinary zero count can gate native secret timer")
+    local frame = currentLive(addon)
+    truthy(isSecret(frame.text.textValue), "native rendering output is treated as opaque")
+    state:advance(0.5)
+    equal(nativeText(addon), "No Shimmer\n15.5", "secret duration advances only in native binding")
+    addon:UpdateSettings({ font = { size = 30 }, scale = 1.2 })
+    equal(nativeText(addon), "No Shimmer\n15.5", "styling does not read secret text")
+    equal(state.liveMeasurements, 0, "restricted text is never measured")
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "public charge recovery ends restricted-duration display")
+end)
+
+test("opaque non-charge duration renders natively and blanks GCD or expiry without reading values", function()
+    local data = { cooldownStart = 100, cooldownDuration = 15, secretDuration = true }
+    local _, addon, state = mobilityLogin(1953, data)
+    mobilityStatus(addon, "Tracking")
+    equal(nativeText(addon), "No Blink\n15.0", "opaque cooldown is native display, not assumed Ready")
+    state:advance(15)
+    equal(nativeText(addon), "", "native expiration blanks full label and digits")
+    data.isOnGCD, data.cooldownDuration, data.cooldownStart = true, 1.5, state.clock
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    mobilityStatus(addon, "Tracking")
+    equal(nativeText(addon), "", "opaque GCD-only duration is natively blank")
+    equal(state.liveMeasurements, 0, "opacity and zero state never leak through geometry")
+end)
+
+test("missing nil inconsistent and unsupported API paths never become fabricated Ready", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20, durationUnavailable = true }
+    local env, addon, state = mobilityLogin(212653, data)
+    mobilityStatus(addon, "Unknown")
+    equal(nativeText(addon), "", "missing real duration hides instead of a sample")
+    data.durationUnavailable, data.unavailable = false, true
+    addon:RefreshMobility()
+    mobilityStatus(addon, "Unknown")
+    equal(nativeText(addon), "", "nil charge and cooldown records are unknown")
+    data.unavailable, data.chargeDuration = false, 0
+    addon:RefreshMobility()
+    mobilityStatus(addon, "Unknown")
+    equal(nativeText(addon), "", "zero charge count with no recharge is not Ready")
+    data.chargeDuration = 20
+    env.C_Spell.GetSpellChargeDuration = nil
+    addon:RefreshMobility()
+    mobilityStatus(addon, "Unsupported")
+    local _, noNative = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }, { nativeBindingUnavailable = true })
+    mobilityStatus(noNative, "Unsupported")
+    equal(nativeText(noNative), "", "missing native rendering never falls back to fake numbers")
+    equal(#state.errors, 0, "API error cases are handled without exceptions")
+end)
+
+test("diagnostics contain actual mock build and public state without secret serialization or persistence", function()
+    local env, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20, secretDuration = true })
+    local status = addon:GetMobilityStatus()
+    equal(status.duration, nil, "public status excludes DurationObject")
+    local diagnostic = addon:GetMobilityDiagnostics()
+    truthy(diagnostic:find("build 99999", 1, true), "diagnostics use GetBuildInfo result")
+    truthy(diagnostic:find("native charge duration", 1, true), "diagnostics identify selected path")
+    truthy(diagnostic:find("212653", 1, true), "ordinary detected spell ID is safe to copy")
+    truthy(diagnostic:find("restricted", 1, true), "restriction policy is explicit")
+    local function publicSaved(value)
+        truthy(not isSecret(value), "SavedVariables never contains secret tokens")
+        if type(value) == "table" then
+            equal(getmetatable(value), nil, "SavedVariables never contains opaque native objects")
+            for key, child in pairs(value) do publicSaved(key); publicSaved(child) end
+        end
+    end
+    publicSaved(env.CarGOUIDB)
+    local before = copy(addon.db)
+    state:advance(3)
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    same(addon.db, before, "live time and charge state are never saved")
+    state.mobility.spells[212653].secretCharges = true
+    addon:RefreshMobility()
+    diagnostic = addon:GetMobilityDiagnostics()
+    truthy(diagnostic:find("currentCharges is restricted", 1, true), "exact blocked condition is copyable")
+    equal(#state.errors, 0, "diagnostics never stringify secret tokens")
+end)
+
+test("event bursts coalesce cancel on disable and reuse objects across repeated depletion", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    local frame, binding = currentLive(addon), currentLive(addon).durationBinding
+    local objects, formatters, bindings = resourceCounts(state), #state.formatters, #state.bindings
+    local reads = state.realReads
+    for _ = 1, 25 do state:fire("SPELL_UPDATE_CHARGES"); state:fire("SPELL_UPDATE_COOLDOWN") end
+    equal(state:activeTimers(), 1, "burst has one pending update")
+    equal(state.realReads, reads, "event handlers do not duplicate immediate API reads")
+    state:flushTimers()
+    truthy(state.realReads > reads, "merged update reads one fresh snapshot")
+    equal(state:activeTimers(), 0, "merged update does not start a recurring timer")
+    for _ = 1, 30 do
+        data.charges = 1; syncEvent(state, "SPELL_UPDATE_CHARGES")
+        data.charges = 0; syncEvent(state, "SPELL_UPDATE_CHARGES")
+    end
+    equal(currentLive(addon), frame, "depletion reuses frame")
+    equal(currentLive(addon).durationBinding, binding, "depletion reuses binding")
+    same(resourceCounts(state), objects, "depletion cycles allocate no UI objects")
+    equal(#state.bindings, bindings, "depletion cycles allocate no bindings")
+    equal(#state.formatters, formatters, "depletion cycles allocate no formatters")
+    state:fire("SPELL_UPDATE_CHARGES")
+    equal(state:activeTimers(), 1, "work pending before disable")
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    equal(state:activeTimers(), 0, "disable cancels pending work")
+    equal(binding.enabled, false, "disable stops native updates")
+    equal(binding.duration, nil, "disable releases duration reference")
+    reads = state.realReads
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(state.realReads, reads, "disabled module performs no cooldown reads")
+    for _, object in ipairs(state.frames) do equal(object:GetScript("OnUpdate"), nil, "no per-frame scans") end
+end)
+
+test("module disable preserves shared Options and branding combat subscriptions", function()
+    local _, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 })
+    local panel = options(addon)
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    state:fire("PLAYER_REGEN_DISABLED")
+    equal(panel.titleAnimation:IsPlaying(), false, "branding still gets combat-start callback")
+    equal(panel.controls.previewAll:IsEnabled(), false, "Options still updates its combat restriction")
+    state:fire("PLAYER_REGEN_ENABLED")
+    truthy(panel.titleAnimation:IsPlaying(), "branding still gets combat-end callback")
+    panel:Hide()
+    for _, frame in ipairs(state.frames) do
+        equal(frame:IsEventRegistered("PLAYER_REGEN_DISABLED"), false, "all inactive owners clean combat-start listener")
+        equal(frame:IsEventRegistered("SPELL_UPDATE_CHARGES"), false, "disabled Mobility cleans charge listener")
+    end
+    equal(state:activeTimers(), 0, "no inactive task remains")
+end)
+
+test("live runtime sources contain no polling cast-count inference or timer text readback", function()
+    for _, path in ipairs({ "Modules/Mobility/Runtime.lua", "Modules/Mobility/SpellState.lua" }) do
+        local file = assert(io.open(root .. "/" .. path, "r"))
+        local source = file:read("*a"); file:close()
+        for _, forbidden in ipairs({ "NewTicker", '"OnUpdate"', "COMBAT_LOG_EVENT_UNFILTERED",
+            "UNIT_SPELLCAST_SUCCEEDED", ":GetText(", ":GetStringWidth(", ":GetStringHeight(",
+            ":GetRemainingDuration(", "GetSpellCastCount", "IsSpellUsable", "UnitAura" }) do
+            truthy(not source:find(forbidden, 1, true), path .. " must not use " .. forbidden)
+        end
+    end
+    local file = assert(io.open(root .. "/UI/Display.lua", "r"))
+    local source = file:read("*a"); file:close()
+    local live = assert(source:match("function addon:RenderLiveMobility(.*)"), "live renderer exists")
+    for _, forbidden in ipairs({ ":GetText(", ":GetStringWidth(", ":GetStringHeight(", "GetRemainingDuration", "string.format" }) do
+        truthy(not live:find(forbidden, 1, true), "native live rendering must not use " .. forbidden)
+    end
 end)
 
 print("All " .. total .. " offline smoke tests passed.")

@@ -1,17 +1,20 @@
 ## Interface: 120100
 ## Title: CarGOUI
-## Notes: Lightweight settings and simulated reminder previews. Live detection not yet implemented.
+## Notes: Mage Blink/Shimmer mobility reminders, settings and separate simulated previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.4
+## Version: 0.1.0-alpha.5
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua
 Core\Events.lua
+Database\MobilityEntries.lua
 Database\PreviewEntries.lua
 Config\Defaults.lua
 Config\Locale.lua
 Core\Database.lua
 UI\Display.lua
+Modules\Mobility\SpellState.lua
+Modules\Mobility\Runtime.lua
 UI\Preview.lua
 UI\Branding.lua
 UI\Options.lua
