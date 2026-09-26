@@ -447,6 +447,8 @@ function addon:UpdateSettings(patch)
         return false, "Proc settings are unavailable until the current specialization module is ready."
     end
     local changedStyles, changedColors, stylesOnly = {}, {}, true
+    local optionsOnly = patch.options ~= nil
+    for key in pairs(patch) do if key ~= "options" then optionsOnly = false end end
     local function RecordStyle(kind)
         local context = self:GetAppearanceContext(kind)
         if context then changedStyles[context.key] = true end
@@ -488,7 +490,12 @@ function addon:UpdateSettings(patch)
         local _, canonical = self:IsSupportedFont(style.font.face)
         style.font.face = canonical
     end
-    if stylesOnly then
+    if optionsOnly then
+        -- Saving a dragged Options window (including combat auto-close) only
+        -- changes the shell. Do not reconfigure live modules or their bindings.
+        if self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
+        if self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
+    elseif stylesOnly then
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
         if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end
     else self:ApplySettings() end

@@ -5,7 +5,7 @@ local L = addon.L
 -- buttons, edits, sliders, menus and scrollbars in charge of their own input.
 function addon:BeginOptionsDrag(button)
     local panel = self.optionsFrame
-    if button ~= "LeftButton" or not panel or not panel:IsShown() or panel.dragging then return end
+    if InCombatLockdown() or button ~= "LeftButton" or not panel or not panel:IsShown() or panel.dragging then return end
     panel.dragging = true
     panel:StartMoving()
 end
@@ -593,18 +593,58 @@ local function OnOptionsSpecializationChanged(self, _, unit)
     self:RefreshOptions()
 end
 
-local function OnOptionsCombatChanged(self)
-    self:RefreshMobilityOptions()
-    local panel = self.optionsFrame
-    if panel and panel:IsShown() then
-        panel.refreshing = true
-        RefreshAppearanceControls(panel)
-        panel.controls.procPreview:SetEnabled(panel.selectedProcEntry ~= nil and not InCombatLockdown())
-        panel.refreshing = false
+local function CancelOptionsOpenRetry(self)
+    if self.optionsOpenRetry then
+        self.optionsOpenRetry:Cancel()
+        self.optionsOpenRetry = nil
     end
 end
 
+local function OnPendingOptionsCombatEnded(self)
+    if not self.pendingOptionsOpen then return end
+    if not InCombat() then
+        self:OpenOptions()
+    elseif not self.optionsOpenRetry and C_Timer and C_Timer.NewTimer then
+        -- The regen event can precede the lockdown transition. Retry exactly
+        -- once next tick, never from this timer itself. If still locked, retain
+        -- the request for the next regen event instead of polling in combat.
+        local retry
+        retry = C_Timer.NewTimer(0, function()
+            if self.optionsOpenRetry ~= retry then return end
+            self.optionsOpenRetry = nil
+            if self.pendingOptionsOpen and not InCombat() then self:OpenOptions() end
+        end)
+        self.optionsOpenRetry = retry
+    end
+end
+
+function addon:QueueOptionsOpen()
+    if not self.pendingOptionsOpen then
+        self.pendingOptionsOpen = true -- Session state only, never SavedVariables.
+        self:Print("Options will open when combat ends.")
+    end
+    self:RegisterEvent("PLAYER_REGEN_ENABLED", OnPendingOptionsCombatEnded)
+end
+
+local function ConsumeOptionsOpen(self)
+    self.pendingOptionsOpen = nil
+    CancelOptionsOpenRetry(self)
+    self:UnregisterEvent("PLAYER_REGEN_ENABLED", OnPendingOptionsCombatEnded)
+end
+
+function addon:CloseOptions()
+    local panel = self.optionsFrame
+    if panel and panel:IsShown() then panel:Hide() end
+    -- OnHide owns editing/preview cleanup. It must never consume a queued open.
+end
+
+local function OnOptionsCombatChanged(self)
+    self:CloseOptions()
+end
+
 function addon:CreateOptions()
+    if InCombat() then self:QueueOptionsOpen(); return nil end
+    if not self.initialized or not self.db then return nil end
     if self.optionsFrame then return self.optionsFrame end
     local panel = CreateFrame("Frame", "CarGOUIOptionsFrame", UIParent, "BackdropTemplate")
     panel:Hide()
@@ -925,7 +965,6 @@ function addon:CreateOptions()
         addon:ApplyOptionsPosition(true)
         addon:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:RegisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
-        addon:RegisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)
         addon:RefreshOptionsTheme()
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
@@ -933,10 +972,10 @@ function addon:CreateOptions()
         addon:CancelProcColorPicker()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
-        addon:UnregisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)
         addon:StopOptionsTheme()
         if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
-        addon:StopPreview()
+        -- Restore live output only when it was actually suppressed by TEST.
+        addon:StopPreview(addon.previewState.mode == "off")
         addon:StopTitleAnimation()
         addon:SaveOptionsPosition()
         CloseMenus(panel)
@@ -947,8 +986,21 @@ function addon:CreateOptions()
     return panel
 end
 
-function addon:ToggleOptions()
-    if not self.initialized then return end
+function addon:OpenOptions()
+    if InCombat() then self:QueueOptionsOpen(); return false end
+    if not self.initialized or not self.db then return false end
     local panel = self:CreateOptions()
-    panel:SetShown(not panel:IsShown())
+    if not panel then return false end
+    -- OnShow retains the page but validates current class/spec and entry lists.
+    -- Explicit Show is idempotent; a deferred request cannot toggle it closed.
+    if not panel:IsShown() then panel:Show() end
+    if panel:IsShown() then ConsumeOptionsOpen(self); return true end
+    return false
+end
+
+function addon:ToggleOptions()
+    if InCombat() then self:QueueOptionsOpen(); return false end
+    local panel = self.optionsFrame
+    if panel and panel:IsShown() then self:CloseOptions(); return true end
+    return self:OpenOptions()
 end

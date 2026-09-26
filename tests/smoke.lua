@@ -2007,7 +2007,7 @@ test("twenty Options reopen cycles reuse every branding object and stop motion i
     combatSubscriptions(state, 0)
 end)
 
-test("combat pauses branding and resumes only while visible and enabled", function()
+test("combat closes Options and branding resumes only on a later explicit visible open", function()
     local env, addon, state = login(nil)
     local panel, controls = options(addon)
     local group, header = panel.titleAnimation, panel.brandingHeader
@@ -2016,13 +2016,17 @@ test("combat pauses branding and resumes only while visible and enabled", functi
     equal(group:IsPlaying(), false, "entering combat stops sweep immediately")
     equal(header.wordmark:GetAlpha(), 1, "combat leaves base wordmark opaque")
     equal(header.sweep:GetAlpha(), 0, "combat clears highlight residue")
-    combatSubscriptions(state, 1)
+    combatSubscriptions(state, 0)
     state:fire("PLAYER_REGEN_ENABLED")
-    truthy(group:IsPlaying(), "visible enabled title resumes after combat")
-    state:fire("PLAYER_REGEN_DISABLED")
+    equal(panel:IsShown(), false, "automatic combat hide alone does not request reopening")
+    equal(group:IsPlaying(), false, "combat ending with Options closed never restarts animation")
+    addon:ToggleOptions()
+    truthy(group:IsPlaying(), "explicit out-of-combat open resumes eligible title")
     controls.animatedTitle:Click()
+    state:fire("PLAYER_REGEN_DISABLED")
     state:fire("PLAYER_REGEN_ENABLED")
     equal(group:IsPlaying(), false, "disabled preference prevents combat-end restart")
+    addon:ToggleOptions()
     controls.animatedTitle:Click()
     truthy(group:IsPlaying(), "re-enabling while visible resumes")
     state:fire("PLAYER_REGEN_DISABLED")
@@ -2038,10 +2042,10 @@ test("combat pauses branding and resumes only while visible and enabled", functi
     addon:RefreshTitleAnimation()
     truthy(group:IsPlaying(), "visible ancestor permits resumption")
     local _, inCombatAddon, combatState = login(nil, false, { inCombat = true })
-    local combatPanel = options(inCombatAddon)
-    equal(combatPanel.titleAnimation:IsPlaying(), false, "opening during combat starts statically")
+    inCombatAddon:ToggleOptions()
+    equal(inCombatAddon.optionsFrame, nil, "first combat request does not create branding or Options")
     combatState:fire("PLAYER_REGEN_ENABLED")
-    truthy(combatPanel.titleAnimation:IsPlaying(), "first opening in combat can resume after combat")
+    truthy(inCombatAddon.optionsFrame.titleAnimation:IsPlaying(), "queued first opening starts branding only after combat")
 end)
 
 test("branding callbacks stay isolated and ordinary settings do not resize or restart the art", function()
@@ -2400,13 +2404,14 @@ test("combat ends simulated previews blocks restart and preserves real Mobility"
     local ok, message = addon:SetPreview("all")
     equal(ok, false, "combat rejects restarting samples")
     truthy(message:find("combat", 1, true), "blocked preview explains combat restriction")
-    equal(controls.mobilityPreview:IsEnabled(), false, "Mobility Preview control disabled in combat")
+    equal(panel:IsShown(), false, "combat closes the panel instead of leaving interactive Preview controls visible")
     data.charges = 1
     syncEvent(state, "SPELL_UPDATE_CHARGES")
     equal(nativeText(addon), "", "combat charge recovery hides normally")
     syncEvent(state, "PLAYER_REGEN_ENABLED")
     equal(addon.previewState.mode, "off", "leaving combat never silently restarts samples")
-    truthy(panel.titleAnimation:IsPlaying(), "existing title resumes when eligible")
+    equal(panel:IsShown(), false, "ending combat alone does not reopen Options")
+    equal(panel.titleAnimation:IsPlaying(), false, "hidden title does not resume")
 end)
 
 test("live and preview share saved layout and style without resetting schema-2 coordinates", function()
@@ -2638,9 +2643,10 @@ test("module disable preserves shared Options and branding combat subscriptions"
     addon:UpdateSettings({ mobility = { enabled = false } })
     state:fire("PLAYER_REGEN_DISABLED")
     equal(panel.titleAnimation:IsPlaying(), false, "branding still gets combat-start callback")
-    equal(panel.controls.previewAll:IsEnabled(), false, "Options still updates its combat restriction")
+    equal(panel:IsShown(), false, "Options still closes for combat with Mobility disabled")
     state:fire("PLAYER_REGEN_ENABLED")
-    truthy(panel.titleAnimation:IsPlaying(), "branding still gets combat-end callback")
+    equal(panel:IsShown(), false, "disabled Mobility cannot change Options combat-close policy")
+    equal(panel.titleAnimation:IsPlaying(), false, "hidden branding does not resume on combat end")
     panel:Hide()
     for _, frame in ipairs(state.frames) do
         equal(frame:IsEventRegistered("PLAYER_REGEN_DISABLED"), false, "all inactive owners clean combat-start listener")
@@ -3227,7 +3233,7 @@ test("theme refresh cannot reset opaque timers opacity class colors or entry app
     local _, addon, state = mobilityLogin(212653,
         { charges = 0, maxCharges = 2, chargeStart = 93, chargeDuration = 20,
             secretCharges = true, secretDuration = true, cooldownStart = 100, cooldownDuration = 20 },
-        { inCombat = true })
+        { inCombat = false })
     local panel = options(addon)
     local frame, saved = currentLive(addon), copy(addon.db)
     local binding = frame.durationBinding
@@ -3244,7 +3250,7 @@ test("theme refresh cannot reset opaque timers opacity class colors or entry app
     equal(frame.alpha, alpha, "opaque alpha identity unchanged")
     equal(frame.alphaWrites, alphaWrites, "theme never writes live opacity")
     same(frame.text.textColor, color, "reminder class color independent of spec accents")
-    equal(panel.titleAnimation:IsPlaying(), false, "automatic theme respects combat-stopped brand animation")
+    truthy(panel.titleAnimation:IsPlaying(), "theme changes preserve currently eligible branding animation")
     state:advance(1)
     equal(nativeText(addon), "No Shimmer\n12.0", "native countdown advances after theme changes")
 end)
@@ -3461,10 +3467,8 @@ test("deferred Mage loading never replaces legacy Proc settings with provisional
     } }
     local _, addon, state = login(saved, true, { inCombat = true, specID = 63 })
     equal(addon:GetProcConfig(), nil, "no persistent factory Proc before migration catalog")
-    local panel = options(addon)
-    addon:OpenAppearance("proc")
-    equal(panel.controls.appearanceFontSize:IsEnabled(), false, "missing catalog disables style controls")
-    equal(panel.controls.appearancePreview:IsEnabled(), false, "missing catalog has no enabled fake preview")
+    addon:ToggleOptions()
+    equal(addon.optionsFrame, nil, "deferred combat request cannot instantiate controls for unavailable catalog")
     local shell = copy(addon.db.options)
     equal(addon:UpdateSettings({ options = { animatedTitle = false },
         styles = { ["proc:MAGE:63"] = { font = { size = 50 } } } }), false,
@@ -3474,6 +3478,9 @@ test("deferred Mage loading never replaces legacy Proc settings with provisional
         "direct Proc patch cannot write into absent config")
     equal(addon.db.classes.MAGE.proc[63], nil, "no saved provisional record")
     syncEvent(state, "PLAYER_REGEN_ENABLED")
+    local panel = addon.optionsFrame
+    truthy(panel and panel:IsShown(), "queued Options opens after actual module becomes available")
+    addon:OpenAppearance("proc")
     local proc = addon:GetProcConfig()
     equal(proc.style.font.size, 42, "legacy first region style migrates after real module load")
     equal(proc.style.scale, 1.6, "legacy scale preserved once")
@@ -5512,6 +5519,253 @@ test("Clearcasting diagnostics retain bounded public graph evidence build mappin
     equal(addon:GetEventDiagnostics().callbacks, callbacks, "diagnostic capture adds no listeners")
     equal(state.realReads, 0, "diagnostic never queries auras")
     equal(#state.errors, 0, "restricted event payloads are rejected before formatting")
+end)
+
+test("first combat Options requests queue once without creating any controls or persistent settings", function()
+    local env, addon, state = login()
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    local frames, messages = #state.frames, #state.messages
+    local callbacks = addon:GetEventDiagnostics().callbacks
+    local saved = copy(addon.db)
+    state:fire("PLAYER_REGEN_DISABLED")
+    for index = 1, 10 do
+        if index % 2 == 0 then env.SlashCmdList.CARGOUI("") else addon:ToggleOptions() end
+    end
+    equal(addon:CreateOptions(), nil, "direct factory entry cannot bypass combat guard")
+    equal(addon:OpenOptions(), false, "explicit open entry cannot bypass combat guard")
+    equal(env.SLASH_CARGOUI1, "/cui", "short alias uses the shared command handler")
+    equal(env.SLASH_CARGOUI2, "/cargoui", "long alias uses the same handler")
+    truthy(addon.pendingOptionsOpen, "ten requests retain one session request")
+    equal(addon.optionsFrame, nil, "combat never creates the Options root or descendants")
+    equal(#state.frames, frames, "queued requests create no control frames")
+    equal(#state.messages, messages + 1, "one queue notification per pending cycle")
+    equal(addon:GetEventDiagnostics().callbacks, callbacks + 1, "one bounded deferred-open callback")
+    equal(state:activeTimers(), 0, "queued requests start no polling or premature retry")
+    same(addon.db, saved, "session request writes no SavedVariables")
+    state:fire("PLAYER_REGEN_ENABLED")
+    local panel = addon.optionsFrame
+    truthy(panel and panel:IsShown(), "first unlocked event opens the queued panel")
+    truthy(not addon.pendingOptionsOpen, "successful explicit open consumes the pending request")
+    local created = #state.frames
+    addon:OpenOptions(); addon:OpenOptions()
+    truthy(panel:IsShown(), "explicit opens are idempotent and cannot toggle visible Options closed")
+    equal(#state.frames, created, "explicit opens reuse existing panel")
+    panel:Hide(); state:fire("PLAYER_REGEN_ENABLED")
+    equal(panel:IsShown(), false, "a later combat-end event cannot reopen a consumed request")
+end)
+
+test("combat request retries once at the unlock boundary and rechecks combat before deferred execution", function()
+    local env, addon, state = login()
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    state:fire("PLAYER_REGEN_DISABLED"); addon:OpenOptions()
+    local boundaryLocked = true
+    env.InCombatLockdown = function() return state.inCombat or boundaryLocked end
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(addon.optionsFrame, nil, "event receipt alone does not override a still-locked client")
+    equal(state:activeTimers(), 1, "one tracked next-tick boundary retry")
+    local scheduled = state.timers
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(state:activeTimers(), 1, "duplicate boundary events do not duplicate a pending retry")
+    equal(state.timers, scheduled, "duplicate boundary event allocates no extra timer")
+    state:flushTimers()
+    equal(addon.optionsFrame, nil, "still-locked retry never opens controls")
+    truthy(addon.pendingOptionsOpen, "still-locked retry retains the request for a later actual unlock")
+    equal(state:activeTimers(), 0, "retry does not recursively schedule itself")
+    boundaryLocked = false
+    state:fire("PLAYER_REGEN_ENABLED")
+    truthy(addon.optionsFrame and addon.optionsFrame:IsShown(), "later unlocked event opens exactly once")
+    addon.optionsFrame:Hide()
+    state:fire("PLAYER_REGEN_DISABLED"); addon:OpenOptions()
+    boundaryLocked = true; state:fire("PLAYER_REGEN_ENABLED")
+    equal(state:activeTimers(), 1, "a new queued cycle has its own bounded boundary retry")
+    state:fire("PLAYER_REGEN_DISABLED"); boundaryLocked = false
+    state:flushTimers()
+    equal(addon.optionsFrame:IsShown(), false, "combat reentry before callback blocks deferred open")
+    truthy(addon.pendingOptionsOpen, "combat reentry does not discard the user's request")
+    state:fire("PLAYER_REGEN_ENABLED")
+    truthy(addon.optionsFrame:IsShown(), "next genuine unlock fulfills preserved request")
+end)
+
+test("manual fulfillment cancels the pending boundary retry without toggling the visible panel", function()
+    local env, addon, state = login()
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    state:fire("PLAYER_REGEN_DISABLED"); addon:OpenOptions()
+    local locked = true
+    env.InCombatLockdown = function() return state.inCombat or locked end
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(state:activeTimers(), 1, "boundary retry exists before manual fulfillment")
+    locked = false; addon:OpenOptions()
+    local panel = addon.optionsFrame
+    truthy(panel and panel:IsShown(), "explicit open fulfills pending request immediately when safe")
+    equal(state:activeTimers(), 0, "successful open cancels stale retry handle")
+    state:flushTimers(); state:fire("PLAYER_REGEN_ENABLED")
+    truthy(panel:IsShown(), "stale callback or later event cannot toggle visible panel closed")
+    truthy(not addon.pendingOptionsOpen, "request is consumed once")
+    equal(#state.errors, 0, "cancelled stale work is harmless")
+end)
+
+test("combat closure cleans drag keyboard menus picker draft and Test Mode without saving uncommitted edits", function()
+    local env, addon, state = auraFixture(62)
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("proc")
+    local entry = regionEntry(addon, "mage_arcane_clearcasting_left")
+    addon:SetProcRegionColor(entry, { r = 0.1, g = 0.2, b = 0.9 })
+    addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 39 }, scale = 1.3 })
+    addon:UpdateSettings({ reminders = { [entry.id] = { position = { x = 41, y = -29 } } } })
+    truthy(addon:SetPreview("all"), "Test Mode is active before combat")
+    controls.procColor:Click(); state:pickerChange(1, 0, 0)
+    controls.procEntry:Click()
+    truthy(controls.procEntry.menu:IsShown(), "region menu is open before cleanup")
+    typeText(controls.x, "918"); controls.x:SetFocus()
+    addon:BeginOptionsDrag("LeftButton")
+    panel.mockCenter = { 1003, 517 }
+    local savedProc = copy(addon:GetProcConfig())
+    local savedMobility = copy(addon:GetMobilityConfig())
+    state:fire("PLAYER_REGEN_DISABLED"); state:flushTimers()
+    equal(panel:IsShown(), false, "entering combat closes the entire Options window")
+    truthy(not panel.dragging and not panel.moving and state.movingFrame == nil, "combat cleanup ends dragging")
+    equal(controls.x:HasFocus(), false, "combat cleanup releases keyboard focus")
+    for _, dropdown in ipairs(panel.dropdowns) do equal(dropdown.menu:IsShown(), false, "all menus close") end
+    equal(env.ColorPickerFrame:IsShown(), false, "owned native picker closes")
+    equal(addon.procColorPickerSession, nil, "owned picker callbacks and session are detached")
+    equal(addon.procRegionColorPreview, nil, "temporary color draft is discarded")
+    equal(addon.previewState.mode, "off", "combat closure stops Test Mode")
+    equal(countKeys(visiblePreviews(addon)), 0, "all TEST sample frames are hidden")
+    equal(panel.titleAnimation:IsPlaying(), false, "combat closure stops title animation")
+    same(addon:GetProcConfig(), savedProc, "committed Proc RGB font and coordinates survive")
+    same(addon:GetMobilityConfig(), savedMobility, "unsubmitted input cannot change Mobility settings")
+    truthy(not addon.pendingOptionsOpen, "automatic hiding does not create a reopening request")
+    state:fire("PLAYER_REGEN_ENABLED")
+    equal(panel:IsShown(), false, "automatic hiding alone never reopens at combat end")
+    addon:OpenOptions()
+    equal(tonumber(controls.x:GetText()), savedMobility.position.x, "reopen restores saved value rather than discarded text")
+    same(procFrame(addon, entry.id).text.textColor, { 0.1, 0.2, 0.9, 1 }, "cancel restores committed live region RGB")
+end)
+
+test("combat closing Options leaves native Proc Mobility and Free move timing active for public and secret data", function()
+    for _, restricted in ipairs({ false, true }) do
+        local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+            chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+            secretCharges = restricted, secretDuration = restricted }, { proc = {} })
+        putAura(state, 48108, 19, 1, restricted); putAura(state, 375240, 11, 1, restricted)
+        local panel = options(addon)
+        local live = currentLive(addon)
+        local nativeBindings = {}
+        for _, slot in ipairs(state.auraSlots) do nativeBindings[slot] = slot.nativeBinding end
+        local slots, bindings = #state.auraSlots, #state.bindings
+        state:fire("PLAYER_REGEN_DISABLED"); state:flushTimers()
+        equal(panel:IsShown(), false, "Options combat lifecycle is independent of data secrecy")
+        truthy(addon.mobilityTracking and addon.procTracking and addon.freeMoveTracking, "all real monitors remain active")
+        equal(currentLive(addon), live, "real Mobility frame is reused")
+        equal(#state.auraSlots, slots, "closing Options does not replace native aura containers")
+        equal(#state.bindings, bindings, "closing Options does not allocate native bindings")
+        for slot, binding in pairs(nativeBindings) do equal(slot.nativeBinding, binding, "native copied binding identity preserved") end
+        state:advance(3)
+        equal(nativeText(addon), "No Shimmer\n12.0", "accepted real recharge continues from original time")
+        equal(procText(addon, state, "mage_fire_hot_streak_left"), "16.0", "real Proc duration continues independently")
+        equal(procText(addon, state, "free_move_mage"), "Free move", "native receiver remains active")
+        state.proc.auras[48108] = nil; state.proc.auras[375240] = nil; state:fire("UNIT_AURA", "player")
+        equal(procText(addon, state, "mage_fire_hot_streak_left"), "", "real consumption still clears closed-panel Proc")
+        equal(procText(addon, state, "free_move_mage"), "", "real consumption still clears closed-panel receiver")
+        equal(#state.errors, 0, "combat plus secret/public data causes no lifecycle errors")
+    end
+end)
+
+test("pending Options opens resolve current specialization and never persist across reload", function()
+    local env, addon, state = auraFixture(62)
+    local entry = regionEntry(addon, "mage_arcane_clearcasting_left")
+    addon:SetProcRegionColor(entry, { r = 0.8, g = 0.1, b = 0.6 })
+    local arcane = copy(addon:GetProcConfig())
+    options(addon); addon:SelectOptionsCategory("proc")
+    state:fire("PLAYER_REGEN_DISABLED"); addon:OpenOptions()
+    truthy(addon.pendingOptionsOpen, "explicit request after combat close queues reopening")
+    local queuedSaved = copy(env.CarGOUIDB)
+    equal(queuedSaved.pendingOptionsOpen, nil, "pending intent is not stored in account data")
+    equal(queuedSaved.options.pendingOptionsOpen, nil, "pending intent is not stored in shell settings")
+    local _, reloaded, fresh = login(queuedSaved, false, { specID = 62, proc = {} })
+    truthy(not reloaded.pendingOptionsOpen, "reload starts with no stale pending intent")
+    fresh:fire("PLAYER_REGEN_ENABLED")
+    equal(reloaded.optionsFrame, nil, "reload never fulfills an old-session queued request")
+    state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    state:fire("PLAYER_REGEN_ENABLED")
+    local panel = addon.optionsFrame
+    truthy(panel:IsShown(), "queued request opens after current context is ready")
+    local selected = addon:GetSelectedProcColorEntry()
+    truthy(selected and selected.specID == 63, "deferred open selects current Fire regions, not stale Arcane")
+    equal(panel.themeWatching, true, "current theme lifecycle starts on deferred actual show")
+    same(addon.db.classes.MAGE.proc[62], arcane, "context-aware reopen preserves old spec RGB font and coordinates")
+end)
+
+test("repeated Options combat queues remain bounded and each successful cycle permits one new notice", function()
+    local _, addon, state = login()
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    addon:OpenOptions(); addon.optionsFrame:Hide()
+    local frames, baseline = #state.frames, addon:GetEventDiagnostics().callbacks
+    local messages = #state.messages
+    for cycle = 1, 20 do
+        state:fire("PLAYER_REGEN_DISABLED")
+        for request = 1, 10 do addon:ToggleOptions() end
+        equal(#state.messages, messages + cycle, "one queue notice per new successful cycle")
+        equal(addon:GetEventDiagnostics().callbacks, baseline + 1, "queued cycle adds one deferred listener")
+        equal(state:activeTimers(), 0, "ordinary combat request does not start timers")
+        state:fire("PLAYER_REGEN_ENABLED")
+        truthy(addon.optionsFrame:IsShown(), "queued cycle opens once when unlocked")
+        addon.optionsFrame:Hide()
+        equal(addon:GetEventDiagnostics().callbacks, baseline, "successful consumption and close release temporary listeners")
+        equal(#state.frames, frames, "all cycles reuse existing Options and controls")
+        equal(state:activeTimers(), 0, "all cycles leave no running work")
+    end
+end)
+
+test("closing dragged Options without TEST saves only shell position and never reconfigures native monitors", function()
+    local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+        chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {} })
+    putAura(state, 48108, 19, 1, true); putAura(state, 375240, 11, 1, true)
+    local panel = options(addon)
+    addon:BeginOptionsDrag("LeftButton"); panel.mockCenter = { 1008, 516 }
+    local live = currentLive(addon)
+    local alpha, duration = live.alpha, live.durationBinding.duration
+    local alphaWrites, durationWrites = live.alphaWrites, live.durationBinding.durationWrites
+    local reads, native = state.realReads, {}
+    local slots, bindings, config = #state.auraSlots, #state.bindings, copy(addon.db.classes)
+    for _, slot in ipairs(state.auraSlots) do native[slot] = slot.nativeBinding end
+    for _, method in ipairs({ "ConfigureMobility", "ConfigureProc", "ConfigureFreeMove", "ApplySettings" }) do
+        addon[method] = function() error("Options-only close cannot reconfigure gameplay: " .. method) end
+    end
+    state.inCombat = true
+    addon:CloseOptions()
+    truthy(not panel:IsShown() and not panel.dragging and not panel.moving, "close ends panel and drag state")
+    truthy(addon.db.options.position.x ~= 0 or addon.db.options.position.y ~= 0, "actual dragged shell position is saved")
+    same(addon.db.classes, config, "shell-only save preserves every class/spec/region setting")
+    equal(state.realReads, reads, "shell-only save does not query live state")
+    equal(live.alpha, alpha, "close preserves secret native Mobility alpha")
+    equal(live.alphaWrites, alphaWrites, "close performs no replacement visibility write")
+    equal(live.durationBinding.duration, duration, "close preserves existing native recharge object")
+    equal(live.durationBinding.durationWrites, durationWrites, "close never restarts native countdown")
+    equal(#state.auraSlots, slots, "close creates no native Aura container")
+    equal(#state.bindings, bindings, "close creates no native timer binding")
+    for slot, binding in pairs(native) do equal(slot.nativeBinding, binding, "native Proc/Free move bindings remain owned and stable") end
+    equal(#state.errors, 0, "no unwanted gameplay reconfiguration or frame access")
+end)
+
+test("combat event snapshot cleanup stops TEST once even when old preview callbacks remain in dispatch", function()
+    local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+        chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {} })
+    options(addon); addon:SetPreview("all")
+    local refresh, stop = addon.RefreshMobility, addon.StopPreview
+    local refreshes, stops = 0, 0
+    addon.RefreshMobility = function(self, ...) refreshes = refreshes + 1; return refresh(self, ...) end
+    addon.StopPreview = function(self, ...) stops = stops + 1; return stop(self, ...) end
+    state:fire("PLAYER_REGEN_DISABLED")
+    equal(stops, 1, "shared event snapshot cannot stop the already-cleared Preview twice")
+    equal(refreshes, 1, "one immediate real-state restoration follows ending TEST")
+    equal(addon.previewState.mode, "off", "TEST is fully stopped")
+    equal(addon.optionsFrame:IsShown(), false, "Options remains combat-closed")
+    state:flushTimers()
+    equal(nativeText(addon), "No Shimmer\n15.0", "legitimate gameplay event coalescer retains true original recharge")
+    equal(#state.errors, 0, "old snapshot callbacks remain harmless after unregister")
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

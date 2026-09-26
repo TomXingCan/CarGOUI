@@ -1,11 +1,19 @@
 # Mage native Proc coverage — alpha.13
 
+**2026-09-27 user acceptance update (alpha.14 lifecycle increment):** the user
+reports that current Mage Proc behavior works normally. This supersedes the
+earlier general request to retest the alpha.13 Clearcasting repair, but does
+not supply a build or a per-talent/per-layout scenario matrix. Mapping and
+runtime code are unchanged in alpha.14; the following records retain their
+original source-audit and offline-test distinctions.
+
 Target source audit: **Retail 12.1.0 build 69933**. The user's actual client
 build has not been supplied. Source verification, offline tests and a real
 client combat/visual test are separate results. The user reports that
 Arcane Soul and Overpowered Missiles work in their alpha.12 scenario.
 That does not establish every talent, combat, refresh or layout scenario.
-Clearcasting's alpha.13 correction remains pending user retest.
+At the alpha.13 delivery, Clearcasting's correction was pending user retest;
+the subsequent user report is recorded above.
 
 This scope adds countdown **numbers** to an existing Blizzard graphical
 activation overlay. It does not create a general buff list, a cast

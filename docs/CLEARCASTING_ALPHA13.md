@@ -1,5 +1,10 @@
 # Clearcasting correction — alpha.13
 
+**Later user feedback, 2026-09-27:** current Mage Proc behavior is confirmed
+normal in the user's tested usage. Alpha.14 preserves this implementation.
+The pending-retake statements below describe the alpha.13 delivery boundary;
+no detailed client build/event capture or exhaustive scenario matrix was supplied.
+
 ## Finding and implemented correction
 
 The user reports that **Arcane Soul and Overpowered Missiles timers work in

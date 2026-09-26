@@ -75,6 +75,8 @@ local function OnSpecializationChanged(self, _, unit)
 end
 
 local function OnPreviewCombat(self)
+    -- Options may already have stopped TEST earlier in this event snapshot.
+    if self.previewState.mode == "off" then return end
     self:StopPreview()
     if self.RefreshMobilityOptions then self:RefreshMobilityOptions() end
 end

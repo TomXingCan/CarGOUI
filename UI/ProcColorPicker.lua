@@ -102,6 +102,7 @@ local function InstallPickerHooks(picker)
 end
 
 function addon:OpenProcColorPicker(entry)
+    if InCombatLockdown() then return false, "The color picker is unavailable in combat." end
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() or not SameRegion(entry, self:GetSelectedProcColorEntry()) then
         return false, "Select a Proc region first."

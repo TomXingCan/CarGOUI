@@ -28,6 +28,23 @@ assert not re.search(r"controls\.(?:font|fontSize|scale|outline|shadow)\s*=", op
 assert not re.search(r"Apply Theme|themeSelector|SetColorRGB|classSelector|specSelector|profileSelector|loadModuleButton", options)
 assert not re.search(r"controls\.(?:fontColor|mobilityColor|themeColor|classColor|opacity|alpha)\s*=", options)
 print("PASS Options has automatic style context, scoped Proc-only RGB and no manual class/spec/profile/theme/module controls")
+queue = options.split("function addon:QueueOptionsOpen()", 1)[1].split("local function ConsumeOptionsOpen", 1)[0]
+assert 'self:RegisterEvent("PLAYER_REGEN_ENABLED", OnPendingOptionsCombatEnded)' in queue
+assert "if not self.pendingOptionsOpen then" in queue and "self.pendingOptionsOpen = true" in queue
+assert not re.search(r"CreateFrame|CreateOptions|C_Timer|CarGOUIDB|self\.db|OnUpdate|NewTicker", queue)
+assert options.count("C_Timer.NewTimer(0,") == 1
+retry = options.split("local function OnPendingOptionsCombatEnded", 1)[1].split("function addon:QueueOptionsOpen", 1)[0]
+assert "not self.optionsOpenRetry" in retry and "self.optionsOpenRetry ~= retry" in retry
+assert "self.pendingOptionsOpen and not InCombat()" in retry
+assert not re.search(r"OnPendingOptionsCombatEnded\s*\(", retry.split("C_Timer.NewTimer(0,", 1)[1])
+factory = options.split("function addon:CreateOptions()", 1)[1]
+assert factory.index("if InCombat()") < factory.index("CreateFrame(")
+opened = options.split("function addon:OpenOptions()", 1)[1].split("function addon:ToggleOptions", 1)[0]
+assert opened.index("if InCombat()") < opened.index("self:CreateOptions()")
+assert "if not panel:IsShown() then panel:Show() end" in opened and "ConsumeOptionsOpen(self)" in opened
+assert "self.optionsOpenRetry:Cancel()" in options
+assert not re.search(r"(?:CarGOUIDB|self\.db)[^\n]*pendingOptionsOpen", options)
+print("PASS Options combat requests remain session-only, creation is guarded and one cancellable boundary retry uses explicit Show")
 
 toc = (root / "CarGOUI.toc").read_text(encoding="utf-8")
 entries = [line.strip().replace("\\", "/") for line in toc.splitlines()

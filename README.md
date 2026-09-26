@@ -1,8 +1,8 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.13**，在 alpha.12 提交 `74d4525` 上修正 Clearcasting 图形/计时映射，并新增当前法师三系 Proc 的逐区域 RGB。目标 WoW Retail 12.1.0（Interface 120100），数据/API 核查固定 build 69933。Mobility、Free move、Options 格局、主题、字体范围及用户坐标保留；不扩展其他职业真实 Proc 或已排除的特殊 Mobility。
+当前版本 **0.1.0-alpha.14**，在 alpha.13 提交 `7ba1dae6` 上只调整 Options 的战斗打开/关闭生命周期。目标 WoW Retail 12.1.0（Interface 120100），已有数据/API 核查固定 build 69933。Mobility、Free move、Options 格局、主题、Proc 区域颜色、字体范围及用户坐标保留；不扩展其他职业真实 Proc 或已排除的特殊 Mobility。
 
-用户已反馈 **Arcane Soul、Overpowered Missiles 在其 alpha.12 使用场景中正常**，Clearcasting 无数字。本包将 Clearcasting 的计时 Aura **263725** 与三个新图形 owner **1277420/1277421/1277422** 分开；只过滤一个计时 Aura，图形换层不重建计时。**源码和离线验证不等于实际修复已通过客户端验收。** 映射为多个目标数据/官方说明支持的关联，用户实际 build、事件及 native Aura 匹配仍需复测。见 [根因与证据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md)、[升级验收](docs/UPGRADE_ALPHA13.md)。
+用户于 2026-09-27 确认当前法师 Proc 正常。本轮保留这份实机反馈和 alpha.13 的映射/颜色实现，不将它扩写为每种天赋、布局或重载场景的逐项验收。其他 12 职业 Proc 仍只处于清单核查范围，没有新增真实监控。历史 [Clearcasting 修复依据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md) 保留；本轮见 [战斗锁定说明与验收步骤](docs/OPTIONS_COMBAT_LOCK.md)。
 
 ## 安装与升级
 
@@ -10,6 +10,8 @@
 2. 检查 `CarGOUI/CarGOUI.toc` 与 `CarGOUI_Data/CarGOUI_Data.toc` 都在上述目录下，没有多嵌套一层。
 3. 从 alpha.8 升级时，退出游戏后删除旧 **AddOns/CarGOUI_Mage 程序目录**，再替换新包两个目录。**不要删除 WTF 中的 CarGOUI SavedVariables**。插件不会自动删除程序目录或用户存档。所有现有职业配置、Proc 样式、坐标及外壳设置保留。
 4. 登录后 `/cui` 打开或关闭 Options；`/cargoui` 为别名。zhCN 客户端也默认英文。
+
+战斗中输入任一别名只排队一次，并提示 `CarGOUI: Options will open when combat ends.`，不会创建窗口、打开拾色器或启动 Test Mode。脱战并确认解除锁定后打开一次；普通脱战不会反复弹窗。窗口已打开时进战斗会自动收起、取消未确认编辑并停止 TEST；仅自动收起不会排队重开。待处理请求只存于当前会话，重载/登出不保留；`help`、`status` 行为不变。
 
 从 GitHub 源码安装时：仓库主体作为 `CarGOUI`，另将其中 `Modules/CarGOUI_Data` 复制为 AddOns 下的同级 `CarGOUI_Data`。推荐直接使用交付安装 ZIP，避免遗漏内部模块。
 
