@@ -1,11 +1,15 @@
 local addonName, addon = ...
 
 addon.name = addonName
-addon.version = "0.1.0-alpha.8"
+addon.version = "0.1.0-alpha.9"
 addon.initialized = false
 addon.enabled = false
--- Private bridge for the automatically loaded internal class addon.
-_G.CarGOUI_Internal = addon
+-- The unified Data package registers isolated adapters through this host.
+_G.CarGOUI_DataHost = addon
+-- An accidentally enabled alpha.8 CarGOUI_Mage may still execute its old
+-- forwarding bootstrap. Quarantine those writes instead of exposing the host.
+-- No files or SavedVariables are deleted. The installer omits that old addon.
+_G.CarGOUI_Internal = {}
 
 function addon:Print(message)
     local text = "|cff67d5c8CarGOUI|r: " .. tostring(message)

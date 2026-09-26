@@ -1,0 +1,15 @@
+## Interface: 120100
+## Title: CarGOUI - Data (internal)
+## Notes: Automatically loaded class adapter definitions. Only the current class is activated.
+## Author: CarGOUI
+## Version: 0.1.0-alpha.9
+## Dependencies: CarGOUI
+## LoadOnDemand: 1
+
+Bootstrap.lua
+Classes\Mage\Bootstrap.lua
+Classes\Mage\MobilityEntries.lua
+Classes\Mage\PreviewEntries.lua
+Classes\Mage\SpellState.lua
+Classes\Mage\Register.lua
+Complete.lua

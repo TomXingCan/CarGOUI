@@ -1,0 +1,3 @@
+local _, data = ...
+local accepted, reason = data.host:RegisterClassAdapter("MAGE", data.adapters.MAGE)
+assert(accepted, reason)

@@ -27,24 +27,24 @@ end
 local function ResolveTheme()
     local faction, classToken, specID = ReadIdentity()
     local spec = classToken == "MAGE" and specID and addon.optionThemeSpecs[specID]
-    local key, fallback = "neutral", "This identity has no dedicated theme."
+    local headerKey = faction == "Alliance" and "alliance" or faction == "Horde" and "horde" or "neutral"
+    local bodyKey, fallback = "neutral", "This class has no dedicated Body theme."
     if classToken == "MAGE" then
-        key = "mage"
-        if faction ~= "Alliance" and faction ~= "Horde" then
-            fallback = "No selected faction; using the Mage fallback."
-        elseif not spec then
-            fallback = specID and "This specialization has no dedicated theme." or "No selected specialization; using the Mage fallback."
-        else
-            key, fallback = string.lower(faction) .. "_" .. spec.key, nil
-        end
+        bodyKey = spec and spec.key or "mage"
+        if spec then fallback = nil
+        else fallback = "No covered specialization; using the Mage Body fallback." end
     elseif not classToken or not addon.optionThemeClassNames[classToken] then
-        fallback = "Player identity is unavailable; using the neutral fallback."
+        fallback = "Class identity is unavailable; using the neutral Body fallback."
     end
-    local theme = addon.optionThemes[key]
-    return theme, {
+    if headerKey == "neutral" then
+        fallback = (fallback and (fallback .. " ") or "") .. "No known faction; using the neutral Header."
+    end
+    local header, body = addon.optionHeaderThemes[headerKey], addon.optionBodyThemes[bodyKey]
+    return header, body, {
         mode = "Automatic", faction = faction, class = addon.optionThemeClassNames[classToken] or "Unknown",
         specialization = spec and spec.label or (specID and ("Unmapped (" .. specID .. ")") or "Not selected"),
-        palette = theme.label, themeKey = key, fallback = fallback,
+        headerKey = headerKey, bodyKey = bodyKey, headerPalette = header.label, bodyPalette = body.label,
+        palette = header.label .. " / " .. body.label, themeKey = headerKey .. "_" .. bodyKey, fallback = fallback,
     }
 end
 
@@ -62,7 +62,7 @@ end
 
 function addon:GetAutomaticThemeInfo()
     if self.automaticThemeInfo then return self.automaticThemeInfo end
-    local _, info = ResolveTheme()
+    local _, _, info = ResolveTheme()
     return info
 end
 
@@ -77,7 +77,7 @@ function addon:ApplyOptionsCategoryTheme(button, selected)
         button.themeSelection = selection
     end
     local info = self.automaticThemeInfo
-    local theme = self.optionThemes[info and info.themeKey or "neutral"]
+    local theme = self.optionBodyThemes[info and info.bodyKey or "neutral"]
     Gradient(selection, theme, self.optionThemeOpacity.selection)
     selection:SetShown(selected == true)
 end
@@ -90,19 +90,115 @@ end
 function addon:CreateOptionsTheme(panel)
     if panel.theme then return panel.theme end
     local header = panel.brandingHeader
-    local theme = { motif = {} }
+    local theme = { motif = {}, watermarkSize = self.optionThemeWatermarkSize }
     panel.theme = theme
     theme.header = header:CreateTexture(nil, "BACKGROUND", nil, -1)
     theme.header:SetAllPoints(header)
-    for i = 1, 8 do
-        local texture = header:CreateTexture(nil, "BACKGROUND", nil, 0)
-        texture:Hide()
-        theme.motif[i] = texture
+    -- BackdropTemplate's center occupies BACKGROUND sublevel 0. These surfaces
+    -- sit above it while remaining below BORDER, child widgets and text.
+    theme.body = panel:CreateTexture(nil, "BACKGROUND", nil, 1)
+    theme.body:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -76)
+    theme.body:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
+    theme.sidebar = panel:CreateTexture(nil, "BACKGROUND", nil, 2)
+    theme.sidebar:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -76)
+    theme.sidebar:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 192, 96)
+    theme.footer = panel:CreateTexture(nil, "BACKGROUND", nil, 2)
+    theme.footer:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 1, 96)
+    theme.footer:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
+    -- Native Lines do not create input frames. Their BACKGROUND layer lies below
+    -- child-page controls and the panel's text; no overlay frame is needed.
+    for i = 1, self.optionThemeMotifLimit do
+        local line = panel:CreateLine(nil, "BACKGROUND", nil, 3)
+        line:Hide()
+        theme.motif[i] = line
     end
     for _, button in ipairs(panel.categories) do
         self:ApplyOptionsCategoryTheme(button, IsSelectedCategory(panel, button))
     end
     return theme
+end
+
+local function Solid(texture, color, alpha)
+    texture:SetColorTexture(color[1], color[2], color[3], alpha or 1)
+end
+
+local function SkinControl(record, body)
+    local control, kind = record.control, record.kind
+    if record.fill then
+        if kind == "content" then Solid(record.fill, body.accent, 0.28)
+        else Solid(record.fill, kind == "input" and body.input or body.button, 0.97) end
+    end
+    for _, line in ipairs(record.border or {}) do Solid(line, body.accent, 0.36) end
+    if kind == "menu" or kind == "dialog" then
+        control:SetBackdropColor(body.input[1], body.input[2], body.input[3], 1)
+        control:SetBackdropBorderColor(body.accent[1], body.accent[2], body.accent[3], 0.65)
+    end
+    if kind == "input" and control.SetTextColor then control:SetTextColor(unpack(addon.optionThemeText)) end
+    for _, method in ipairs({ "GetHighlightTexture", "GetCheckedTexture", "GetThumbTexture" }) do
+        local texture = control[method] and control[method](control)
+        if texture and texture.SetVertexColor then texture:SetVertexColor(body.accent[1], body.accent[2], body.accent[3]) end
+    end
+end
+
+function addon:RegisterOptionsThemeControl(panel, control, kind)
+    if not panel or not control then return end
+    panel.themeControls = panel.themeControls or {}
+    if control.optionsThemeRecord then return end
+    local record = { control = control, kind = kind, border = {} }
+    control.optionsThemeRecord = record
+    panel.themeControls[#panel.themeControls + 1] = record
+    if kind ~= "menu" and kind ~= "dialog" then
+        local layer = (kind == "check" or kind == "slider" or kind == "content") and "BACKGROUND" or "ARTWORK"
+        local fill = control:CreateTexture(nil, layer, nil, -2)
+        record.fill = fill
+        if kind == "content" then
+            fill:SetPoint("TOPLEFT", control, "TOPLEFT", 0, -28)
+            fill:SetPoint("TOPRIGHT", control, "TOPRIGHT", 0, -28)
+            fill:SetHeight(1)
+        elseif kind == "slider" then
+            fill:SetPoint("LEFT", control, "LEFT", 0, 0)
+            fill:SetPoint("RIGHT", control, "RIGHT", 0, 0)
+            fill:SetHeight(4)
+        else
+            fill:SetPoint("TOPLEFT", control, "TOPLEFT", 1, -1)
+            fill:SetPoint("BOTTOMRIGHT", control, "BOTTOMRIGHT", -1, 1)
+        end
+        if kind ~= "content" and kind ~= "slider" and kind ~= "check" then
+            for _, edge in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+                local border = control:CreateTexture(nil, "ARTWORK", nil, -1)
+                if edge == "TOP" or edge == "BOTTOM" then
+                    border:SetPoint(edge .. "LEFT", control, edge .. "LEFT", 0, 0)
+                    border:SetPoint(edge .. "RIGHT", control, edge .. "RIGHT", 0, 0)
+                    border:SetHeight(1)
+                else
+                    border:SetPoint("TOP" .. edge, control, "TOP" .. edge, 0, 0)
+                    border:SetPoint("BOTTOM" .. edge, control, "BOTTOM" .. edge, 0, 0)
+                    border:SetWidth(1)
+                end
+                record.border[#record.border + 1] = border
+            end
+        end
+    end
+    local info = self.automaticThemeInfo
+    SkinControl(record, self.optionBodyThemes[info and info.bodyKey or "neutral"])
+end
+
+local function ApplyWatermark(self, panel, surfaces, body)
+    local pattern = self:BuildOptionsThemeMotif(body.motif)
+    surfaces.motifKey, surfaces.motifCount = body.motif, #pattern
+    for i, line in ipairs(surfaces.motif) do
+        local stroke = pattern[i]
+        if stroke then
+            -- Endpoints define actual native geometry. Rotating WHITE8X8 UVs
+            -- on a narrow rectangular texture would not establish that shape.
+            line:ClearAllPoints()
+            line:SetStartPoint("BOTTOMRIGHT", panel, -122 + stroke[1], 202 + stroke[2])
+            line:SetEndPoint("BOTTOMRIGHT", panel, -122 + stroke[3], 202 + stroke[4])
+            line:SetThickness(stroke[5])
+            line:SetColorTexture(body.accent[1], body.accent[2], body.accent[3], self.optionThemeOpacity.motif)
+            line:Show()
+        else line:Hide() end
+    end
 end
 
 local function OnThemeIdentityChanged(self, event, unit)
@@ -123,31 +219,28 @@ function addon:RefreshOptionsTheme()
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() then return false end
     local surfaces = self:CreateOptionsTheme(panel)
-    local theme, info = ResolveTheme()
+    local header, body, info = ResolveTheme()
     self.automaticThemeInfo = info
     WatchIdentity(self, panel, true)
-    if surfaces.key ~= info.themeKey then
-        surfaces.key = info.themeKey
+    surfaces.key = info.themeKey
+    if surfaces.headerKey ~= info.headerKey then
+        surfaces.headerKey = info.headerKey
+        Gradient(surfaces.header, header, self.optionThemeOpacity.header)
+        self:UpdateBrandingTheme(header.accent)
+    end
+    if surfaces.bodyKey ~= info.bodyKey then
+        surfaces.bodyKey = info.bodyKey
         local opacity = self.optionThemeOpacity
-        Gradient(surfaces.header, theme, opacity.header)
-        panel:SetBackdropColor(theme.background[1], theme.background[2], theme.background[3], 0.98)
-        panel:SetBackdropBorderColor(theme.accent[1], theme.accent[2], theme.accent[3], opacity.border)
+        Gradient(surfaces.body, body, 1)
+        Solid(surfaces.sidebar, body.input, 0.60)
+        Solid(surfaces.footer, body.input, 0.76)
+        panel:SetBackdropColor(body.background[1], body.background[2], body.background[3], 1)
+        panel:SetBackdropBorderColor(body.accent[1], body.accent[2], body.accent[3], opacity.border)
         if panel.themeDivider then
-            panel.themeDivider:SetColorTexture(theme.accent[1], theme.accent[2], theme.accent[3], opacity.line)
+            Solid(panel.themeDivider, body.accent, opacity.line)
         end
-        self:UpdateBrandingTheme(theme.accent)
-        local pattern = self.optionThemeMotifs[theme.motif] or {}
-        for i, texture in ipairs(surfaces.motif) do
-            local stroke = pattern[i]
-            if stroke then
-                texture:ClearAllPoints()
-                texture:SetPoint("CENTER", panel.brandingHeader, "TOPLEFT", 346 + stroke[1], -38 + stroke[2])
-                texture:SetSize(stroke[3], 1)
-                texture:SetRotation(stroke[4] * math.pi / 180)
-                texture:SetColorTexture(theme.accent[1], theme.accent[2], theme.accent[3], opacity.motif)
-                texture:Show()
-            else texture:Hide() end
-        end
+        ApplyWatermark(self, panel, surfaces, body)
+        for _, record in ipairs(panel.themeControls or {}) do SkinControl(record, body) end
         for _, button in ipairs(panel.categories) do
             self:ApplyOptionsCategoryTheme(button, IsSelectedCategory(panel, button))
         end

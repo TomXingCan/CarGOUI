@@ -47,15 +47,23 @@ function addon:GetLoadDiagnosticsText()
     local report = self:GetRuntimeLoadDiagnostics()
     local modules, events = report.modules, report.events
     local names = { self.name }
-    if modules.mageLoaded then names[#names + 1] = "CarGOUI_Mage" end
+    if modules.dataPackageLoaded then names[#names + 1] = "CarGOUI_Data" end
+    if modules.retiredMageLoaded then names[#names + 1] = "CarGOUI_Mage" end
     local eventNames = {}
     for event, count in pairs(events.perEvent) do eventNames[#eventNames + 1] = event .. "=" .. count end
     table.sort(eventNames)
     return table.concat({
-        "Files: CarGOUI loaded; CarGOUI_Mage " .. modules.fileStatus,
+        "Files: CarGOUI loaded; CarGOUI_Data " .. modules.fileStatus,
+        "Data TOC code files loaded=" .. modules.loadedDataFiles .. "; class-definition files=" .. modules.loadedClassFiles,
+        "Registered adapter definitions=" .. modules.registeredAdapters
+            .. "; selected adapter=" .. Public(modules.activeAdapterClass),
+        "Retired CarGOUI_Mage: " .. ((modules.retiredMageLoaded or modules.retiredMageRegistered)
+            and "present/loaded; isolated legacy namespace, not selected. Remove the old AddOns program directory."
+            or "not loaded (this does not assert its directory is absent)"),
         "Module load note: " .. (modules.reason or "none"),
         "Current class/spec: " .. Public(modules.currentClass) .. "/" .. Public(modules.currentSpec),
         "Instantiated active data: Mobility=" .. modules.mobilityEntries .. ", Preview=" .. modules.previewEntries,
+        "Loading boundary: every file listed in CarGOUI_Data.toc loads together; class subdirectories are not independent LoD addons.",
         "Configuration loaded: " .. modules.configuration,
         "Configuration access: only current class Mobility / requested current spec Proc is normalized; legacy backup remains loaded.",
         "Runtime: active skills=" .. report.activeSkills .. ", pending event tasks=" .. report.pendingTasks,

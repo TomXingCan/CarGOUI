@@ -1,9 +1,29 @@
-# Loading and measurement boundary — alpha.8, stage A
+# Loading and measurement boundary — alpha.9, unified Data package
+
+## Explicit architecture tradeoff
+
+This revision deliberately replaces the per-class top-level addon model with
+two installed directories: `CarGOUI` and `CarGOUI_Data`. Native Load-on-Demand
+applies to the **whole Data addon**, not to its class subdirectories. Every file
+listed in `CarGOUI_Data.toc`, including static class definitions, loads together
+when Data is loaded. Future class files added to that TOC will therefore be
+loaded together, even when their adapter is not selected. This design does not
+claim strict per-class file loading isolation.
+
+Only the current supported class adapter is selected and only its current spec
+entry factories are run. Unselected adapter definitions are not active cooldown
+monitors. The Data addon declares no SavedVariables. Existing account-wide
+`CarGOUIDB` remains owned by CarGOUI and can restore all saved class records at
+once; a record being unaccessed does **not** mean it is unloaded. No saved class
+settings are deleted or compressed to hide this cost. This is the explicitly
+accepted package-organization tradeoff, not fulfillment of the former strict
+per-class file/storage-unloaded target.
 
 This release prepares class-scoped configuration and automatic loading. It does
 not add another class's live Mobility adapter or real Proc monitoring. The
-previously client-tested Mage spell classifier is relocated without changing its
-source bytes. Mage combat behavior still needs an installation regression test
+previously client-tested Mage spell classifier is relocated with only its two-line
+private-namespace preamble changed; its classification body is unchanged. Mage
+combat behavior still needs an installation regression test
 after the packaging change.
 
 ## Native load-on-demand implementation
@@ -12,28 +32,34 @@ The single installer contains two sibling AddOn directories:
 
 ```text
 Interface/AddOns/CarGOUI/CarGOUI.toc
-Interface/AddOns/CarGOUI_Mage/CarGOUI_Mage.toc
+Interface/AddOns/CarGOUI_Data/CarGOUI_Data.toc
 ```
 
 Install both directories together. CarGOUI chooses its internal module; the user
 does not select a class package, press a load button, or change profiles.
-The internal Mage TOC declares `LoadOnDemand: 1` and a required dependency on
+The internal Data TOC declares `LoadOnDemand: 1` and a required dependency on
 CarGOUI. The root TOC does not list Mage business-data files or SpellState.lua.
-The repository stores the internal addon under `Modules/CarGOUI_Mage`; packaging
+The repository stores the internal addon under `Modules/CarGOUI_Data`; packaging
 maps that directory to the sibling addon directory above.
 
-`Core/Modules.lua` contains only the `MAGE -> CarGOUI_Mage` module index and generic
-loading/identity/reporting functions. `C_AddOns.LoadAddOn` is called only for the
-current supported class. Loading during combat is deferred until the shared
+`Core/Modules.lua` contains a lightweight supported-class index and generic
+registration/selection/loading/reporting functions. It requests
+`C_AddOns.LoadAddOn("CarGOUI_Data")` only when the current class has shipped support
+(Mage in this release). Loading during combat is deferred until the shared
 event manager delivers `PLAYER_REGEN_ENABLED`; only that loader callback is
 removed afterward. A failed/missing internal module is reported as unavailable.
 
-The module's small namespace bridge forwards to the core addon object. There is
-one configuration system. Module factories create only the current spec's
+Each class directory owns an isolated adapter namespace. The Data host explicitly
+registers it with `RegisterClassAdapter(classToken, adapter)`; duplicate registration
+is rejected. The core dispatch methods select the current class adapter without
+letting class files overwrite core methods. Narrow bound read delegates provide
+identity, current public status and style-key access. There is no write-through
+metatable into the core and no second configuration store. Adapter factories
+create only the current spec's
 Mobility entry and existing Proc preview regions. They replace the active list
 on spec changes, rather than retaining all spec entry instances in a catalog.
 The Lua factory definitions for the three Mage specs are loaded together with
-the Mage module; they are **loaded definitions, not unloaded code**. Frames
+the Data package; they are **loaded definitions, not unloaded code**. Frames
 already created during the session can be pooled and reused. Native Lua addon
 code and WoW frame objects are not claimed to be unloadable.
 
@@ -41,8 +67,8 @@ code and WoW frame objects are not claimed to be unloadable.
 
 | Layer | Mage session | Other-class session |
 | --- | --- | --- |
-| Files/modules | Core plus `CarGOUI_Mage` loaded on demand | Core; Mage module not requested |
-| Business-data instances | Current Mage spec entries only; zero or one active Mobility entry | No Mage entry instances |
+| Files/modules | Core plus the entire `CarGOUI_Data` TOC loaded on demand | Core; Data not automatically requested by this Mage-only release. If loaded externally, all Data files remain loaded. |
+| Business-data instances | Current Mage spec entries only; zero or one active Mobility entry | No Mage entry instances; registered definitions may exist if Data was loaded externally |
 | Saved configuration | Core `CarGOUIDB` restored; current scope selected for normal reads | Core `CarGOUIDB` restored; current class defaults created only when needed |
 | Monitoring | Existing Mage adapter handles only Blink/Shimmer; runtime selects actual learned replacement | No live class adapter, cooldown queries, or Mobility bindings |
 
@@ -51,19 +77,43 @@ is not yet met.** `CarGOUIDB` is still an account-wide SavedVariables object
 owned by the core, so the client restores all previously saved class tables
 when the core loads. Normal configuration access is scoped, and untouched class
 defaults are not constructed, but scoped access is not storage isolation. The
-module has no separate SavedVariables declaration in this stage. Before stage B
-claims strict per-class storage loading, storage must move to matching native
-module-owned SavedVariables with a tested migration; simply adding more adapters
-or claiming that unread tables are unloaded would not satisfy the requirement.
+Data package has no separate SavedVariables declaration. The two-directory
+organization takes precedence over the earlier per-class package proposal;
+adding more class subdirectories cannot create independent native file or
+SavedVariables load boundaries. Storage and runtime costs require actual client
+measurement rather than a claim of strict per-class unloading.
 
 The diagnostic snapshot distinguishes `not loaded` from `loaded but inactive`,
 reports entry counts in the **active catalog**, and separately reports active
-runtime listeners/bindings. Previously used pooled frames may retain their own
+runtime listeners/bindings. The one Mobility catalog entry is the existing
+current-spec UI/position record; it is not proof that Blink/Shimmer is learned.
+The separately reported `activeSkills` follows the adapter's confirmed spell ID
+and is zero when learning has not been confirmed. Proc catalog entries remain
+static Preview-only regions, never live Proc monitors. Previously used pooled frames may retain their own
 entry references; active catalog counts do not claim those references were
 destroyed. On a real client, changing characters rebuilds the UI
 environment; a synthetic test that changes class tokens inside one environment
 can leave the previously loaded Mage code resident but inactive. That is not an
 unload operation.
+
+## Alpha.8 residual Mage addon
+
+The new core publishes its current host as `CarGOUI_DataHost`. The retired
+`CarGOUI_Internal` name points to an isolated empty compatibility sink. If an
+alpha.8 `CarGOUI_Mage` is left installed and explicitly loaded, its old bootstrap
+and class functions write into that sink. They cannot replace the new dispatch
+methods, register a second active Mage adapter or use the real saved settings.
+Its declared dependency requires the new CarGOUI core to load first; this guard
+works whether the retired addon runs before or after Data is requested. This is
+collision prevention, not proof that the old code or its memory is unloaded.
+
+The new ZIP includes no `CarGOUI_Mage` directory. For a clean upgrade, exit WoW,
+remove the old **AddOns program directories** `CarGOUI` and `CarGOUI_Mage` (and a
+prior `CarGOUI_Data` when replacing this release), then extract the new two
+directories. Keep WTF and all SavedVariables files. CarGOUI never deletes these
+directories or user settings automatically. Diagnostics distinguish retired code
+being loaded/registered in quarantine from an active adapter; “not loaded” does
+not assert that the directory is absent.
 
 ## Target API evidence
 
@@ -100,15 +150,18 @@ On the target client, preserve SavedVariables and record the build with the
 existing diagnostics. Capture the same diagnostic snapshot at each stage:
 
 1. Fresh Mage login, before opening Options; then open `/cui`. For the first
-   snapshot without creating Options, run `/run print(CarGOUI_Internal:GetMobilityDiagnostics())`
+   snapshot without creating Options, run `/run print(CarGOUI_DataHost:GetMobilityDiagnostics())`
    in chat. This calls the same explicit diagnostic method; it does not start a sampler.
 2. Start the existing external Preview; stop Preview; close Options.
 3. Enter combat, exhaust Blink/Shimmer, restore one use, and leave combat.
 4. Switch Arcane/Fire/Frost repeatedly (at least 20 changes), using Preview and
    stopping it between changes; return to the initial spec and close Options.
-5. Relog a Warrior, open Options and attempt Preview. Mage code must remain
-   unrequested, with no active Mage skills/listeners/bindings. A saved Mage
-   configuration table may still be present because the storage limitation above
+5. Relog a Warrior, open Options and attempt Preview. This release must not
+   automatically request Data, and has no active Mage skills/listeners/bindings.
+   Separately, if Data is explicitly loaded for an isolation test, its Mage
+   definitions must be reported loaded but inactive, with zero instantiated
+   active Mage entries and no Mobility subscriptions/bindings. A saved Mage
+   configuration table may still be restored because the storage limitation above
    is explicit. Relog Mage and check settings restore unchanged.
 
 Record the module/file state, active class/spec, instantiated entries, actual
@@ -123,7 +176,8 @@ profiling, the tester may enable `scriptProfile` and reload for that measurement
 session, then restore their previous setting afterward. CarGOUI does not toggle
 it. Record CPU deltas between equal-duration activity intervals, not just a
 cumulative number, and label profiling overhead. Record memory for CarGOUI and
-CarGOUI_Mage separately with the loaded-state field; do not report an unloaded
+CarGOUI_Data separately with the loaded-state field (and retired CarGOUI_Mage if
+accidentally loaded); do not report an unloaded
 module's absent metric as measured zero. Natural GC and other client activity
 can change memory between snapshots; no forced collection is used to hide that.
 

@@ -1,4 +1,5 @@
-local _, addon = ...
+local _, data = ...
+local addon = data.adapters.MAGE
 
 -- These checks inspect only whether a value is restricted, never its contents.
 local function Secret(value)

@@ -269,7 +269,7 @@ function addon:GetProcConfig(specID)
     if not class or not currentSpec or specID ~= currentSpec then return end
     -- A deferred/missing Mage module has no migration catalog yet. Do not
     -- persist provisional factory values which would later mask old settings.
-    if class == "MAGE" and (not self.mageModuleLoaded or self.activeModuleClass ~= class
+    if class == "MAGE" and (not self.dataPackageLoaded or self.activeAdapterClass ~= class
         or self.activeModuleSpec ~= specID) then return end
     if self.configurationClass ~= class then self:RefreshConfigurationContext() end
     local classConfig = self.db.classes[class]

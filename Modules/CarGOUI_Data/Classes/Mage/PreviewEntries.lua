@@ -1,4 +1,5 @@
-local _, addon = ...
+local _, data = ...
+local addon = data.adapters.MAGE
 
 -- Preview only; these are the existing verified regions, not a live Proc DB.
 -- Definitions are factories. Only the current specialization's entry tables
@@ -39,7 +40,7 @@ local factories = {
     end,
 }
 
-function addon:ActivateMageEntries(specID)
+function addon:ActivateEntries(specID)
     if self.activeModuleClass == "MAGE" and self.activeModuleSpec == specID then return false end
     local mobility = self:CreateMageMobilityEntry(specID)
     local entries = {}
@@ -53,14 +54,14 @@ function addon:ActivateMageEntries(specID)
     return true
 end
 
+function addon:DeactivateEntries()
+    self.activeModuleClass, self.activeModuleSpec, self.activeMobilityEntry = nil, nil, nil
+    self.mobilityEntries, self.previewEntries = nil, nil
+end
+
 function addon:GetPreviewEntries()
-    local class, specID = self:GetCurrentModuleIdentity()
-    if class ~= "MAGE" then return {} end
-    if self.activeModuleClass ~= class or self.activeModuleSpec ~= specID then
-        self:RefreshActiveEntries()
-    end
     local result = {}
-    for _, entry in ipairs(self.previewEntries) do
+    for _, entry in ipairs(self.previewEntries or {}) do
         if entry.kind == "mobility" then
             local status = self.GetMobilityStatus and self:GetMobilityStatus()
             local name = status and status.spellName or "Shimmer"

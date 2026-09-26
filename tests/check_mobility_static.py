@@ -3,10 +3,10 @@ from pathlib import Path
 import re
 
 root = Path(__file__).resolve().parent.parent
-mage_root = root / "Modules/CarGOUI_Mage"
+mage_root = root / "Modules/CarGOUI_Data"
 if not mage_root.is_dir():
-    mage_root = root.parent / "CarGOUI_Mage"
-modules = [mage_root / "SpellState.lua", root / "Modules/Mobility/Runtime.lua"]
+    mage_root = root.parent / "CarGOUI_Data"
+modules = [mage_root / "Classes/Mage/SpellState.lua", root / "Modules/Mobility/Runtime.lua"]
 sources = {path: path.read_text(encoding="utf-8") for path in modules}
 
 

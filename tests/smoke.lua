@@ -19,9 +19,9 @@ for line in toc:lines() do
 end
 toc:close()
 assert(#files > 0, "CarGOUI.toc contains no Lua files")
-local moduleRoot = root .. "/Modules/CarGOUI_Mage"
-local probe = io.open(moduleRoot .. "/CarGOUI_Mage.toc", "r")
-if probe then probe:close() else moduleRoot = root .. "/../CarGOUI_Mage" end
+local moduleRoot = root .. "/Modules/CarGOUI_Data"
+local probe = io.open(moduleRoot .. "/CarGOUI_Data.toc", "r")
+if probe then probe:close() else moduleRoot = root .. "/../CarGOUI_Data" end
 local total, failed = 0, 0
 
 local function equal(actual, expected, label)
@@ -92,7 +92,7 @@ local function setup(saved, loggedIn, client)
     env.GameFontHighlight = { template = "GameFontHighlight" }
     env.GameFontHighlightSmall = { template = "GameFontHighlightSmall" }
     local state = { frames = {}, errors = {}, messages = {}, loggedIn = loggedIn or false,
-        fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, masks = {}, fontStrings = {},
+        fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, lines = {}, masks = {}, fontStrings = {},
         specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0,
         inCombat = client.inCombat or false, clock = 100, pendingTimers = {},
         faction = client.faction or "Alliance", factionReads = 0, gradientWrites = 0,
@@ -496,6 +496,19 @@ local function setup(saved, loggedIn, client)
     function object:SetBackdropColor(...) self.backdropColor = { ... } end
     function object:SetBackdropBorderColor(...) self.backdropBorderColor = { ... } end
     function object:SetColorTexture(...) self.color = { ... } end
+    function object:SetStartPoint(point, relative, x, y)
+        equal(self.kind, "Line", "native start point belongs to Line geometry")
+        self.startPoint = { point, relative, x, y }
+    end
+    function object:SetEndPoint(point, relative, x, y)
+        equal(self.kind, "Line", "native end point belongs to Line geometry")
+        self.endPoint = { point, relative, x, y }
+    end
+    function object:SetThickness(value)
+        equal(self.kind, "Line", "native thickness belongs to Line geometry")
+        truthy(type(value) == "number" and value > 0, "line thickness is positive")
+        self.thickness = value
+    end
     function object:SetTexture(value) self.texture = value end
     function object:GetTexture() return self.texture end
     function object:SetBlendMode(value) self.blendMode = value end
@@ -570,6 +583,13 @@ local function setup(saved, loggedIn, client)
         if name then env[name] = texture end
         state.textures[#state.textures + 1] = texture
         return texture
+    end
+    function object:CreateLine(name, layer, template, sublevel)
+        local line = setmetatable({ parent = self, name = name, layer = layer, template = template,
+            sublevel = sublevel, scripts = {}, events = {}, kind = "Line" }, { __index = object })
+        if name then env[name] = line end
+        state.lines[#state.lines + 1] = line
+        return line
     end
     function object:CreateMaskTexture(name, layer)
         local mask = setmetatable({ parent = self, name = name, layer = layer,
@@ -668,13 +688,13 @@ local function setup(saved, loggedIn, client)
             return state.loadedModules[name] == true, state.loadedModules[name] == true
         end,
         LoadAddOn = function(name)
-            equal(name, "CarGOUI_Mage", "only current implemented class module may load")
+            equal(name, "CarGOUI_Data", "only the unified business data package may load")
             truthy(not state.inCombat, "native LoD loading must defer combat")
             if client.moduleUnavailable then return false, "MISSING" end
             if state.loadedModules[name] then return true end
             state.moduleLoads = state.moduleLoads + 1
             local namespace = {}
-            local moduleTOC = assert(io.open(moduleRoot .. "/CarGOUI_Mage.toc", "r"))
+            local moduleTOC = assert(io.open(moduleRoot .. "/CarGOUI_Data.toc", "r"))
             for line in moduleTOC:lines() do
                 local path = line:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
                 if path ~= "" and path:sub(1, 1) ~= "#" then
@@ -1279,21 +1299,39 @@ test("font menu applies each supported face and localized client font persists",
 end)
 
 
-test("only the Options header starts dragging and its saved position is independent", function()
+test("Options backgrounds drag the same window while interactive controls keep their own input", function()
     local env, addon, state = login(nil)
     addon:UpdateSettings({ position = { x = 37, y = -19 } })
     local panel, controls = options(addon)
     truthy(panel.movable and panel.clampedToScreen, "Options movable and clamped")
     local header = panel.header
-    truthy(header and header.parent == panel, "distinct title drag region")
+    truthy(header and header.parent == panel, "original title drag region retained")
     same(header.dragButtons, { "LeftButton" }, "header accepts only left drag")
-    equal(panel:GetScript("OnDragStart"), nil, "panel body never starts dragging")
-    equal(panel:GetScript("OnDragStop"), nil, "panel body has no drag handler")
+    truthy(panel.optionsDragSurface, "window background is a drag surface")
+    truthy(panel.appearanceScroll.optionsDragSurface, "Appearance scroll background is a drag surface")
+    truthy(panel.appearanceScroll.scrollChild.optionsDragSurface, "Appearance editor empty area is a drag surface")
+    for _, page in pairs(panel.pages) do truthy(page.optionsDragSurface, "every existing page background is draggable") end
+    addon:ShowMobilityDiagnostics()
+    truthy(panel.diagnosticsFrame.optionsDragSurface, "diagnostic dialog empty background can drag Options")
+    equal(panel.diagnosticsFrame.editBox:GetScript("OnDragStart"), nil, "diagnostic selection field owns text input")
+    local dragSurfaces = 0
     for _, frame in ipairs(state.frames) do
-        if frame ~= header then
-            equal(frame:GetScript("OnDragStart"), nil, "only header owns a drag-start handler")
+        if frame.optionsDragSurface then
+            dragSurfaces = dragSurfaces + 1
+            truthy(frame.kind == "Frame" or frame.kind == "ScrollFrame", "only backgrounds receive drag hooks")
+            same(frame.dragButtons, { "LeftButton" }, "background accepts only left drag")
+            truthy(frame:GetScript("OnDragStart") and frame:GetScript("OnDragStop") and frame:GetScript("OnMouseUp"), "background has release safety")
+            local oldStart = frame:GetScript("OnDragStart")
+            addon:RegisterOptionsDragSurface(frame)
+            equal(frame:GetScript("OnDragStart"), oldStart, "re-registering does not stack hooks")
+        else
+            equal(frame:GetScript("OnDragStart"), nil, "buttons inputs menus sliders and reminder frames never start window drag")
         end
     end
+    truthy(dragSurfaces >= 10, "existing empty surfaces covered without extra overlay frame")
+    panel.diagnosticsFrame.close:Click()
+    panel:GetScript("OnDragStart")(panel, "RightButton")
+    equal(state.movingFrame, nil, "right mouse never drags window")
     header:GetScript("OnDragStart")(header, "LeftButton")
     equal(state.movingFrame, panel, "header starts moving Options")
     panel.mockCenter = { (960 + 120) / panel:GetScale(), (540 - 80) / panel:GetScale() }
@@ -1302,6 +1340,10 @@ test("only the Options header starts dragging and its saved position is independ
     equal(addon.db.options.position.x, 120, "window X saved independently")
     equal(addon.db.options.position.y, -80, "window Y saved independently")
     savedPosition(addon, env, 37, -19)
+    panel:GetScript("OnDragStart")(panel, "LeftButton")
+    panel.mockCenter = { (960 + 120) / panel:GetScale(), (540 - 80) / panel:GetScale() }
+    panel:GetScript("OnMouseUp")(panel, "LeftButton")
+    equal(panel.moving, false, "mouse-up on background also stops movement")
     panel.mockCenter = nil
     local saved = copy(addon.db)
     panel:Hide()
@@ -1608,7 +1650,7 @@ end
 local function resourceCounts(state)
     local animationCount = 0
     for _, group in ipairs(state.animations) do animationCount = animationCount + #group.animations end
-    return { frames = #state.frames, textures = #state.textures, masks = #state.masks,
+    return { frames = #state.frames, textures = #state.textures, lines = #state.lines, masks = #state.masks,
         fontStrings = #state.fontStrings, groups = #state.animations, animations = animationCount }
 end
 
@@ -2725,7 +2767,7 @@ test("non-Mage login does not inherit or instantiate legacy Mage settings and re
     same(warrior:GetMobilityConfig().position, { anchor = "CENTER", x = 0, y = 0 }, "new class has factory position")
     equal(warrior:GetMobilityConfig().enabled, true, "Mage disable never leaks to Warrior")
     equal(warrior.db.classes.MAGE, nil, "pending migration does not allocate Mage config on Warrior")
-    equal(ws.moduleLoads, 0, "Warrior never loads Mage business files")
+    equal(ws.moduleLoads, 0, "Warrior never loads class business files")
     warrior:UpdateReminderStyle("mobility:WARRIOR", { font = { size = 29 } })
     local _, mage = mobilityLogin(1953, { charges = 1, maxCharges = 1 }, nil, copy(warrior.db))
     equal(mage:GetMobilityConfig().style.font.size, 52, "Mage consumes its backed-up legacy appearance later")
@@ -2875,7 +2917,7 @@ test("updating Proc spec style updates all its regions while leaving Mobility fo
     end
 end)
 
-test("Alliance Arcane automatically uses corrected blue-to-purple Options gradient only", function()
+test("Alliance Arcane resolves an Alliance-only blue Header and separate violet Arcane Body", function()
     local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
     equal(state.factionReads, 0, "hidden Options performs no decorative identity reads")
     local before = copy(addon.db)
@@ -2885,9 +2927,13 @@ test("Alliance Arcane automatically uses corrected blue-to-purple Options gradie
     equal(info.faction, "Alliance", "faction detected")
     equal(info.specialization, "Arcane", "specialization detected")
     equal(info.themeKey, "alliance_arcane", "specified combination selected")
-    same(panel.theme.header.gradient.first, { 0.08, 0.22, 0.48, 0.45 }, "header starts at Alliance blue")
-    same(panel.theme.header.gradient.last, { 0.36, 0.13, 0.58, 0.45 }, "header ends in Arcane purple")
-    same(panel.brandingHeader.sweep.vertexColor, { 0.72, 0.46, 0.98 }, "brand highlight uses central accent")
+    equal(info.headerKey, "alliance", "Header identity depends only on faction")
+    equal(info.bodyKey, "arcane", "Body identity depends only on current class and spec")
+    same(panel.theme.header.gradient.first, { 0.025, 0.075, 0.18, 1 }, "header starts in deep Alliance blue")
+    same(panel.theme.header.gradient.last, { 0.06, 0.28, 0.52, 1 }, "header remains blue rather than blending spec color")
+    same(panel.theme.body.gradient.first, { 0.064, 0.031, 0.11, 1 }, "body starts in deep Arcane violet")
+    same(panel.theme.body.gradient.last, { 0.17, 0.078, 0.245, 1 }, "body has a restrained violet gradient")
+    same(panel.brandingHeader.sweep.vertexColor, { 0.30, 0.66, 1.00 }, "brand emphasis belongs to faction Header")
     equal(panel.brandingHeader.wordmark.vertexColor, nil, "blue/gold wordmark receives no tint")
     same(addon.db, before, "automatic theme never writes saved reminder settings")
     for key in pairs(controls) do
@@ -2909,10 +2955,10 @@ test("all six Mage faction-spec combinations and unknown identities resolve safe
             equal(addon:GetAutomaticThemeInfo().themeKey, faction:lower() .. "_" .. name, "all mapped combinations resolve")
         end
     end
-    for _, item in ipairs({ { "Neutral", "MAGE", 62, "mage" }, { "Unknown", "MAGE", 62, "mage" },
-        { "Alliance", "MAGE", false, "mage" }, { "Horde", "MAGE", 999, "mage" },
-        { "Alliance", "WARRIOR", 71, "neutral" }, { "Alliance", "UNKNOWN", false, "neutral" },
-        { secret("Alliance"), "MAGE", 62, "mage" }, { "Alliance", "MAGE", secret(62), "mage" } }) do
+    for _, item in ipairs({ { "Neutral", "MAGE", 62, "neutral_arcane" }, { "Unknown", "MAGE", 62, "neutral_arcane" },
+        { "Alliance", "MAGE", false, "alliance_mage" }, { "Horde", "MAGE", 999, "horde_mage" },
+        { "Alliance", "WARRIOR", 71, "alliance_neutral" }, { "Alliance", "UNKNOWN", false, "alliance_neutral" },
+        { secret("Alliance"), "MAGE", 62, "neutral_arcane" }, { "Alliance", "MAGE", secret(62), "alliance_mage" } }) do
         state.faction, state.classToken, state.specID = item[1], item[2], item[3] or nil
         addon:RefreshOptionsTheme()
         local info = addon:GetAutomaticThemeInfo()
@@ -2927,6 +2973,9 @@ test("theme events refresh visible Options only and closing preserves live Mobil
     local _, addon, state = mobilityLogin(212653,
         { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20 })
     local panel = options(addon)
+    -- First visiting Frost grows existing dropdown choice pools to their known
+    -- maximum. Their static skins are reused afterwards, like reminder frames.
+    for _, spec in ipairs({ 62, 64, 63 }) do state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player") end
     local resources, before = resourceCounts(state), copy(addon.db)
     state.specID = 62
     syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
@@ -3031,8 +3080,8 @@ end)
 test("native class loading distinguishes files active data saved configuration and runtime ownership", function()
     local _, mage, ms = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20 })
     local report = mage:GetRuntimeLoadDiagnostics()
-    equal(ms.moduleLoads, 1, "native class module loads exactly once")
-    equal(report.modules.fileStatus, "loaded and active", "Mage file status is explicit")
+    equal(ms.moduleLoads, 1, "unified native data package loads exactly once")
+    equal(report.modules.fileStatus, "loaded; current adapter active", "Data file status and current adapter activity are explicit")
     equal(report.modules.previewEntries, 3, "only Fire catalog entries instantiated")
     equal(countKeys(mage.mobilityEntries), 1, "no unrelated spec Mobility entry instantiated")
     equal(mage.db.classes.MAGE.proc[62], nil, "unused Arcane config not initialized")
@@ -3041,7 +3090,7 @@ test("native class loading distinguishes files active data saved configuration a
     local saved = copy(mage.db)
     local _, warrior, ws = login(saved, false, { classToken = "WARRIOR", specID = 71 })
     local wr = warrior:GetRuntimeLoadDiagnostics()
-    equal(ws.moduleLoads, 0, "unrelated Mage module never loaded on Warrior")
+    equal(ws.moduleLoads, 0, "data package is not automatically loaded on unsupported Warrior")
     equal(wr.modules.fileStatus, "not loaded", "files not loaded distinct from inactive")
     equal(wr.modules.previewEntries, 0, "no unrelated preview catalog instantiated")
     equal(wr.liveFrames + wr.previewFrames + wr.allocatedBindings + wr.activeSkills, 0, "no unrelated runtime allocation")
@@ -3049,7 +3098,7 @@ test("native class loading distinguishes files active data saved configuration a
     truthy(wr.modules.configuration:find("all previously saved class tables", 1, true), "diagnostic discloses shared storage limitation")
     equal(warrior:GetProcConfig(62), nil, "foreign spec cannot be read as current Proc context")
     for _, file in ipairs(ws.loadedFiles) do
-        truthy(not file:find("CarGOUI_Mage/", 1, true), "core cannot eagerly execute Mage business file")
+        truthy(not file:find("CarGOUI_Data/", 1, true), "core cannot eagerly execute class business file")
     end
     equal(ws.realReads, 0, "Warrior never queries unrelated spell state")
 end)
@@ -3060,12 +3109,112 @@ test("already loaded class module is reported inactive without pretending code o
     state.classToken, state.specID = "WARRIOR", 71
     syncEvent(state, "PLAYER_ENTERING_WORLD")
     local report = addon:GetRuntimeLoadDiagnostics()
-    equal(report.modules.fileStatus, "loaded but inactive", "loaded code is never claimed unloaded")
+    equal(report.modules.fileStatus, "loaded; no current adapter active", "loaded code is never claimed unloaded")
     equal(report.activeSkills + report.activeBindings + report.modules.previewEntries, 0, "obsolete activity removed")
     equal(old.durationBinding.enabled, false, "old class timer detached")
     equal(old:IsShown(), false, "old class frame hidden")
     equal(state.moduleLoads, 1, "class change does not reload cached module")
     equal(report.liveFrames, 1, "cached reusable frame remains and is disclosed")
+end)
+
+test("unified data registration stays inactive on an unsupported class and never creates its saved defaults", function()
+    local env, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    equal(state.moduleLoads, 0, "unsupported current class does not request Data automatically")
+    local before = addon:GetRuntimeLoadDiagnostics()
+    truthy(env.C_AddOns.LoadAddOn("CarGOUI_Data"), "explicit native loading is modeled independently of activation")
+    addon:RefreshActiveEntries()
+    local after = addon:GetRuntimeLoadDiagnostics()
+    equal(after.modules.dataPackageLoaded, true, "whole unified package is now loaded")
+    equal(after.modules.registeredAdapters, 1, "shipped Mage definition is registered")
+    equal(after.modules.loadedClassFiles, 5, "file report counts loaded class business code honestly")
+    equal(after.modules.loadedDataFiles, 7, "whole Data TOC is loaded, internal folders are not separately LoD")
+    equal(after.modules.activeAdapterClass, nil, "Mage adapter not selected on Warrior")
+    equal(after.modules.mobilityEntries + after.modules.previewEntries, 0, "registration does not instantiate Mage entries")
+    equal(after.activeSkills + after.activeBindings + after.allocatedBindings + after.liveFrames + after.previewFrames, 0, "registration creates no unrelated runtime objects")
+    equal(after.events.callbacks, before.events.callbacks, "registration adds no unrelated listeners")
+    equal(addon.db.classes.MAGE, nil, "registration does not create another class configuration")
+    equal(state.realReads, 0, "registration performs no cooldown or charge query")
+end)
+
+test("class adapter registry rejects duplicates and only activates the adapter for current class", function()
+    local _, addon, state = mobilityLogin(1953, { charges = 0, maxCharges = 1, chargeStart = 98, chargeDuration = 20 })
+    local adapter, before = addon.activeClassAdapter, addon:GetRuntimeLoadDiagnostics()
+    local called = 0
+    local function forbidden() called = called + 1; error("Duplicate adapter must never be dispatched") end
+    local replacement = { classToken = "MAGE", ActivateEntries = forbidden, DeactivateEntries = forbidden,
+        GetMobilityEntry = forbidden, GetPreviewEntries = forbidden, ReadMobilityState = forbidden }
+    equal(addon:RegisterClassAdapter("MAGE", replacement), false, "duplicate class registration rejected")
+    equal(addon:RegisterClassAdapter("WARRIOR", replacement), false, "class-token mismatch rejected")
+    local selections, deactivations = 0, 0
+    local synthetic = { classToken = "WARRIOR", mobilityEntries = {}, previewEntries = {},
+        ActivateEntries = function(self, spec) selections = selections + 1; self.spec = spec; return true end,
+        DeactivateEntries = function() deactivations = deactivations + 1 end,
+        GetMobilityEntry = function() return nil end,
+        GetPreviewEntries = function() return {} end,
+        ReadMobilityState = function() return { status = "Unsupported", reason = "Offline adapter fixture only", path = "none" } end }
+    truthy(addon:RegisterClassAdapter("WARRIOR", synthetic), "generic registry accepts an offline future-class fixture")
+    equal(selections, 0, "registration does not activate non-current class")
+    equal(addon.activeClassAdapter, adapter, "registered active adapter retains identity")
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "No Blink\n18.0", "validated Blink path remains current")
+    equal(called, 0, "rejected record never executes a factory or reader")
+    local after = addon:GetRuntimeLoadDiagnostics()
+    equal(after.modules.registeredAdapters, 2, "one shipped adapter plus one explicit offline fixture")
+    equal(after.events.callbacks, before.events.callbacks, "duplicate rejection adds no listener")
+    equal(after.allocatedBindings, before.allocatedBindings, "duplicate rejection adds no binding")
+    state.classToken, state.specID = "WARRIOR", 71
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    equal(addon.activeClassAdapter, synthetic, "current class selects its own registered adapter")
+    equal(synthetic.spec, 71, "current specialization passed to selected adapter")
+    truthy(selections >= 1, "selected adapter activates only after identity changed")
+    equal(addon:GetRuntimeLoadDiagnostics().activeBindings, 0, "old Mage timer is detached on class switch")
+    state.classToken, state.specID = "MAGE", 63
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    equal(addon.activeClassAdapter, adapter, "return selects original Mage adapter")
+    equal(deactivations, 1, "old adapter deactivated exactly once")
+    equal(nativeText(addon), "No Blink\n18.0", "Mage returns to real current cooldown")
+end)
+
+test("leftover alpha-8 Mage namespace cannot overwrite unified adapter state or duplicate monitoring", function()
+    local function loadRetiredBridge(env, state)
+        -- The exact alpha.8 namespace forwarding contract. All subsequent old
+        -- business definitions write through __newindex; the new core must keep
+        -- that old global detached rather than trusting the leftover folder.
+        local chunk = assert(loadstring([[
+            local _, module = ...
+            local core = _G.CarGOUI_Internal
+            assert(type(core) == "table", "CarGOUI core must load before its Mage module.")
+            setmetatable(module, { __index = core, __newindex = function(_, key, value) core[key] = value end })
+            core.mageModuleRegistered = true
+            module.ReadMobilityState = function() error("Retired Mage adapter was dispatched") end
+            module.GetMobilityEntry = function() error("Retired Mage entry was dispatched") end
+            module.GetPreviewEntries = function() error("Retired Mage previews were dispatched") end
+            module.ActivateMageEntries = function() error("Retired Mage activation was dispatched") end
+            module.mageModuleLoaded = true
+        ]]))
+        setfenv(chunk, env); chunk("CarGOUI_Mage", {})
+        state.loadedModules.CarGOUI_Mage = true
+        state:fire("ADDON_LOADED", "CarGOUI_Mage")
+    end
+    local fixture = { known = { [1953] = true, [212653] = true }, override = 212653,
+        spells = { [212653] = { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20 } } }
+    local env, addon, state = setup(nil, false, { mobility = fixture })
+    truthy(env.CarGOUI_Internal ~= addon, "retired namespace is detached before any data module loads")
+    loadRetiredBridge(env, state)
+    state:fire("ADDON_LOADED", "CarGOUI"); state:fire("PLAYER_LOGIN")
+    equal(#state.errors, 0, "stale module before login raises no dispatch error")
+    equal(nativeText(addon), "No Shimmer\n16.0", "new registered adapter wins despite old folder loaded first")
+    local diagnostics = addon:GetRuntimeLoadDiagnostics()
+    local frame, binding, reader = currentLive(addon), currentLive(addon).durationBinding, addon.ReadMobilityState
+    loadRetiredBridge(env, state)
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(addon.ReadMobilityState, reader, "old namespace cannot replace core dispatcher after login")
+    equal(currentLive(addon), frame, "old module cannot create duplicate live region")
+    equal(currentLive(addon).durationBinding, binding, "old module cannot create second binding")
+    equal(addon:GetRuntimeLoadDiagnostics().events.callbacks, diagnostics.events.callbacks, "no duplicate monitoring subscription")
+    equal(addon:GetRuntimeLoadDiagnostics().allocatedBindings, diagnostics.allocatedBindings, "no duplicate native timer allocation")
+    equal(state.moduleLoads, 1, "only unified Data is automatically loaded")
+    equal(nativeText(addon), "No Shimmer\n16.0", "countdown remains current after stale module attempt")
 end)
 
 test("combat-time initial Load-on-Demand defers safely then synchronizes actual learned spell", function()
@@ -3183,7 +3332,7 @@ test("runtime CPU and memory diagnostics sample only on demand and disclose unav
 end)
 
 test("live runtime sources contain no polling cast-count inference or timer text readback", function()
-    for _, path in ipairs({ root .. "/Modules/Mobility/Runtime.lua", moduleRoot .. "/SpellState.lua" }) do
+    for _, path in ipairs({ root .. "/Modules/Mobility/Runtime.lua", moduleRoot .. "/Classes/Mage/SpellState.lua" }) do
         local file = assert(io.open(path, "r"))
         local source = file:read("*a"); file:close()
         for _, forbidden in ipairs({ "NewTicker", '"OnUpdate"', "COMBAT_LOG_EVENT_UNFILTERED",
@@ -3198,6 +3347,111 @@ test("live runtime sources contain no polling cast-count inference or timer text
     for _, forbidden in ipairs({ ":GetText(", ":GetStringWidth(", ":GetStringHeight(", ":GetAlpha(", "GetRemainingDuration", "string.format" }) do
         truthy(not live:find(forbidden, 1, true), "native live rendering must not use " .. forbidden)
     end
+end)
+
+test("empty editor and diagnostic backgrounds release dragging without consuming normal control actions", function()
+    local _, addon, state = login()
+    local panel, controls = options(addon)
+    addon:OpenAppearance("mobility")
+    local editor = panel.appearanceScroll.scrollChild
+    editor:GetScript("OnDragStart")(editor, "LeftButton")
+    equal(state.movingFrame, panel, "blank editor moves containing Options")
+    panel.mockCenter = { (960 + 83) / panel:GetScale(), (540 - 27) / panel:GetScale() }
+    editor:Hide()
+    equal(state.movingFrame, nil, "hiding active drag surface cannot leave movement latched")
+    equal(addon.db.options.position.x, 83, "empty editor drag saves window offset")
+    editor:Show(); panel.mockCenter = nil
+    enter(controls.appearanceFontSize.editBox, "35")
+    equal(addon:GetMobilityConfig().style.font.size, 35, "Enter still edits font after background drag")
+    controls.appearanceScale:SetValue(1.25)
+    equal(addon:GetMobilityConfig().style.scale, 1.25, "slider drag retains slider semantics")
+    choose(controls.appearanceOutline, "THICKOUTLINE")
+    equal(addon:GetMobilityConfig().style.font.outline, "THICKOUTLINE", "dropdown remains functional")
+    equal(state.movingFrame, nil, "interactive edits never start window movement")
+    addon:ShowMobilityDiagnostics()
+    local dialog = panel.diagnosticsFrame
+    dialog:GetScript("OnDragStart")(dialog, "LeftButton")
+    equal(state.movingFrame, panel, "blank dialog background drags same Options root")
+    dialog:GetScript("OnMouseUp")(dialog, "LeftButton")
+    dialog.selectAll:Click()
+    truthy(dialog.editBox.highlight, "diagnostic text selection still works")
+    dialog.close:Click()
+    equal(state.movingFrame, nil, "dialog close leaves no drag capture")
+end)
+
+test("faction Header and specialization Body update independently and keep scoped configuration untouched", function()
+    local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
+    local panel, controls = options(addon)
+    local saved = copy(addon.db)
+    local header = panel.theme.header.gradient
+    local brand = panel.brandingHeader.sweep.vertexColor
+    local body = panel.theme.body.gradient
+    state.specID = 63; addon:RefreshOptionsTheme()
+    equal(panel.theme.header.gradient, header, "changing spec does not rewrite Header gradient")
+    equal(panel.brandingHeader.sweep.vertexColor, brand, "changing spec does not rewrite faction brand emphasis")
+    truthy(panel.theme.body.gradient ~= body, "changing spec refreshes Body palette")
+    equal(panel.theme.bodyKey, "fire", "Fire Body selected independently")
+    local fire = panel.theme.body.gradient
+    local input = controls.x.optionsThemeRecord.fill.color
+    state.faction = "Horde"; addon:RefreshOptionsTheme()
+    equal(panel.theme.body.gradient, fire, "changing faction does not rewrite Body gradient")
+    equal(controls.x.optionsThemeRecord.fill.color, input, "changing faction does not rewrite input body skin")
+    equal(panel.theme.headerKey, "horde", "Horde Header selected automatically")
+    truthy(panel.theme.header.gradient.first[1] > panel.theme.header.gradient.first[3], "Horde Header remains red")
+    truthy(panel.theme.header.gradient.last[1] > panel.theme.header.gradient.last[3], "both faction gradient endpoints are red")
+    for _, rgb in ipairs({ panel.theme.body.gradient.first, panel.theme.body.gradient.last, input }) do
+        truthy(math.max(rgb[1], rgb[2], rgb[3]) < 0.30, "Body surfaces stay dark for readable text")
+    end
+    same(addon.db, saved, "decorative changes never write shell or scoped reminder settings")
+    equal(panel.brandingHeader.wordmark.vertexColor, nil, "base logo keeps original blue/gold artwork")
+end)
+
+test("Arcane Fire and Frost Body watermarks use distinct native endpoint geometry with one bounded Line pool", function()
+    local _, addon, state = login(nil, false, { specID = 62 })
+    local panel = options(addon)
+    local resources = resourceCounts(state)
+    local lines, counts, signatures = {}, {}, {}
+    equal(#panel.theme.motif, 64, "one bounded static watermark Line pool")
+    equal(panel.theme.watermarkSize, 200, "watermark remains a restrained body decoration")
+    for i, line in ipairs(panel.theme.motif) do lines[i] = line end
+    for _, spec in ipairs({ 62, 63, 64, 62, 64, 63 }) do
+        state.specID = spec; addon:RefreshOptionsTheme()
+        local pieces, visible = {}, 0
+        for i, line in ipairs(panel.theme.motif) do
+            equal(line, lines[i], "specializations reuse the same native Line objects")
+            equal(line.kind, "Line", "watermark uses endpoint geometry, not rotated texture coordinates")
+            equal(line.layer, "BACKGROUND", "watermark stays below interactive controls and text")
+            equal(line.sublevel, 3, "watermark stays above Body fill")
+            equal(line.parent, panel, "watermark adds no mouse-intercepting overlay frame")
+            if line:IsShown() then
+                visible = visible + 1
+                equal(line.color[4], 0.16, "watermark has low fixed opacity")
+                for _, point in ipairs({ line.startPoint, line.endPoint }) do
+                    equal(point[1], "BOTTOMRIGHT", "native endpoint uses stable panel anchor")
+                    equal(point[2], panel, "native endpoint is relative to Options")
+                    truthy(math.abs(point[3] + 122) <= 100 and math.abs(point[4] - 202) <= 100,
+                        "both endpoints fit the 200-pixel watermark bounds")
+                end
+                truthy(line.startPoint[3] ~= line.endPoint[3] or line.startPoint[4] ~= line.endPoint[4], "native segment is non-degenerate")
+                truthy(line.thickness == 2 or line.thickness == 3, "watermark has restrained line thickness")
+                equal(line.rotation, nil, "Line geometry never depends on texture rotation")
+                pieces[#pieces + 1] = table.concat({ line.startPoint[3], line.startPoint[4], line.endPoint[3], line.endPoint[4], line.thickness }, ":")
+            end
+        end
+        counts[spec] = visible; signatures[spec] = table.concat(pieces, ";")
+        equal(panel.theme.motifCount, visible, "reported motif count matches visible static strokes")
+    end
+    equal(counts[62], 60, "Arcane rune-ring motif")
+    equal(counts[63], 27, "Fire flame motif")
+    equal(counts[64], 36, "Frost crystalline motif")
+    truthy(signatures[62] ~= signatures[63] and signatures[63] ~= signatures[64] and signatures[62] ~= signatures[64],
+        "each specialization has different geometry, not merely a color swap")
+    same(resourceCounts(state), resources, "theme-only updates allocate no extra lines textures frames fonts or animations")
+    panel:Hide()
+    local gradients, reads = state.gradientWrites, state.factionReads
+    state.specID = 62; addon:RefreshOptionsTheme()
+    equal(state.gradientWrites, gradients, "hidden watermark does not update")
+    equal(state.factionReads, reads, "hidden theme performs no identity refresh")
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

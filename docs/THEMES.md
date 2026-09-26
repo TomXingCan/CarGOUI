@@ -1,40 +1,59 @@
-# Automatic Options themes
+# Automatic Header and Body themes
 
-This release resolves the player's faction, class and specialization whenever `/cui` opens Options. The Theme page reports the detected identity and palette. There is no manual theme selector, RGB editor, or Apply Theme action. Theme values are not stored in SavedVariables.
+Alpha.9 separates two automatic identities. The **Header follows faction only**; the **Body follows class/specialization only**. `/cui` resolves both identities each time Options opens. The Theme page displays both detected palettes without selectors, an Apply action, or saved theme settings.
 
-Latest user correction: **Alliance uses blue, Horde uses red**. Arcane combines that faction accent with arcane purple over a dark background. This supersedes the earlier Alliance red direction.
-
-| Combination | Header gradient | Status |
+| Surface | Identity | Direction |
 | --- | --- | --- |
-| Alliance / Arcane | Deep blue → arcane purple | User-specified direction |
-| Alliance / Fire | Deep blue → muted amber | Design proposal in this release |
-| Alliance / Frost | Deep blue → glacial teal | Design proposal in this release |
-| Horde / Arcane | Dark red → arcane purple | User-specified direction |
-| Horde / Fire | Dark ember red → burnt orange | Design proposal in this release |
-| Horde / Frost | Dark red → steel cyan | Design proposal in this release |
-| Mage without a known faction or covered specialization | Slate teal → blue grey; no specialization motif | Automatic Mage fallback |
-| Other classes or unknown identity | Slate grey; no specialization motif | Automatic neutral fallback |
+| Header and existing brand highlight | Alliance | Deep blue → brighter blue |
+| Header and existing brand highlight | Horde | Dark red → ember red |
+| Header | Neutral, missing or secret faction | Slate-grey fallback |
+| Body, sidebar, footer, selections and controls | Mage / Arcane | Deep violet → arcane purple |
+| Body, sidebar, footer, selections and controls | Mage / Fire | Dark red-brown → muted amber |
+| Body, sidebar, footer, selections and controls | Mage / Frost | Deep blue → glacial cyan |
+| Body | Mage with no covered specialization | Dark Mage slate-blue fallback, no spec symbol |
+| Body | Other or unknown class | Neutral dark fallback, no spec symbol |
 
-Colors and static motif definitions are centralized in `Database/Themes.lua`. The Arcane palette uses RGB `(0.08, 0.22, 0.48)` → `(0.36, 0.13, 0.58)`, blended at 45% opacity above a dark body. Selected categories use the same gradient at 38%. Other controls and input backgrounds retain their readable dark treatment.
+The current user direction defines this separation and the three Mage visual families. Exact RGB choices and the original geometric watermark drawings are this implementation's design proposals. The earlier combined faction-to-specialization Header gradient is superseded: changing Arcane to Fire does not recolor the Alliance Header; changing Alliance to Horde does not recolor an Arcane Body. An unknown faction does not erase a confirmed specialization's Body theme.
 
-Themes affect the header background, selected category background, thin outer border/divider and the existing brand highlight accent. The full emblem and wordmark are not tinted. Arcane, Fire and Frost have small static geometric motifs made from at most eight reused 1-pixel texture strokes at 7% opacity. No external artwork, new image files, particles or animation loops are added.
+`Database/Themes.lua` centralizes both palette tables, ordinary control backgrounds, opacity constants, class/spec labels and geometry. Header examples use `(0.025, 0.075, 0.18)` → `(0.06, 0.28, 0.52)` for Alliance and `(0.16, 0.025, 0.035)` → `(0.43, 0.07, 0.085)` for Horde. Arcane Body uses `(0.064, 0.031, 0.11)` → `(0.17, 0.078, 0.245)`. These are static native gradients, not time-varying color effects.
 
-## Runtime boundaries
+## Coverage and layering
 
-- `UI/Theme.lua` uses `UnitFactionGroup("player")`, the class token from `UnitClass("player")` and specialization ID from `C_SpecializationInfo.GetSpecialization` / `GetSpecializationInfo`. Existing global specialization functions are a compatibility fallback. Values are checked for secrecy before comparisons, indexing, or display.
-- While Options is visible, this module subscribes through the shared event manager to `PLAYER_SPECIALIZATION_CHANGED`, `UNIT_FACTION`, `NEUTRAL_FACTION_SELECT_RESULT` and `PLAYER_ENTERING_WORLD`. Unit-bearing events ignore units other than `player`. Hiding Options unregisters only this module's callbacks. Reopening always rereads identity.
-- The texture pool is created once and reused. A changed identity only reapplies the palette if the resolved theme key changed. No `OnUpdate`, ticker, spell query, cooldown state or reminder-frame transparency is involved.
-- This module uses `UpdateBrandingTheme` only for the existing highlight accent. The animated-title setting and existing combat-stop behavior are unchanged.
-- Reminder text stays the Blizzard player class color. Automatic themes do not touch reminder appearance settings, coordinates, native duration bindings, preview state or Mobility subscriptions.
-- A secret/unavailable/unrecognized identity safely uses a declared fallback, without asking the player to make a manual selection. Known Mage spec names are displayed in English; an unmapped spec is explicitly labelled as unmapped instead of being assigned a Mage specialization theme.
+The gradient covers the complete area beneath the Header. Dark translucent sidebar and footer surfaces organize the existing layout without adding pages. Registered buttons, inputs, dropdown menus, checkboxes, sliders and the diagnostics dialog reuse the Body accent. Input fills stay near-black and input text stays light. Ordinary labels, error messages and feedback keep their established readable styling.
 
-## Target-client API review
+`RegisterOptionsThemeControl(panel, control, kind)` adds a reusable skin record when an existing control is constructed; it does not add a clickable overlay or replace handlers. Supported kinds are `button`, `input`, `dropdown`, `menu`, `check`, `slider`, `dialog`, and `content`. Transparent content pages receive only a fine separator, so they do not conceal the Body gradient or watermark. Menus/dialogs reuse their existing backdrops. Other controls use bounded local flat fills/borders plus their existing highlight/thumb/checked textures.
 
-Reviewed against the pinned Blizzard UI-source snapshot for **Retail 12.1.0 / build 69933**, commit `09b9db7948abc9b9648dedaab51eb0cf3ee67b31`:
+The full-color emblem and wordmark remain unchanged. Only the pre-existing masked brand highlight and Header accent line use the faction accent. Title animation settings, combat-stop behavior, positions and glyph proportions are unchanged.
 
-- [`SimpleTextureBaseAPIDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleTextureBaseAPIDocumentation.lua) declares `SetGradient(orientation, minColor, maxColor)` with `ColorMixin` colors and `SetRotation(radians, normalizedRotationPoint?)`. Only ordinary constants from the theme mapping are passed to these APIs. If native gradients are absent on an older client, the surface uses a static solid-color capability fallback.
-- [`UnitDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua) declares `UnitFactionGroup`, `UnitClass`, and the unit/faction/specialization events used here. Secret identity values are discarded before use.
-- [`SpecializationInfoDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpecializationInfoDocumentation.lua) declares the current-player specialization query signatures in `C_SpecializationInfo`.
-- [`SecureUIPanelTemplates.xml`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_SharedXML/SecureUIPanelTemplates.xml) places `UIPanelButtonNoTooltipTemplate`'s three normal button textures in `BACKGROUND`. The category selection gradient uses `ARTWORK` sublevel -1, above that background and below the button text. The nested Appearance page keeps its owning Mobility/Proc category selected, including after a theme update.
+The Body watermark occupies a **200 × 200 design area in its lower-right corner**, above the footer and behind page controls/text. It is a recognizable but restrained outline at 16% opacity:
 
-This source review and offline tests validate the implementation contract; they do not replace actual-client visual acceptance. In-game acceptance should verify Alliance Arcane's blue-to-purple header, all six Mage combinations where characters are available, low-level/no-faction fallback, theme updates after spec changes, unchanged readable input fields, and preserved title animation settings. Existing user-confirmed Blink/Shimmer combat behavior must also be checked after the update.
+- Arcane: concentric segmented rings, a central sigil and four small rune marks (60 strokes).
+- Fire: a rising flame silhouette and inner flame (27 strokes).
+- Frost: a central crystal and six branched ice rays (36 strokes).
+
+These are original code-authored geometries rendered with native solid-color `Line` objects. They do not reuse EUI artwork, extract game emblems, download media, or add image files. One shared pool of **64 Lines** is created with Options and reused; only the selected geometry's endpoint list is generated. `SetStartPoint`, `SetEndPoint`, and `SetThickness` define actual stroke geometry directly. Unused strokes are hidden. Lines add no input frame, and no decorative frame covers interactive controls.
+
+Review caught that rotating UVs on a narrow solid-white rectangular texture would not prove the desired stroke geometry. That provisional path was replaced before delivery. The implementation does not rely on `Texture:SetRotation`, and earlier mock rotation checks were not evidence of actual client rendering.
+
+The panel backdrop's center uses `BACKGROUND`; the Body uses sublevel 1, sidebar/footer sublevel 2, and watermark sublevel 3. Child controls and text remain above those backgrounds. Selected category gradients use `ARTWORK` sublevel -1, above the underlying button fill and below text.
+
+## Runtime isolation
+
+- `headerKey` and `bodyKey` are resolved and cached independently. A changed Body key cannot recolor the Header; a changed Header key cannot recreate or recolor Body geometry. `themeKey` remains the composite diagnostic identity.
+- Identity queries are `UnitFactionGroup("player")`, `UnitClass("player")` and current-player specialization metadata. Secret/unavailable values are rejected before comparison, indexing or display.
+- While Options is visible, shared event callbacks handle `PLAYER_SPECIALIZATION_CHANGED`, `UNIT_FACTION`, `NEUTRAL_FACTION_SELECT_RESULT`, and `PLAYER_ENTERING_WORLD`. Unit events ignore non-player units. Hiding Options removes only the theme callbacks. Reopening rereads identity.
+- No `OnUpdate`, ticker, periodic scan, animated watermark, forced garbage collection, cooldown query, native duration binding or reminder-frame alpha write is added.
+- Existing controls are skinned once and reused. A newly needed dropdown choice may allocate its own small skin when that control is first created; repeated switching after those choices exist reuses them. The watermark pool itself remains exactly 64 Lines regardless of the number of switches.
+- Themes never write SavedVariables, reminder fonts/positions/scales, class colors, Preview state or Mobility subscriptions. Real Blink/Shimmer state and the next-charge timer are outside this module.
+
+## Target-client API review and acceptance
+
+Reviewed against the pinned Blizzard source for **Retail 12.1.0 / build 69933**, commit `09b9db7948abc9b9648dedaab51eb0cf3ee67b31`:
+
+- [`SimpleTextureBaseAPIDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleTextureBaseAPIDocumentation.lua) declares `SetGradient(orientation, minColor, maxColor)` using `ColorMixin`. Only ordinary palette constants enter this API. If gradients are absent on another client, a static solid fill is the capability fallback.
+- [`SimpleFrameAPIDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleFrameAPIDocumentation.lua) declares `CreateLine(name?, drawLayer?, templateName?, subLevel?)`; [`SimpleLineAPIDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleLineAPIDocumentation.lua) declares `SetStartPoint(relativePoint, relativeTo, offsetX, offsetY)`, `SetEndPoint(...)`, and `SetThickness(uiUnit)`. The explicit endpoint contract establishes geometry rather than texture-coordinate rotation. Blizzard's [`EditModeTemplates.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_EditMode/Shared/EditModeTemplates.lua) also positions native Lines by endpoints. Watermark inputs are only ordinary constant coordinates/colors.
+- [`Backdrop.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_SharedXML/Backdrop.lua) creates the center in `BACKGROUND` and supplies local backdrop color/border setters. Body sublevels deliberately sit above that center, so an opaque backdrop cannot conceal the gradient.
+- [`UnitDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua) and [`SpecializationInfoDocumentation.lua`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SpecializationInfoDocumentation.lua) document the existing identity queries/events.
+- [`SecureUIPanelTemplates.xml`](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_SharedXML/SecureUIPanelTemplates.xml) documents the template background layers beneath the category selection texture. No secure action, combat spell query, or restricted value is introduced by this skin.
+
+Offline tests can verify split keys/colors, stable pool identities, callback lifecycle, fallback behavior and unchanged live timer bindings. They cannot confirm actual client pixel rendering or mouse-hit behavior. In-game visual acceptance remains required: verify each Mage Body and watermark, stable faction Header across spec changes, stable Body across faction identity changes where available, readable controls, dropdown/slider interaction, dragging empty areas, neutral fallbacks, and unchanged live Blink/Shimmer combat behavior.

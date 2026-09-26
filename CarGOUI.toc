@@ -2,7 +2,7 @@
 ## Title: CarGOUI
 ## Notes: Mage Blink/Shimmer mobility reminders, settings and separate simulated previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.8
+## Version: 0.1.0-alpha.9
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua

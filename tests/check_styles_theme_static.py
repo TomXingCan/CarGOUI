@@ -28,17 +28,35 @@ entries = [line.strip().replace("\\", "/") for line in toc.splitlines()
            if line.strip() and not line.strip().startswith("#")]
 assert not any(path in entries for path in ("Database/MobilityEntries.lua", "Database/PreviewEntries.lua",
                                             "Modules/Mobility/SpellState.lua"))
-assert all("CarGOUI_Mage" not in path for path in entries)
-mage_root = root / "Modules/CarGOUI_Mage"
+assert all("CarGOUI_Data" not in path for path in entries)
+mage_root = root / "Modules/CarGOUI_Data"
 if not mage_root.is_dir():
-    mage_root = root.parent / "CarGOUI_Mage"
-mage_toc = (mage_root / "CarGOUI_Mage.toc").read_text(encoding="utf-8")
+    mage_root = root.parent / "CarGOUI_Data"
+mage_toc = (mage_root / "CarGOUI_Data.toc").read_text(encoding="utf-8")
 assert re.search(r"^## LoadOnDemand:\s*1\s*$", mage_toc, re.M)
 assert re.search(r"^## (?:Dependencies|RequiredDeps):\s*CarGOUI\s*$", mage_toc, re.M)
 loader = source("Core/Modules.lua")
 assert "C_AddOns.LoadAddOn" in loader and "InCombatLockdown" in loader
-assert "PLAYER_REGEN_ENABLED" in loader and "loaded but inactive" in loader
-print("PASS Mage business files use native LoD and core distinguishes loaded from active state")
+assert "PLAYER_REGEN_ENABLED" in loader and "loaded; no current adapter active" in loader
+assert 'C_AddOns.LoadAddOn("CarGOUI_Data")' in loader
+assert not re.search(r'C_AddOns\.LoadAddOn\("CarGOUI_Mage"\)', loader)
+data_entries = [line.strip().replace("\\", "/") for line in mage_toc.splitlines()
+                if line.strip() and not line.strip().startswith("#")]
+assert data_entries == ["Bootstrap.lua", "Classes/Mage/Bootstrap.lua", "Classes/Mage/MobilityEntries.lua",
+                        "Classes/Mage/PreviewEntries.lua", "Classes/Mage/SpellState.lua",
+                        "Classes/Mage/Register.lua", "Complete.lua"]
+assert "RegisterClassAdapter" in loader and "activeClassAdapter" in loader
+assert not (root / "Modules/CarGOUI_Mage/CarGOUI_Mage.toc").exists()
+print("PASS One native Data package registers isolated adapters and distinguishes loaded files from current activation")
+
+assert "surfaces.headerKey ~= info.headerKey" in theme and "surfaces.bodyKey ~= info.bodyKey" in theme
+assert 'CreateLine(nil, "BACKGROUND", nil, 3)' in theme
+assert ":SetStartPoint(" in theme and ":SetEndPoint(" in theme and ":SetThickness(" in theme
+assert not re.search(r"SetRotation\s*\(", theme)
+assert not re.search(r"CreateFrame\s*\(|CreateAnimationGroup|NewTicker|OnUpdate", theme)
+assert 'surface:RegisterForDrag("LeftButton")' in options
+assert "surface.optionsDragSurface" in options and 'surface:HookScript("OnMouseUp"' in options
+print("PASS Header/Body update independently; watermark and dragging add no animated or input-blocking overlay frame")
 
 core = "\n".join(source(path) for path in entries)
 assert not re.search(r"collectgarbage\s*\(|UpdateAddOnMemoryUsage[^\n]*OnUpdate|NewTicker", core)

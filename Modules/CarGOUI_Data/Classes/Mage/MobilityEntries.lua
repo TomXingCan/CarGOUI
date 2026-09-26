@@ -1,6 +1,7 @@
-local _, addon = ...
+local _, data = ...
+local addon = data.adapters.MAGE
 
--- Business data lives only in the Mage Load-on-Demand addon.
+-- Loaded definitions belong to the private Mage adapter in CarGOUI_Data.
 addon.mobilitySpells = { [1953] = "Blink", [212653] = "Shimmer" }
 local positionIDs = {
     [62] = "mage_arcane_shimmer", [63] = "mage_fire_shimmer",
@@ -16,10 +17,5 @@ function addon:CreateMageMobilityEntry(specID)
 end
 
 function addon:GetMobilityEntry()
-    local class, specID = self:GetCurrentModuleIdentity()
-    if class ~= "MAGE" then return nil end
-    if self.activeModuleClass ~= class or self.activeModuleSpec ~= specID then
-        self:RefreshActiveEntries()
-    end
     return self.activeMobilityEntry
 end

@@ -1,6 +1,34 @@
 local _, addon = ...
 local L = addon.L
 
+-- Attach only to existing non-interactive frames. Native hit testing leaves
+-- buttons, edits, sliders, menus and scrollbars in charge of their own input.
+function addon:BeginOptionsDrag(button)
+    local panel = self.optionsFrame
+    if button ~= "LeftButton" or not panel or not panel:IsShown() or panel.dragging then return end
+    panel.dragging = true
+    panel:StartMoving()
+end
+
+function addon:RegisterOptionsDragSurface(surface)
+    if surface.optionsDragSurface then return end
+    surface.optionsDragSurface = true
+    surface:EnableMouse(true)
+    surface:RegisterForDrag("LeftButton")
+    surface:SetScript("OnDragStart", function(_, button) addon:BeginOptionsDrag(button) end)
+    surface:SetScript("OnDragStop", function() addon:SaveOptionsPosition() end)
+    surface:HookScript("OnMouseUp", function(_, button)
+        if button == "LeftButton" then addon:SaveOptionsPosition() end
+    end)
+    surface:HookScript("OnHide", function() addon:SaveOptionsPosition() end)
+end
+
+local function ThemeControl(control, kind)
+    if addon.optionsFrame and addon.RegisterOptionsThemeControl then
+        addon:RegisterOptionsThemeControl(addon.optionsFrame, control, kind)
+    end
+end
+
 local function Label(parent, text, x, y, width, height, template)
     local label = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
     label:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
@@ -26,6 +54,7 @@ local function Button(parent, text, x, y, width, callback)
     button:SetSize(width, 28)
     button:SetText(text)
     button:SetScript("OnClick", callback)
+    ThemeControl(button, "button")
     return button
 end
 
@@ -79,6 +108,7 @@ local function EditBox(panel, parent, x, y, width)
     edit:SetFontObject("ChatFontNormal")
     edit:SetTextInsets(6, 6, 0, 0)
     edit:SetScript("OnEscapePressed", function() panel:Hide() end)
+    ThemeControl(edit, "input")
     panel.editBoxes[#panel.editBoxes + 1] = edit
     return edit
 end
@@ -87,6 +117,7 @@ local function CheckBox(panel, parent, text, x, y, buildPatch)
     local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
     check:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     check:SetSize(26, 26)
+    ThemeControl(check, "check")
     Label(parent, text, x + 32, y - 5, 390, 22, "GameFontHighlight")
     check:SetScript("OnClick", function(self)
         Submit(panel, buildPatch(not not self:GetChecked()))
@@ -104,6 +135,7 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
     menu:SetFrameLevel(panel:GetFrameLevel() + 20)
     menu:EnableMouse(true)
     Backdrop(menu, 0.07, 0.09, 0.12)
+    ThemeControl(menu, "menu")
     dropdown.menu = menu
     dropdown.choices = {}
     function dropdown:SetEntries(newEntries)
@@ -193,6 +225,7 @@ local function Slider(panel, parent, text, y, range, step, buildPatch, errorText
     track:SetColorTexture(0.20, 0.27, 0.30, 1)
     slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
     slider:GetThumbTexture():SetSize(18, 24)
+    ThemeControl(slider, "slider")
     Label(parent, tostring(range.min), 0, y - 54, 56)
     local maximum = Label(parent, tostring(range.max), 274, y - 54, 56)
     maximum:SetJustifyH("RIGHT")
@@ -297,7 +330,8 @@ function addon:RefreshOptionsThemeLabels(info)
     if not panel or not panel.themeIdentity then return end
     panel.themeIdentity:SetText("Theme: Automatic\nFaction: " .. info.faction
         .. "\nClass: " .. info.class .. "\nSpecialization: " .. info.specialization
-        .. "\nPalette: " .. info.palette)
+        .. "\nHeader: " .. (info.headerPalette or info.palette)
+        .. "\nBody: " .. (info.bodyPalette or info.palette))
     panel.themeFallback:SetText(info.fallback or "")
 end
 
@@ -371,11 +405,14 @@ function addon:ShowMobilityDiagnostics()
         dialog:SetFrameLevel(panel:GetFrameLevel() + 30)
         dialog:EnableMouse(true)
         Backdrop(dialog, 0.045, 0.06, 0.075)
+        self:RegisterOptionsDragSurface(dialog)
+        ThemeControl(dialog, "dialog")
         Label(dialog, L.diagnosticsTitle, 20, -16, 620, 24, "GameFontNormalLarge")
         Label(dialog, L.diagnosticsHint, 20, -48, 620, 36)
         local scroll = CreateFrame("ScrollFrame", nil, dialog, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", dialog, "TOPLEFT", 20, -88)
         scroll:SetSize(594, 288)
+        self:RegisterOptionsDragSurface(scroll)
         local edit = CreateFrame("EditBox", nil, scroll)
         edit:SetSize(588, 288)
         edit:SetMultiLine(true)
@@ -406,7 +443,7 @@ function addon:ShowMobilityDiagnostics()
             edit:SetFocus(); edit:HighlightText()
         end)
         dialog.close = Button(dialog, L.close, 520, -386, 120, function() dialog:Hide() end)
-        dialog:SetScript("OnHide", function() edit:ClearFocus() end)
+        dialog:HookScript("OnHide", function() edit:ClearFocus() end)
         panel.diagnosticsFrame = dialog
     end
     CloseMenus(panel)
@@ -556,14 +593,10 @@ function addon:CreateOptions()
     panel.editBoxes, panel.dropdowns = {}, {}
     panel.activeCategory = "general"
     self.optionsFrame = panel
+    self:RegisterOptionsDragSurface(panel)
     local header = self:CreateOptionsBranding(panel)
     panel.header = header
-    header:RegisterForDrag("LeftButton")
-    header:SetScript("OnDragStart", function()
-        panel.dragging = true
-        panel:StartMoving()
-    end)
-    header:SetScript("OnDragStop", function() addon:SaveOptionsPosition() end)
+    self:RegisterOptionsDragSurface(header)
     local divider = panel:CreateTexture(nil, "ARTWORK")
     divider:SetColorTexture(0.22, 0.30, 0.34, 1)
     divider:SetPoint("TOPLEFT", panel, "TOPLEFT", 192, -82)
@@ -575,6 +608,8 @@ function addon:CreateOptions()
         page:SetPoint("TOPLEFT", panel, "TOPLEFT", 216, -88)
         page:SetSize(480, 374)
         page:Hide()
+        self:RegisterOptionsDragSurface(page)
+        ThemeControl(page, "content")
         panel.pages[key] = page
         Label(page, L[key], 0, 0, 470, 24, "GameFontNormalLarge")
     end
@@ -652,8 +687,10 @@ function addon:CreateOptions()
     local scroll = CreateFrame("ScrollFrame", nil, appearance, "UIPanelScrollFrameTemplate")
     scroll:SetPoint("TOPLEFT", appearance, "TOPLEFT", 0, -32)
     scroll:SetSize(448, 336)
+    self:RegisterOptionsDragSurface(scroll)
     local editor = CreateFrame("Frame", nil, scroll)
     editor:SetSize(448, 654)
+    self:RegisterOptionsDragSurface(editor)
     scroll:SetScrollChild(editor)
     panel.appearanceScroll = scroll
     local appearanceChoices = {}
@@ -785,9 +822,9 @@ function addon:CreateOptions()
     Label(proc, "All Proc regions in this specialization share font, size, outline, shadow and scale. Each region retains its own position; Mobility uses a separate class style.", 0, -298, 470, 60)
 
     local themes = panel.pages.themes
-    Label(themes, "Automatic faction and specialization theme. No manual selection or custom colors are needed.", 0, -36, 470, 42)
-    panel.themeIdentity = Label(themes, "", 0, -98, 470, 150, "GameFontHighlight")
-    panel.themeFallback = Label(themes, "", 0, -260, 470, 76)
+    Label(themes, "Automatic faction Header and class / specialization Body. No manual selection or custom colors.", 0, -36, 470, 42)
+    panel.themeIdentity = Label(themes, "", 0, -92, 470, 168, "GameFontHighlight")
+    panel.themeFallback = Label(themes, "", 0, -276, 470, 72)
 
     local mobility = panel.pages.mobility
     panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,
@@ -846,7 +883,7 @@ function addon:CreateOptions()
         addon:RefreshOptionsTheme()
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
-    panel:SetScript("OnHide", function()
+    panel:HookScript("OnHide", function()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
         addon:UnregisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)

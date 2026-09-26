@@ -1,3 +1,5 @@
+> Alpha.9 update: Options now drags from all non-interactive backgrounds, Header is faction-only and Body is spec-themed; runtime package is CarGOUI_Data. See [UPGRADE_ALPHA9.md](UPGRADE_ALPHA9.md) and [LOAD_BOUNDARIES.md](LOAD_BOUNDARIES.md). Older header-only/module descriptions below are historical.
+
 > Current alpha.8 configuration/loading changes: [CONFIG_SCOPES.md](CONFIG_SCOPES.md) and [LOAD_BOUNDARIES.md](LOAD_BOUNDARIES.md). Historical per-entry/global configuration paths below are superseded. Mage business files now reside in Modules/CarGOUI_Mage.
 
 # Alpha 0.1 — Options, Test Mode, branding and Mage Mobility

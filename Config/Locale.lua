@@ -5,7 +5,7 @@ local english = {
     preview = "Test Mode", mobility = "Mobility", proc = "Proc", themes = "Themes",
     importExport = "Import / Export", unavailable = "Not implemented",
     future = "Disabled categories are reserved for future updates.",
-    generalHint = "Current class Mobility settings. Appearance is in Mobility / Proc. Drag the title bar to move this window.",
+    generalHint = "Current class Mobility settings. Appearance is in Mobility / Proc. Drag any empty area to move this window.",
     enabled = "Show Mobility (current class)", x = "Mobility X offset", y = "Mobility Y offset",
     apply = "Apply", center = "Center position", scale = "Scale",
     positionHint = "Press Enter in either box to save both axes (-10000 to 10000). Offsets apply to this class's Mobility reminder.",

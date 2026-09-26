@@ -1,3 +1,5 @@
+> Alpha.9 update: Options now drags from all non-interactive backgrounds, Header is faction-only and Body is spec-themed; runtime package is CarGOUI_Data. See [UPGRADE_ALPHA9.md](UPGRADE_ALPHA9.md) and [LOAD_BOUNDARIES.md](LOAD_BOUNDARIES.md). Older header-only/module descriptions below are historical.
+
 # Increment A — artwork title with glyph-masked light
 
 This is an incremental change on the existing Options branch. It preserves `/cui`, Enter-to-apply, header-only window dragging, shared SavedVariables, English UI, and external Test Mode cleanup. It does not produce Curse promotional content.
