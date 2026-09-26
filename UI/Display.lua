@@ -20,6 +20,7 @@ function addon:ApplyFontSettings(text)
         text:SetShadowColor(0, 0, 0, 0)
         text:SetShadowOffset(0, 0)
     end
+    self:ApplyReminderColor(text)
 end
 
 function addon:AcquireReminderFrame(entry, channel)
@@ -40,7 +41,7 @@ function addon:AcquireReminderFrame(entry, channel)
     frame.text = frame:CreateFontString(nil, "OVERLAY")
     frame.text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text:SetJustifyH("CENTER")
-    frame.text:SetTextColor(0.92, 0.97, 1, 1)
+    self:ApplyReminderColor(frame.text)
     pool[entry.id] = frame
     return frame
 end
@@ -85,7 +86,7 @@ end
 
 -- Live durations never enter RenderReminder's Lua string/measurement path.
 -- The native binding owns all time sampling, formatting and expiration text.
-function addon:RenderLiveMobility(entry, spellName, duration)
+function addon:RenderLiveMobility(entry, spellName, duration, visibility)
     local frame = self:AcquireReminderFrame(entry, "live")
     frame.mobilityOwned = true
     self:LayoutReminder(frame, entry)
@@ -112,13 +113,23 @@ function addon:RenderLiveMobility(entry, spellName, duration)
     binding:SetDuration(duration)
     binding:Enable()
     binding:UpdateFontString()
+    -- A duration object may hold restricted timing. Its native evaluation goes
+    -- straight to the approved display sink, never to a Lua test or readback.
+    -- This is the only writer of live opacity; styling and the timer do not
+    -- overwrite it. Ordinary paths explicitly restore opacity before showing.
+    if visibility then
+        frame:SetAlpha(visibility.duration:EvaluateTotalDuration(visibility.curve,
+            Enum.DurationTimeModifier.BaseTime))
+    else
+        frame:SetAlpha(1)
+    end
     frame:Show()
     return frame
 end
 
-function addon:HideLiveMobility()
+function addon:HideLiveMobility(except)
     for _, frame in pairs(self.reminderFrames and self.reminderFrames.live or {}) do
-        if frame.mobilityOwned then
+        if frame.mobilityOwned and frame.entryId ~= except then
             frame:Hide()
             if frame.durationBinding then
                 frame.durationBinding:Disable()

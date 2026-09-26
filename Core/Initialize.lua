@@ -14,6 +14,7 @@ function addon:Enable()
         return
     end
     self:CreateDisplay()
+    self:RefreshReminderClassColor()
     self:ApplySettings()
     self.enabled = true
     self:Print("Alpha 0.1 loaded. Type /cui for Mobility settings and separate Test Mode.")
@@ -40,3 +41,9 @@ local function OnAddonLoaded(self, _, loadedAddon)
 end
 
 addon:RegisterEvent("ADDON_LOADED", OnAddonLoaded)
+
+-- Style recovery is not tied to the Mage module's enabled state. This also
+-- updates any reused Preview/future reminder frames after entering the world.
+addon:RegisterEvent("PLAYER_ENTERING_WORLD", function(self)
+    self:RefreshReminderClassColor()
+end)

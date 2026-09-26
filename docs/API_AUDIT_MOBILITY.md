@@ -1,5 +1,7 @@
 # Phase 2A — Blink / Shimmer API 核查
 
+> **历史记录：本文描述 alpha.5。** 用户随后实测战斗外可用、战斗内不显示。alpha.6 已替换下文“secret 次数一律隐藏”的分支；当前实现、依据及未验证条件以 [战斗修复 API 核查](Mobility-Combat-API-Audit.md) 为准。本文的识别、原生文字和事件接口说明仍作参考。
+
 本次只核查 Blink `1953`、Shimmer `212653`。目标声明为 **Retail 12.1.0 / build 69933 / Interface 120100**，Blizzard UI/API 声明镜像固定到 [`09b9db7948abc9b9648dedaab51eb0cf3ee67b31`](https://github.com/Gethe/wow-ui-source/tree/09b9db7948abc9b9648dedaab51eb0cf3ee67b31)。用户实际客户端 version/build **未知**；TOC 不是实测证据。Options → Mobility → Copy diagnostics 显示运行时 `GetBuildInfo()` 的 version、build、date、Interface。
 
 ## 采用的识别和判断

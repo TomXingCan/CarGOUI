@@ -2,7 +2,7 @@
 
 This phase extends the existing standalone Options frame and `UpdateSettings` pipeline. All UI remains English, including zhCN clients. `/cui` is primary; `/cargoui` resolves to the same slash handler.
 
-Alpha.5 adds the bounded Mage runtime described in [API_AUDIT_MOBILITY.md](API_AUDIT_MOBILITY.md). Public zero-charge checks feed native duration text; secret charge availability is explicitly Restricted and hidden. Native timing/taint/combat behavior has not been validated in a real client. [Client acceptance steps](TESTING_MOBILITY.md) distinguish this from the user's earlier general UI acceptance.
+Alpha.6 incrementally fixes the bounded Mage runtime described in [the combat API audit](Mobility-Combat-API-Audit.md). Public zero charges and public single-slot recovery feed native duration text. Multiple secret charges use an independent ordinary-cooldown total-duration curve for frame opacity, while the existing charge duration supplies the real number. Diagnostics report Native tracking; Lua never reads back the opacity. Unsupported metadata/API conditions still fail closed with a precise reason. Native selection semantics near recovery and under reductions have not been validated in a real client. [Current acceptance steps](Mobility-Combat-Acceptance.md) distinguish this from the user's confirmed alpha.5 out-of-combat success and combat failure.
 
 ## Interaction and persistence
 
@@ -27,6 +27,8 @@ Only `panel.header` registers left-button drag handlers. It moves the unprotecte
 `Database/PreviewEntries.lua` contains a small Mage-only simulation catalog, not real detection rules. Specialization lookup selects eligible entries. Every separate Proc region has a stable ID, including the two separate Fingers of Frost source rows.
 
 `UI/Display.lua` exposes `AcquireReminderFrame(entry, channel)` and the sample-only `RenderReminder(frame, entry, content, testMode)`. `LayoutReminder` applies shared font/shadow/scale/position and per-region offsets. Live `RenderLiveMobility` uses a separate native DurationTextBinding and fixed dimensions from ordinary font settings; it never sends opaque timing through Lua concatenation, empty-string checks, or text measurement. Native formatting owns zero/expired empty text, a 0.1-second update interval and RealTime rate handling. There is no always-visible login placeholder.
+
+`UI/ReminderStyle.lua` copies the current Blizzard class RGB into a session-only cache keyed by UnitClass token. Both live and Preview FontStrings use SetTextColor; no global font/color table or saved color setting is modified. World entry refreshes existing frames and retries initialization fallback independently of whether the Mage runtime is enabled. Font/layout changes preserve this color and never overwrite the live parent frame's native alpha. Continuing state refreshes do not first clear/hide its binding; obsolete/suppressed output is still disabled explicitly.
 
 `UI/Preview.lua` owns transient `previewState` and the `preview` frame pool. `SetPreview('single', id)` or `SetPreview('all', id)` renders fixed sample data for the current spec in UIParent. No samples are written to SavedVariables or a real reminder state. Starting with an invalid mode, closed Options, or an unavailable entry is rejected. The `enabled` preference gates sample visibility.
 
@@ -60,4 +62,4 @@ The alpha.4 baseline had 37 Lua 5.1 mock tests covering interaction, persistence
 
 The user has viewed the prior UI in-game and accepted its general appearance. This does not establish acceptance of the new live skill logic, native timer, combat restrictions, all visual scales or region alignment. This phase has no real-client testing environment.
 
-Real Proc/aura detection, other classes and spells, Evoker Free move, theme switching and import/export remain unimplemented. Exact charged-spell depletion when currentCharges is secret remains a documented conditional blocker; no fixed timer, cast-count inference, secret arithmetic or native-display readback substitutes for it.
+Real Proc/aura detection, other classes and spells, Evoker Free move, theme switching and import/export remain unimplemented. Multiple secret charges now have a native visibility path subject to documented API/metadata prerequisites and outstanding real-client semantic acceptance. No fixed countdown, cast ledger, secret arithmetic or native-display readback substitutes for actual state.

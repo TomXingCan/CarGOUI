@@ -21,13 +21,21 @@ end
 
 function addon:RenderMobilityState()
     local state = self.mobilityState
-    self:HideLiveMobility()
-    if not self.mobilityTracking or not self.db.enabled or not state or not state.duration then return end
+    if not self.mobilityTracking or not self.db.enabled or not state or not state.duration then
+        self:HideLiveMobility()
+        return
+    end
     local preview = self.previewState
     if preview and preview.mode ~= "off" then
-        if preview.mode == "all" or preview.entryId == state.entry.id then return end
+        if preview.mode == "all" or preview.entryId == state.entry.id then
+            self:HideLiveMobility()
+            return
+        end
     end
-    self:RenderLiveMobility(state.entry, state.spellName, state.duration)
+    -- Updating a continuing reminder need not clear/hide its native binding.
+    -- Only obsolete/suppressed entries are explicitly torn down.
+    self:HideLiveMobility(state.entry.id)
+    self:RenderLiveMobility(state.entry, state.spellName, state.duration, state.visibility)
 end
 
 function addon:RefreshMobility()

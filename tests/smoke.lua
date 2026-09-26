@@ -92,7 +92,8 @@ local function setup(saved, loggedIn, client)
         fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, masks = {}, fontStrings = {},
         specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0,
         inCombat = client.inCombat or false, clock = 100, pendingTimers = {},
-        bindings = {}, formatters = {}, spellReads = {}, liveMeasurements = 0 }
+        bindings = {}, formatters = {}, curves = {}, curveEvaluations = {},
+        spellReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0 }
     if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
@@ -108,6 +109,14 @@ local function setup(saved, loggedIn, client)
     env.GetTime = function() return state.clock end
     env.issecretvalue = isSecret
     env.UnitClass = function() return state.classToken, state.classToken, state.classToken == "MAGE" and 8 or 1 end
+    state.classColors = client.classColors or { MAGE = { 0.25, 0.78, 0.92 }, WARRIOR = { 0.78, 0.61, 0.43 } }
+    env.C_ClassColor = { GetClassColor = function(token)
+        truthy(not isSecret(token), "class color lookup must receive a public class token")
+        state.classColorReads = state.classColorReads + 1
+        local rgb = state.classColors[token]
+        if not rgb then return nil end
+        return { GetRGB = function() return unpack(rgb) end }
+    end }
     env.GetSpecialization = function() return state.specID and 2 or nil end
     env.GetSpecializationInfo = function() return state.specID, "Mock specialization" end
     env.C_SpecializationInfo = { GetSpecialization = env.GetSpecialization, GetSpecializationInfo = env.GetSpecializationInfo }
@@ -163,6 +172,17 @@ local function setup(saved, loggedIn, client)
     function durationMethods:GetRemainingDuration()
         error("Live Lua must not calculate or read native remaining time")
     end
+    function durationMethods:EvaluateTotalDuration(curve, modifier)
+        equal(modifier, env.Enum.DurationTimeModifier.BaseTime, "visibility classifies base total, never remaining time")
+        equal(curve.kind, env.Enum.LuaCurveType.Step, "charge visibility needs discrete native opacity")
+        local item, value = durations[self], 0
+        for _, point in ipairs(curve.points) do
+            if item.total >= point[1] then value = point[2] end
+        end
+        state.curveEvaluations[#state.curveEvaluations + 1] = { duration = self, curve = curve }
+        -- This unwrap/classification is the native mock, not an addon operation.
+        return item.secret and secret(value) or value
+    end
     function state:duration(start, total, restricted, rate)
         local handle = setmetatable({}, { __index = durationMethods })
         durations[handle] = { start = start or 0, total = total or 0,
@@ -173,7 +193,18 @@ local function setup(saved, loggedIn, client)
     env.Enum = { DurationTextBindingProperty = { RemainingDuration = 0 },
         DurationTimeModifier = { RealTime = 0, BaseTime = 1 },
         NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 },
-        SpellBookSpellBank = { Player = 0, Pet = 1 } }
+        SpellBookSpellBank = { Player = 0, Pet = 1 }, LuaCurveType = { Step = 0 } }
+    env.C_CurveUtil = { CreateCurve = function()
+        local curve = { points = {} }
+        function curve:SetType(kind) self.kind = kind end
+        function curve:AddPoint(x, y)
+            truthy(not isSecret(x) and not isSecret(y), "curve points are public metadata, not decoded spell state")
+            self.points[#self.points + 1] = { x, y }
+        end
+        state.curves[#state.curves + 1] = curve
+        return curve
+    end }
+    if client.curveUnavailable then env.C_CurveUtil = nil end
     env.C_StringUtil = { CreateNumericRuleFormatter = function()
         local formatter = { breakpoints = {} }
         function formatter:AddBreakpoint(item) self.breakpoints[#self.breakpoints + 1] = item end
@@ -199,7 +230,10 @@ local function setup(saved, loggedIn, client)
             self.enabled = value
         end
         function binding:Enable() self:SetEnabled(true) end
-        function binding:Disable() self:SetEnabled(false) end
+        function binding:Disable()
+            self.disableCalls = (self.disableCalls or 0) + 1
+            self:SetEnabled(false)
+        end
         function binding:SetToDefaults()
             self.enabled, self.duration, self.fontString = false, nil, nil
             self.format, self.components, self.formatter = nil, nil, nil
@@ -245,6 +279,14 @@ local function setup(saved, loggedIn, client)
         state.mobility = client.mobility
         state.mobility.known = state.mobility.known or { [1953] = true }
         state.mobility.spells = state.mobility.spells or {}
+        -- Public metadata fixtures model the audited ordinary spell interval and
+        -- GCD envelope. They do not prove actual client values or semantics.
+        state.baseCooldowns = client.baseCooldowns or { [1953] = { 500, 1500 }, [212653] = { 500, 0 } }
+        env.GetSpellBaseCooldown = function(id)
+            truthy(id == 1953 or id == 212653, "base metadata remains limited to Blink/Shimmer")
+            local record = state.baseCooldowns[id]
+            if record then return unpack(record) end
+        end
         local function spellData(id, api)
             truthy(id == 1953 or id == 212653, "live runtime only queries supported Mage spell IDs")
             state.realReads = state.realReads + 1
@@ -262,8 +304,11 @@ local function setup(saved, loggedIn, client)
         env.C_Spell.GetSpellCharges = function(id)
             local item = spellData(id, "charges")
             if not item or item.unavailable or item.charges == nil then return nil end
+            local active = item.charges < (item.maxCharges or 2)
+            if item.active ~= nil then active = item.active end
             return { currentCharges = item.secretCharges and secret(item.charges) or item.charges,
-                maxCharges = item.maxCharges or 2, isActive = item.charges < (item.maxCharges or 2),
+                maxCharges = item.secretCapacity and secret(item.maxCharges or 2) or item.maxCharges or 2,
+                isActive = item.secretActivity and secret(active) or active,
                 cooldownStartTime = item.secretDuration and secret(item.chargeStart or 0) or item.chargeStart or 0,
                 cooldownDuration = item.secretDuration and secret(item.chargeDuration or 0) or item.chargeDuration or 0,
                 chargeModRate = item.secretDuration and secret(item.rate or 1) or item.rate or 1 }
@@ -283,10 +328,10 @@ local function setup(saved, loggedIn, client)
             return state:duration(item.chargeStart, item.chargeDuration, item.secretDuration, item.rate)
         end
         env.C_Spell.GetSpellCooldownDuration = function(id, ignoreGCD)
-            equal(ignoreGCD, true, "native spell cooldown queries must exclude GCD")
-            local item = spellData(id, "cooldown-duration")
+            equal(type(ignoreGCD), "boolean", "cooldown query explicitly selects its GCD purpose")
+            local item = spellData(id, ignoreGCD and "cooldown-duration-timer" or "cooldown-duration-visibility")
             if not item or item.unavailable or item.durationUnavailable then return nil end
-            return state:duration(item.cooldownStart, item.isOnGCD and 0 or item.cooldownDuration,
+            return state:duration(item.cooldownStart, ignoreGCD and item.isOnGCD and 0 or item.cooldownDuration,
                 item.secretDuration, item.rate)
         end
     end
@@ -336,6 +381,7 @@ local function setup(saved, loggedIn, client)
         if not wasShown and self.scripts.OnShow then self.scripts.OnShow(self) end
     end
     function object:Hide()
+        self.hideCalls = (self.hideCalls or 0) + 1
         local wasShown = self:IsShown()
         self.shown = false
         if wasShown and self.scripts.OnHide then self.scripts.OnHide(self) end
@@ -345,8 +391,17 @@ local function setup(saved, loggedIn, client)
         return self:IsShown() and (not self.parent or not self.parent.IsVisible or self.parent:IsVisible())
     end
     function object:SetShown(shown) if shown then self:Show() else self:Hide() end end
-    function object:SetAlpha(alpha) self.alpha = alpha end
-    function object:GetAlpha() return self.alpha == nil and 1 or self.alpha end
+    function object:SetAlpha(alpha)
+        self.alpha = alpha
+        self.alphaWrites = (self.alphaWrites or 0) + 1
+    end
+    function object:GetAlpha()
+        if self.mobilityOwned then
+            state.alphaReads = state.alphaReads + 1
+            error("Live native visibility alpha must never be read back")
+        end
+        return self.alpha == nil and 1 or self.alpha
+    end
     function object:SetFrameStrata(strata) self.strata = strata end
     function object:SetClampedToScreen(value) self.clampedToScreen = value end
     function object:SetFrameLevel(level) self.frameLevel = level end
@@ -1841,7 +1896,7 @@ end
 local function nativeText(addon)
     local frame = currentLive(addon)
     -- Test-only native render observation; addon code must never read this back.
-    if not frame or not frame:IsVisible() then return "" end
+    if not frame or not frame:IsVisible() or nativeValue(frame.alpha) == 0 then return "" end
     return frame.text.nativeRenderedText or ""
 end
 
@@ -2183,12 +2238,13 @@ test("Mobility pending edits survive live refresh and diagnostic copying but inv
     equal(#state.errors, 0, "copy and edit flow raises no errors")
 end)
 
-test("restricted charge count fails closed but secret timing uses native display when zero is public", function()
-    local data = { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20, secretCharges = true }
+test("secret charges use native visibility while public zero still uses native secret timing", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20,
+        cooldownStart = 96, cooldownDuration = 20, secretCharges = true, secretDuration = true }
     local _, addon, state = mobilityLogin(212653, data)
-    mobilityStatus(addon, "Restricted")
-    equal(nativeText(addon), "", "opaque charge count never implies exhausted or ready")
-    truthy(addon:GetMobilityStatus().reason:find("currentCharges", 1, true), "precise restricted gate is reported")
+    mobilityStatus(addon, "Native tracking")
+    equal(nativeText(addon), "No Shimmer\n16.0", "native visibility accepts secret charge state")
+    truthy(isSecret(currentLive(addon).alpha), "native curve result remains opaque through SetAlpha")
     data.secretCharges, data.secretDuration = false, true
     syncEvent(state, "SPELL_UPDATE_CHARGES")
     mobilityStatus(addon, "Depleted")
@@ -2268,7 +2324,8 @@ test("diagnostics contain actual mock build and public state without secret seri
     state.mobility.spells[212653].secretCharges = true
     addon:RefreshMobility()
     diagnostic = addon:GetMobilityDiagnostics()
-    truthy(diagnostic:find("currentCharges is restricted", 1, true), "exact blocked condition is copyable")
+    truthy(diagnostic:find("Native tracking", 1, true), "opaque native visibility is never claimed as known Ready or Depleted")
+    equal(addon:GetMobilityStatus().visibility, nil, "public diagnostics exclude native visibility objects")
     equal(#state.errors, 0, "diagnostics never stringify secret tokens")
 end)
 
@@ -2323,20 +2380,308 @@ test("module disable preserves shared Options and branding combat subscriptions"
     equal(state:activeTimers(), 0, "no inactive task remains")
 end)
 
+-- These tests model two separate native durations: an ongoing recharge supplies
+-- the displayed time, while an ordinary cooldown supplies a native alpha curve.
+-- Mock behavior verifies safe plumbing, not real-client Blink/Shimmer semantics.
+test("depletion survives entering combat when charge count and timing become secret", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20,
+        cooldownStart = 96, cooldownDuration = 20 }
+    local _, addon, state = mobilityLogin(212653, data)
+    equal(nativeText(addon), "No Shimmer\n16.0", "public out-of-combat depletion is visible")
+    local frame, binding = currentLive(addon), currentLive(addon).durationBinding
+    local hides, disables = frame.hideCalls or 0, binding.disableCalls or 0
+    data.secretCharges, data.secretDuration = true, true
+    syncEvent(state, "PLAYER_REGEN_DISABLED")
+    truthy(state.inCombat, "combat flag changes separately from data secrecy")
+    mobilityStatus(addon, "Native tracking")
+    equal(currentLive(addon), frame, "combat reuses the live frame")
+    equal(frame.durationBinding, binding, "combat reuses the native binding")
+    equal(frame.hideCalls or 0, hides, "active combat refresh does not hide then reshow the live frame")
+    equal(binding.disableCalls or 0, disables, "active combat refresh does not detach the running timer")
+    truthy(isSecret(frame.alpha), "secret native alpha is passed through without decoding")
+    equal(nativeText(addon), "No Shimmer\n16.0", "combat transition does not hide or restart the countdown")
+    state:advance(2.3)
+    equal(nativeText(addon), "No Shimmer\n13.7", "native timer keeps progressing in combat")
+    equal(state.alphaReads, 0, "addon never reads native alpha back")
+    equal(state.liveMeasurements, 0, "addon never measures restricted duration text")
+end)
+
+test("secret combat charges preserve 2-to-1 hide 1-to-0 show and 0-to-1 hide for both skills", function()
+    for _, id in ipairs({ 1953, 212653 }) do
+        local name = id == 1953 and "Blink" or "Shimmer"
+        local data = { charges = 2, maxCharges = 2, chargeStart = 100, chargeDuration = 20,
+            cooldownStart = 100, cooldownDuration = 0, secretCharges = true, secretDuration = true }
+        local _, addon, state = mobilityLogin(id, data, { inCombat = true })
+        equal(nativeText(addon), "", "fully charged is hidden")
+        data.charges, data.cooldownDuration = 1, 0.5
+        syncEvent(state, "SPELL_UPDATE_CHARGES")
+        mobilityStatus(addon, "Native tracking")
+        equal(nativeText(addon), "", "one usable charge during a short spell interval remains hidden")
+        local frame = currentLive(addon)
+        state:advance(6)
+        data.charges, data.cooldownDuration = 0, 20
+        syncEvent(state, "SPELL_UPDATE_CHARGES")
+        equal(currentLive(addon), frame, "native state transitions reuse the frame")
+        equal(nativeText(addon), "No " .. name .. "\n14.0", "last use keeps the existing recharge start")
+        local timerHandle = frame.durationBinding.duration
+        local lastEvaluation = state.curveEvaluations[#state.curveEvaluations]
+        truthy(timerHandle ~= lastEvaluation.duration, "visibility and digit timing use different native objects")
+        data.charges, data.chargeStart, data.cooldownDuration = 1, state.clock, 0
+        syncEvent(state, "SPELL_UPDATE_CHARGES")
+        mobilityStatus(addon, "Native tracking")
+        equal(nativeText(addon), "", "one recovered charge hides despite the next recharge still running")
+        truthy(frame.durationBinding.enabled, "native tracking may continue while alpha is zero")
+        equal(state.alphaReads, 0, "no alpha readback across secret transitions")
+    end
+end)
+
+test("native visibility excludes GCD short intervals and unrelated unusability with one charge", function()
+    local data = { charges = 1, maxCharges = 2, chargeStart = 95, chargeDuration = 20,
+        cooldownStart = 100, cooldownDuration = 1.5, isOnGCD = true,
+        secretCharges = true, secretDuration = true }
+    local env, addon, state = mobilityLogin(212653, data, { inCombat = true })
+    env.C_Spell.IsSpellUsable = function() error("mana/silence/control usability is not charge exhaustion") end
+    for _, totalDuration in ipairs({ 0, 0.5, 0.75, 1.5 }) do
+        for _, rate in ipairs({ 1, 2, 4 }) do
+            data.cooldownDuration, data.rate = totalDuration, rate
+            syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+            equal(nativeText(addon), "", "native BaseTime classification keeps GCD/interval invisible")
+        end
+    end
+    local visibilityReads = 0
+    for _, read in ipairs(state.spellReads) do
+        if read.api == "cooldown-duration-visibility" then visibilityReads = visibilityReads + 1 end
+        truthy(read.api ~= "cooldown-duration-timer", "secret multi-charge visibility must retain GCD in the ordinary cooldown object")
+    end
+    truthy(visibilityReads > 0, "native alpha queried ordinary cooldown with explicit ignoreGCD=false")
+    equal(#state.curves, 1, "identical metadata envelope reuses one native curve")
+end)
+
+test("native visibility classifies total not remaining and timer follows recharge rate changes", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 81, chargeDuration = 20,
+        cooldownStart = 81, cooldownDuration = 20, secretCharges = true, secretDuration = true }
+    local _, addon, state = mobilityLogin(212653, data, { inCombat = true })
+    equal(nativeText(addon), "No Shimmer\n1.0", "less than GCD remaining is still genuine depletion")
+    state:advance(0.9)
+    equal(nativeText(addon), "No Shimmer\n0.1", "countdown does not disappear at the visibility threshold")
+    data.chargeStart, data.cooldownStart, data.rate = state.clock - 3, state.clock - 3, 4
+    syncEvent(state, "SPELL_UPDATE_COOLDOWN")
+    equal(nativeText(addon), "No Shimmer\n2.0", "native timer reflects changed recharge rate without Lua calculations")
+    data.chargeStart, data.chargeDuration, data.cooldownStart, data.cooldownDuration, data.rate = state.clock, 8, state.clock, 8, 2
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "No Shimmer\n4.0", "new API durations replace the native timer after cooldown reduction")
+    equal(state.alphaReads, 0, "rate changes never inspect opacity")
+end)
+
+test("single secret charge capacity uses public recharge activity without multi-charge inference", function()
+    local data = { charges = 1, maxCharges = 1, chargeStart = 100, chargeDuration = 12,
+        cooldownStart = 100, cooldownDuration = 1.5, secretCharges = true, secretDuration = true, isOnGCD = true }
+    local _, addon, state = mobilityLogin(1953, data, { inCombat = true, specID = false })
+    mobilityStatus(addon, "Unknown")
+    equal(nativeText(addon), "", "single charge is available even with GCD")
+    data.charges = 0
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "No Blink\n12.0", "active recharge implies depletion only with public capacity one")
+    data.charges = 1
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "first recovery ends single-charge reminder")
+    equal(#state.curves, 0, "single-charge public activity does not need threshold visibility")
+end)
+
+test("secret cooldown resets and repeated combat transitions leave no stale or restarted output", function()
+    local data = { charges = 0, maxCharges = 3, chargeStart = 97, chargeDuration = 20,
+        cooldownStart = 97, cooldownDuration = 20, secretCharges = true, secretDuration = true }
+    local _, addon, state = mobilityLogin(1953, data, { inCombat = true })
+    equal(nativeText(addon), "No Blink\n17.0", "larger public capacity uses native tracking")
+    local frame, binding, curve = currentLive(addon), currentLive(addon).durationBinding, state.curves[1]
+    data.charges, data.chargeDuration, data.cooldownDuration = 3, 0, 0
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "real reset immediately hides")
+    syncEvent(state, "PLAYER_REGEN_ENABLED")
+    equal(nativeText(addon), "", "leaving combat cannot revive old duration")
+    syncEvent(state, "PLAYER_REGEN_DISABLED")
+    equal(nativeText(addon), "", "reentering combat cannot revive old duration")
+    data.charges, data.chargeStart, data.chargeDuration = 0, 98, 20
+    data.cooldownStart, data.cooldownDuration = 98, 20
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    for _ = 1, 3 do
+        state:advance(1)
+        syncEvent(state, "PLAYER_REGEN_ENABLED")
+        syncEvent(state, "PLAYER_REGEN_DISABLED")
+    end
+    equal(nativeText(addon), "No Blink\n15.0", "combat transitions use fresh duration, never restart full cooldown")
+    equal(currentLive(addon), frame, "reset and combat transition reuse frame")
+    equal(frame.durationBinding, binding, "reset and combat transition reuse binding")
+    equal(state.curves[1], curve, "reset and combat transition reuse curve")
+    equal(#state.curves, 1, "no curve allocation growth")
+end)
+
+test("closing Options stopping Preview and styling preserve secret live visibility and monitoring", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 94, chargeDuration = 20,
+        cooldownStart = 94, cooldownDuration = 20, secretCharges = true, secretDuration = true }
+    local _, addon, state = mobilityLogin(212653, data)
+    local panel, controls = options(addon)
+    truthy(addon:SetPreview("all"), "out-of-combat sample begins")
+    local live = currentLive(addon)
+    equal(nativeText(addon), "", "sample suppresses matching live output")
+    addon:StopPreview()
+    equal(nativeText(addon), "No Shimmer\n14.0", "stop queries native tracking again")
+    truthy(live.durationBinding.enabled and isSecret(live.alpha), "native timing and visibility are both restored")
+    truthy(addon:SetPreview("all"), "sample can be started again")
+    syncEvent(state, "PLAYER_REGEN_DISABLED")
+    equal(addon.previewState.mode, "off", "combat removes only simulation")
+    equal(nativeText(addon), "No Shimmer\n14.0", "combat keeps native live timer and alpha")
+    controls.close:Click()
+    truthy(not panel:IsShown() and addon.mobilityTracking, "closing Options leaves live module active")
+    data.charges, data.cooldownDuration = 1, 1.5
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "", "closed Options still receives recovery and native hide")
+    addon:UpdateSettings({ font = { size = 33 }, scale = 1.4 })
+    addon:RefreshReminderClassColor()
+    equal(nativeText(addon), "", "font/color refresh cannot overwrite secret zero opacity")
+    truthy(isSecret(live.alpha), "style alpha is confined to FontString text color")
+    data.charges, data.cooldownDuration = 0, 20
+    syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(nativeText(addon), "No Shimmer\n14.0", "live monitoring resumes depletion with Options still closed")
+    equal(state.alphaReads, 0, "render refresh never reads secret frame alpha")
+    equal(state.liveMeasurements, 0, "native text remains outside string measurement")
+end)
+
+test("native charge visibility reports precise missing or restricted API prerequisites", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20,
+        cooldownStart = 100, cooldownDuration = 20, secretCharges = true, secretDuration = true }
+    local env, addon, state = mobilityLogin(212653, data, { curveUnavailable = true })
+    truthy(addon:GetMobilityStatus().status == "Unsupported" or addon:GetMobilityStatus().status == "Restricted",
+        "missing native curve support is reported, not fabricated depletion")
+    equal(nativeText(addon), "", "unavailable native display path stays safely hidden")
+    local _, other, otherState = mobilityLogin(212653, copy(data),
+        { baseCooldowns = { [1953] = { secret(500), 1500 }, [212653] = { 500, 0 } } })
+    truthy(other:GetMobilityStatus().status == "Restricted" or other:GetMobilityStatus().status == "Unknown",
+        "secret public-metadata candidate cannot be compared to build a threshold")
+    equal(nativeText(other), "", "secret envelope metadata does not produce guessed alpha")
+    equal(#otherState.errors, 0, "metadata secrets are rejected before arithmetic")
+    local _, changedMetadata = mobilityLogin(212653, copy(data),
+        { baseCooldowns = { [1953] = { 20000, 1500 }, [212653] = { 500, 0 } } })
+    mobilityStatus(changedMetadata, "Restricted")
+    equal(nativeText(changedMetadata), "", "changed metadata rejects the classifier instead of inflating its threshold")
+    data.secretCapacity = true
+    addon:RefreshMobility()
+    mobilityStatus(addon, "Restricted")
+    equal(nativeText(addon), "", "unknown capacity cannot use single-charge reasoning")
+    data.secretCapacity, data.secretActivity = false, true
+    addon:RefreshMobility()
+    mobilityStatus(addon, "Restricted")
+    equal(nativeText(addon), "", "secret recharge activity is never branched on")
+    equal(#state.errors, 0, "restricted prerequisite paths do not throw")
+end)
+
+test("reminder names and native digits share fixed Blizzard class color with Preview and future Proc", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20,
+        cooldownStart = 100, cooldownDuration = 20, secretCharges = true, secretDuration = true }
+    local _, addon, state = mobilityLogin(212653, data)
+    local live = currentLive(addon)
+    same(live.text.textColor, { 0.25, 0.78, 0.92, 1 }, "one native FontString colors both skill name and timer")
+    truthy(live.durationBinding.format:find("No Shimmer\n{}", 1, true), "name and numeric token share styled string")
+    truthy(not live.durationBinding.format:find("|c", 1, true), "restricted formatting contains no color escape markup")
+    local panel = options(addon)
+    truthy(addon:SetPreview("all"), "all defined test samples are shown")
+    local guideColor
+    for _, frame in pairs(addon.previewFrames) do
+        same(frame.text.textColor, live.text.textColor, "Mobility/Proc Preview uses the same automatic class color")
+        guideColor = frame.guidance.label.textColor
+        same(guideColor, { 0.55, 0.8, 1, 1 }, "TEST label retains its helper style")
+    end
+    local saved, reads = copy(addon.db), state.classColorReads
+    addon:RefreshPreview()
+    addon:RefreshMobility()
+    equal(state.classColorReads, reads, "ordinary renderer reuse reuses class color cache")
+    same(addon.db, saved, "color does not persist RGB in account settings")
+    truthy(panel.brandingHeader.wordmark.kind == "Texture", "brand remains authored artwork")
+end)
+
+test("class color survives font changes reuse spec changes and reload without saved RGB", function()
+    local data = { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }
+    local env, addon, state = mobilityLogin(212653, data)
+    local frame = currentLive(addon)
+    local savedColor = copy(frame.text.textColor)
+    addon:UpdateSettings({ font = { size = 36 }, scale = 1.25 })
+    same(frame.text.textColor, savedColor, "changing font reapplies class color")
+    data.charges = 1; syncEvent(state, "SPELL_UPDATE_CHARGES")
+    data.charges = 0; syncEvent(state, "SPELL_UPDATE_CHARGES")
+    equal(currentLive(addon), frame, "reused live frame remains pooled")
+    same(frame.text.textColor, savedColor, "reused native frame keeps class color")
+    for _, specID in ipairs({ 62, 63, 64 }) do
+        state.specID = specID
+        syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        same(currentLive(addon).text.textColor, savedColor, "Mage spec never selects a different color")
+    end
+    local _, reloaded = mobilityLogin(212653, copy(data), nil, copy(env.CarGOUIDB))
+    same(currentLive(reloaded).text.textColor, savedColor, "reload derives current player color")
+    local _, warrior = login(copy(env.CarGOUIDB), false, { classToken = "WARRIOR" })
+    local sample = warrior:AcquireReminderFrame({ id = "future_proc" }, "preview")
+    warrior:ApplyFontSettings(sample.text)
+    same(sample.text.textColor, { 0.78, 0.61, 0.43, 1 }, "shared account DB cannot carry Mage RGB onto another class")
+    equal(addon.db.reminderClassColor, nil, "session cache is not a SavedVariables member")
+end)
+
+test("class color fallback retries and world entry refreshes hidden and live pooled frames", function()
+    local _, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }, { classColors = {} })
+    local live = currentLive(addon)
+    same(live.text.textColor, { 1, 1, 1, 1 }, "initial unavailable color uses safe white")
+    options(addon)
+    addon:SetPreview("all")
+    addon:StopPreview()
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    state.classColors.MAGE = { 0.25, 0.78, 0.92 }
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    truthy(not addon.mobilityTracking, "style lifecycle does not enable disabled Mobility")
+    for _, pool in pairs(addon.reminderFrames) do
+        for _, frame in pairs(pool) do
+            same(frame.text.textColor, { 0.25, 0.78, 0.92, 1 }, "world entry fixes all hidden/reused reminder text")
+        end
+    end
+    for _, invalid in ipairs({ { 0 / 0, 0.4, 0.4 }, { math.huge, 0.4, 0.4 },
+        { -0.1, 0.4, 0.4 }, { 1.1, 0.4, 0.4 }, { secret(0.25), 0.78, 0.92 } }) do
+        state.classColors.MAGE = invalid
+        equal(addon:RefreshReminderClassColor(), false, "invalid/secret color is rejected before comparison")
+        same(live.text.textColor, { 1, 1, 1, 1 }, "invalid source never leaks invalid RGB into SetTextColor")
+    end
+    state.classColors.MAGE = { 0.25, 0.78, 0.92 }
+    equal(addon:ApplyReminderColor(live.text), true, "failed lookup is retried on demand")
+    same(live.text.textColor, { 0.25, 0.78, 0.92, 1 }, "class color recovers without reload")
+    equal(#state.errors, 0, "color recovery produces no errors")
+end)
+
+test("Options exposes no custom reminder colors and class style adds no polling or global mutations", function()
+    local _, addon = login()
+    local _, controls = options(addon)
+    for key in pairs(controls) do
+        truthy(not key:lower():find("color", 1, true), "no custom color controls: " .. key)
+    end
+    for _, path in ipairs({ "UI/Options.lua", "Config/Defaults.lua", "UI/ReminderStyle.lua" }) do
+        local file = assert(io.open(root .. "/" .. path, "r"))
+        local source = file:read("*a"); file:close()
+        for _, forbidden in ipairs({ "ColorPickerFrame", "CUSTOM_CLASS_COLORS", "ElvUI", "Ellesmere", '"OnUpdate"', "NewTicker" }) do
+            truthy(not source:find(forbidden, 1, true), path .. " does not introduce " .. forbidden)
+        end
+    end
+end)
+
 test("live runtime sources contain no polling cast-count inference or timer text readback", function()
     for _, path in ipairs({ "Modules/Mobility/Runtime.lua", "Modules/Mobility/SpellState.lua" }) do
         local file = assert(io.open(root .. "/" .. path, "r"))
         local source = file:read("*a"); file:close()
         for _, forbidden in ipairs({ "NewTicker", '"OnUpdate"', "COMBAT_LOG_EVENT_UNFILTERED",
             "UNIT_SPELLCAST_SUCCEEDED", ":GetText(", ":GetStringWidth(", ":GetStringHeight(",
-            ":GetRemainingDuration(", "GetSpellCastCount", "IsSpellUsable", "UnitAura" }) do
+            ":GetRemainingDuration(", ":GetTotalDuration(", ":GetAlpha(", "GetSpellCastCount", "IsSpellUsable", "UnitAura" }) do
             truthy(not source:find(forbidden, 1, true), path .. " must not use " .. forbidden)
         end
     end
     local file = assert(io.open(root .. "/UI/Display.lua", "r"))
     local source = file:read("*a"); file:close()
     local live = assert(source:match("function addon:RenderLiveMobility(.*)"), "live renderer exists")
-    for _, forbidden in ipairs({ ":GetText(", ":GetStringWidth(", ":GetStringHeight(", "GetRemainingDuration", "string.format" }) do
+    for _, forbidden in ipairs({ ":GetText(", ":GetStringWidth(", ":GetStringHeight(", ":GetAlpha(", "GetRemainingDuration", "string.format" }) do
         truthy(not live:find(forbidden, 1, true), "native live rendering must not use " .. forbidden)
     end
 end)
