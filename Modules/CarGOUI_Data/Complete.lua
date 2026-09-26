@@ -30,6 +30,10 @@ data.host.dataFileManifest = {
     "Classes/Paladin/ProcDefinitions.lua",
     "Classes/Priest/ProcDefinitions.lua",
     "Classes/Warlock/ProcDefinitions.lua",
+    "Classes/Druid/ProcDefinitions.lua",
+    "Classes/Shaman/ProcDefinitions.lua",
+    "Classes/Evoker/ProcDefinitions.lua",
+    "Classes/Rogue/ProcDefinitions.lua",
     "Complete.lua",
 }
 data.host.dataCodeFileCount = #data.host.dataFileManifest
