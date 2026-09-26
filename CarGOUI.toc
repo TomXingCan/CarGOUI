@@ -2,13 +2,15 @@
 ## Title: CarGOUI
 ## Notes: Lightweight CarGOUI Alpha 0.1 framework (Phase 1).
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.1
+## Version: 0.1.0-alpha.2
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua
 Core\Events.lua
 Config\Defaults.lua
+Config\Locale.lua
 Core\Database.lua
 UI\Display.lua
+UI\Options.lua
 Config\Commands.lua
 Core\Initialize.lua

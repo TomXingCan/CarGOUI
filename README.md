@@ -1,140 +1,143 @@
-# CarGOUI Alpha 0.1 — Phase 1
+# CarGOUI Alpha 0.1
 
-已实现可独立安装的 AddOn 基础框架。目标客户端为 WoW Retail 12.1.0，TOC Interface 为 `120100`。无需 Ace3、LibSharedMedia 或其他插件。
+轻量、独立的 WoW Retail AddOn。当前版本 `0.1.0-alpha.2` 包含 Phase 1 基础框架和独立图形设置窗口，目标客户端为 Retail 12.1.0（Interface `120100`）。无需其他插件或外部媒体库。
 
-默认在屏幕中央显示 `CarGOUI` 文本：Friz Quadrata、24 号、普通描边、阴影开启。通过命令调整位置和字体，立即生效。框体不接受鼠标操作，不支持拖动。
+输入 `/cargoui` 打开或关闭设置窗口。位置、字体、字号、描边、缩放、阴影和显示开关都可在窗口内完成。`/cargoui help` 显示可选命令帮助。
+
+## 安装
+
+1. 完全退出 WoW。
+2. 将安装包内的整个 `CarGOUI` 文件夹复制到正式服目录 `_retail_\Interface\AddOns\`。
+3. 确认最终路径为 `_retail_\Interface\AddOns\CarGOUI\CarGOUI.toc`，没有额外的同名目录嵌套。
+4. 启动游戏，在角色选择界面的插件列表中启用 CarGOUI。
+
+也可下载本仓库的 ZIP，将解压后的仓库目录重命名为 `CarGOUI` 后安装。升级时替换插件文件即可；账号设置保存在 WTF 目录中。
+
+首次登录后，默认在屏幕中央显示 `CarGOUI` 文字：Friz Quadrata、24 号、普通描边、缩放 1、阴影开启。当前是基础显示框体，尚未加入职业技能或 Buff 逻辑。
+
+## 图形设置窗口
+
+窗口采用左侧分类、右侧选项布局。简体中文客户端使用中文标签，其余客户端使用英文标签。再次输入 `/cargoui`、按 Esc 或点击关闭按钮均可关闭窗口。
+
+| 分类 | 可操作设置 |
+| --- | --- |
+| 常规 / General | 显示开关；X/Y 输入框和应用按钮；恢复居中；缩放滑块与精确数值输入 |
+| 字体与外观 / Font & appearance | 字体下拉菜单；字号滑块与精确数值输入；描边下拉菜单；阴影复选框 |
+| 预览 / Preview | 使用当前字体、字号、描边、阴影和缩放的静态文字样例 |
+
+字体菜单提供游戏内置的 Friz Quadrata、Arial Narrow、Morpheus、Skurri。若客户端标准字体与这些字体不同，也会提供 `Client default` 选项。标签自身使用客户端界面字体，避免中文标签依赖 Friz 字体。
+
+可用范围：
+
+- X/Y：-10000 至 10000。正 X 向右、正 Y 向上，锚点固定为 CENTER。偏移使用 UIParent 界面坐标单位，不是固定物理像素。
+- 字号：8 至 72。滑块以 1 为步长；输入框允许精确数值。
+- 缩放：0.5 至 3。滑块以 0.05 为步长；输入框允许精确数值。缩放不改变设定的视觉偏移。
+- 描边：无、普通、加粗。
+
+勾选框、下拉菜单和滑块的修改立即生效。输入数值后按 Enter 或点击对应的应用按钮；X/Y 会作为一组完整校验后一起应用。无效输入会在窗口底部显示错误，并保留原配置。切换分类或关闭窗口会丢弃尚未应用的输入。
+
+底部的“重置全部设置”按钮需要再次点击“确认重置”才会恢复默认值。点击关闭或切换分类会取消这次重置确认。
+
+预览只显示静态 `CarGOUI` 文字，不模拟技能、倒计时或 Buff。过大文字会缩小以适应预览区，实际显示框体仍使用配置值。关闭设置窗口后，面板预览隐藏；实际显示框体是否显示由常规页的显示开关决定。
+
+Mobility、Proc、主题、导入/导出分类均标记为“未实现”并禁用。没有提醒框体拖动、Unlock Mode 或布局编辑器。
+
+## 游戏内验收
+
+建议先仅启用 CarGOUI，并使用 `/console scriptErrors 1` 开启错误弹窗。
+
+1. `/reload` 后确认屏幕中央有占位文字；此时设置窗口不应自行出现。
+2. 输入 `/cargoui`。应打开独立窗口，左侧可选择常规、字体与外观、预览。未实现分类应灰显且不能打开。
+3. 在常规页输入 X=100、Y=-80，点击应用。再把缩放设为 1.2。关闭窗口，观察实际文字的位置和大小。
+4. 重新打开窗口，在字体页依次选择字体，把字号设为 30，选择加粗描边并关闭阴影。前往预览页确认文字变化；可切回字体页继续调整。
+5. 再次输入 `/cargoui` 应关闭窗口。在打开的窗口内按 Esc，或先点击输入框再按 Esc，也应关闭窗口并释放输入焦点。
+6. 重新打开，输入无效数值或超过范围的数值再点击应用。应出现窗口内错误提示，已保存值保持不变。
+7. 在 X/Y 输入框输入一个值但不应用，关闭窗口再打开。输入框应恢复已保存的数值。
+8. 在常规页关闭显示开关，关闭窗口并 `/reload`。文字应保持隐藏；重新打开窗口可恢复显示。
+9. `/reload` 后打开窗口，检查字体、字号、描边、位置、缩放和阴影保留。点击重置全部设置，确认第一次点击不会重置，第二次确认后恢复默认值。
+10. 反复打开/关闭窗口，切换分类及打开下拉菜单。确认没有 Lua 错误、残留下拉菜单或不能释放的输入焦点。
+
+可用 `/dump select(4, GetBuildInfo())` 检查客户端 Interface。此版本面向 `120100`。出现错误时，请保留完整错误文本、操作步骤和客户端版本。
 
 ## 文件结构
 
 ```text
 CarGOUI/
-├── CarGOUI.toc             # 插件元数据、SavedVariables 和加载顺序
+├── CarGOUI.toc             # 元数据与 9 个 Lua 文件的加载顺序
 ├── Core/
-│   ├── Addon.lua           # 私有命名空间、版本和聊天输出
-│   ├── Events.lua          # 单一事件框体、多订阅者事件分发
-│   ├── Database.lua        # 默认值合并、设置校验和重置
-│   └── Initialize.lua      # ADDON_LOADED / PLAYER_LOGIN 生命周期
+│   ├── Addon.lua           # 私有命名空间、版本与聊天输出
+│   ├── Events.lua          # 事件订阅与分发
+│   ├── Database.lua        # SavedVariables、共享校验与设置更新接口
+│   └── Initialize.lua      # ADDON_LOADED / PLAYER_LOGIN 初始化
 ├── Config/
-│   ├── Defaults.lua        # 默认设置和允许的数值范围
-│   └── Commands.lua        # /cargoui 设置命令
+│   ├── Defaults.lua        # 默认值、字体列表与数值范围
+│   ├── Locale.lua          # 设置窗口的中文与英文文案
+│   └── Commands.lua        # 默认打开窗口及可选兼容命令
 ├── UI/
-│   └── Display.lua         # CENTER 文本框体、位置和字体应用
-├── Modules/
-│   ├── Mobility/           # 预留目录
-│   └── Proc/               # 预留目录
-├── Database/               # 预留目录
-├── Media/
-│   └── Fonts/              # 预留目录；使用游戏自带字体
-├── tests/
-│   ├── smoke.lua           # 10 项离线测试
-│   └── run_tests.py        # 可选本地测试运行器
-└── README.md
+│   ├── Display.lua         # 显示框体与共用字体渲染
+│   └── Options.lua         # 延迟创建的独立图形设置窗口
+├── Modules/Mobility/       # 预留
+├── Modules/Proc/           # 预留
+├── Database/               # 预留
+├── Media/Fonts/            # 预留；使用客户端字体
+└── tests/                  # 离线 Lua 5.1 测试及 Python 运行器
 ```
 
-预留目录内的 `.gitkeep` 用于保留目录结构，不会被 WoW 加载。TOC 只加载列出的 7 个运行时 Lua 文件；README 和 tests 也不会被加载。
+预留目录中的 `.gitkeep`、README 和测试脚本不会被 WoW 加载。
 
-## 安装
+## 配置与性能
 
-1. 完全退出 WoW。
-2. 解压交付的 ZIP，将其中的整个 `CarGOUI` 文件夹复制到正式服安装目录的 `_retail_\Interface\AddOns\` 下。
-3. 确认最终路径是 `_retail_\Interface\AddOns\CarGOUI\CarGOUI.toc`，不要多套一层同名文件夹，也不要放进 Classic 目录。
-4. 启动 WoW，在角色选择界面的插件列表中启用 `CarGOUI`，然后进入游戏。
-
-登录后应看到一条 CarGOUI 加载提示，以及屏幕中央的 `CarGOUI` 文本。
-
-## 命令
-
-| 命令 | 效果 |
-| --- | --- |
-| `/cargoui` 或 `/cargoui help` | 显示命令帮助 |
-| `/cargoui status` | 显示当前设置 |
-| `/cargoui position 100 -80` | 相对屏幕中央向右 100、向下 80 |
-| `/cargoui fontsize 30` | 设置字号，允许 8–72 |
-| `/cargoui outline none` | 关闭描边 |
-| `/cargoui outline outline` | 普通描边 |
-| `/cargoui outline thickoutline` | 加粗描边 |
-| `/cargoui scale 1.2` | 设置缩放，允许 0.5–3 |
-| `/cargoui shadow off` 或 `/cargoui shadow on` | 关闭或开启阴影 |
-| `/cargoui hide` 或 `/cargoui show` | 隐藏或显示文本 |
-| `/cargoui reset` | 将本插件全部设置重置为默认值，并显示文本 |
-
-X/Y 范围为 -10000–10000，单位为 UIParent 的界面坐标单位，并非固定物理像素。X 正数向右，Y 正数向上。缩放不会改变设置的视觉偏移；如果将框体移出屏幕，可用 `/cargoui reset` 恢复。
-
-本阶段使用命令设置，没有图形选项面板。显示的是固定占位文本，没有倒计时或模拟战斗事件。
-
-## 游戏内验收
-
-建议先仅启用 CarGOUI，以便定位本插件的错误。逐条执行命令，不要把下面多行一次性粘贴到聊天框。
-
-1. 输入 `/console scriptErrors 1`，再输入 `/reload`。应出现加载提示和居中文本，且没有 Lua 错误弹窗。
-2. 输入 `/dump select(4, GetBuildInfo())` 检查当前客户端 Interface。此版本面向 `120100`；若结果不同，应针对实际客户端复核兼容性。
-3. 输入 `/cargoui` 和 `/cargoui status`，确认帮助和初始设置正常。
-4. 输入 `/cargoui position 100 -80`，确认文本向右下方移动；输入 `/cargoui fontsize 30`，确认字号变大。
-5. 依次输入 `/cargoui outline none`、`/cargoui outline outline`、`/cargoui outline thickoutline`，确认描边变化。
-6. 输入 `/cargoui scale 1.2` 和 `/cargoui shadow off`，确认缩放和阴影变化，位置仍保持相同偏移。
-7. 输入 `/reload`，再输入 `/cargoui status`。应保留 X=100、Y=-80、字号 30、加粗描边、缩放 1.2、阴影关闭。
-8. 输入 `/cargoui hide`，再 `/reload`；文本应保持隐藏。输入 `/cargoui show` 后应恢复显示。
-9. 输入 `/cargoui fontsize nope`、`/cargoui position 10` 或 `/cargoui outline bogus`。应仅显示参数提示，不报错也不改变设置。
-10. 输入 `/cargoui reset`。文本应恢复居中、24 号、普通描边、缩放 1、阴影开启。
-
-可用 `/dump CarGOUIDB` 查看内存中的配置。完成测试后，如需关闭错误弹窗，可输入 `/console scriptErrors 0`。
-
-如出现错误，请保留完整错误文本、触发命令、客户端版本及 `/cargoui status` 的输出，以便复现。
-
-## SavedVariables 与生命周期
-
-配置为账号级共享，变量名为 `CarGOUIDB`。WoW 会在 `/reload`、登出或正常退出时保存；不要在游戏运行期间手动编辑磁盘上的 SavedVariables。
-
-正常保存位置为 `_retail_\WTF\Account\<账号目录>\SavedVariables\CarGOUI.lua`。
+配置仍只有账号级 `CarGOUIDB`，各角色共享。没有新增第二套配置、布局或预览 SavedVariables。
 
 ```lua
 CarGOUIDB = {
     schemaVersion = 1,
     enabled = true,
     position = { x = 0, y = 0 },
-    font = {
-        face = "Fonts\\FRIZQT__.ttf",
-        size = 24,
-        outline = "OUTLINE",
-    },
+    font = { face = "Fonts\\FRIZQT__.ttf", size = 24, outline = "OUTLINE" },
     scale = 1,
     shadow = { enabled = true },
 }
 ```
 
-仅在本插件的 `ADDON_LOADED` 事件中初始化配置，并在 `PLAYER_LOGIN` 后创建显示框体。若加载时已经登录，则直接创建框体。缺失字段会补默认值；已知字段的类型、范围或描边值无效时会恢复为默认值；其他未知字段会保留。`enabled` 只控制占位文本显示，不会卸载插件。
+`InitializeDatabase()` 负责首次加载、补齐缺失字段、修复异常值，并保留未知的已有字段。`UpdateSettings(patch)` 先校验完整修改再写入，成功后统一调用 `ApplySettings()` 和可见面板刷新；图形控件与兼容命令共用此接口。显式重置会重建默认配置。
 
-Lua 文件通过 WoW 提供的 `local addonName, addon = ...` 共享私有命名空间。事件接口为 `addon:RegisterEvent(event, callback)` 和 `addon:UnregisterEvent(event, callback)`；回调参数为 `(addon, event, ...)`。同一回调不会重复订阅，订阅变化从下次事件开始生效；回调错误会交给 WoW 错误处理器，其他订阅者继续执行。这里订阅的是游戏事件。
+WoW 在 `/reload`、登出或正常退出时保存设置。磁盘位置通常是 `_retail_\WTF\Account\<账号目录>\SavedVariables\CarGOUI.lua`。
 
-运行时代码没有 `OnUpdate`、轮询计时器、职业技能逻辑、Mobility/Proc 数据库或外部依赖。字体来自游戏客户端；若 Friz 无法加载，会尝试客户端标准字体。
+设置窗口在第一次打开时创建，之后复用全部框体与控件。关闭时清理输入焦点、关闭下拉菜单并隐藏预览。隐藏窗口的刷新接口直接返回；只有预览分类打开时才刷新静态样例。面板没有常驻事件订阅、`OnUpdate`、轮询计时器或每帧扫描。
 
-## 已完成的验证
+窗口内尚未确认的数字只存在于输入框和临时脏状态标记中，不会保存到数据库。面板首次打开及再次显示时会根据当前屏幕尺寸适当缩小，以适应小尺寸界面。
 
-已使用 Lua 5.1 执行 10 项离线测试，全部通过：
+## 可选兼容命令
 
-- TOC 元数据、文件存在性和实际加载顺序。
-- 首次加载、无关插件事件过滤及重复事件处理。
-- 已保存设置在模拟重载后保留。
-- 已登录状态下的插件加载。
-- 异常 SavedVariables、NaN 和无限大数值的恢复。
-- 命令对位置、字体、缩放、阴影和重置的应用，以及无效参数拒绝。
-- 隐藏状态在模拟重载后保留。
-- 事件订阅快照与重复订阅处理。
-- 事件参数中 nil 的保留。
-- 单个监听器出错后其他监听器继续执行。
+日常设置可全部通过窗口完成。以下命令保留用于调试或习惯命令操作的用户：
 
-这些测试使用 WoW API 模拟对象，验证 Lua 语法及框架行为。尚未在真实 WoW Retail 客户端中运行，不能代替上面的游戏内验收，尤其是字体渲染、界面缩放和客户端加载行为。
+| 命令 | 功能 |
+| --- | --- |
+| `/cargoui` | 打开或关闭设置窗口 |
+| `/cargoui help` | 显示命令帮助 |
+| `/cargoui status` | 输出当前配置 |
+| `/cargoui show` / `hide` | 显示或隐藏占位文字 |
+| `/cargoui position 100 -80` | 修改偏移 |
+| `/cargoui font friz` | 选择字体；也支持 arial、morpheus、skurri、default |
+| `/cargoui fontsize 30` | 修改字号 |
+| `/cargoui outline none` | 修改描边；也支持 outline、thickoutline |
+| `/cargoui scale 1.2` | 修改缩放 |
+| `/cargoui shadow on` / `off` | 开启或关闭阴影 |
+| `/cargoui reset` | 立即恢复默认设置 |
 
-开发者可在已安装 Lua 5.1/LuaJIT 的环境中，从插件目录执行：
+## 验证范围
 
-```text
-lua5.1 tests/smoke.lua .
-```
+22 项 Lua 5.1 离线测试全部通过，覆盖原有加载生命周期、SavedVariables、命令与事件分发，以及窗口延迟创建、反复复用、全部控件的设置更新、原子校验、待确认输入、关闭清理、预览停止、滑块边界、字体切换、配置保留和小尺寸界面下的控件边界。
 
-也可运行 `python tests/run_tests.py`，它会查找 Lua 5.1/LuaJIT，或使用当前 Python 环境中的 `lupa.lua51`。测试运行器不会自动安装依赖。普通玩家不需要 Python 或 Lua 运行时，WoW 自身负责执行插件。
+测试使用 WoW API 模拟对象。**尚未在真实 Retail 12.1 客户端中实测，仍需按上面的步骤检查实际渲染、点击、焦点和模板兼容性。**
+
+开发者可以从插件目录执行 `lua5.1 tests/smoke.lua .`，或运行 `python tests/run_tests.py`。Python 运行器使用本机已有的 Lua 5.1/LuaJIT 或 `lupa.lua51`，不会自动安装依赖。普通玩家不需要这些测试依赖。
 
 ## API 核查来源
 
-- [Blizzard 12.1.0 AddOn API 源码镜像](https://github.com/Gethe/wow-ui-source/blob/12.1.0/Interface/AddOns/Blizzard_APIDocumentationGenerated/AddOnsDocumentation.lua)：`ADDON_LOADED` 事件。
-- [Blizzard 命令注册源码镜像](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_ChatFrameBase/Shared/SlashCommandsRegistry.lua)：SlashCmdList 命令注册方式。
-- [Blizzard 字体定义源码镜像](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_Fonts_Shared/Mainline/GameFonts.xml)：Friz Quadrata 游戏字体路径。
+- [Blizzard 12.1.0 AddOn API 源码镜像](https://github.com/Gethe/wow-ui-source/blob/12.1.0/Interface/AddOns/Blizzard_APIDocumentationGenerated/AddOnsDocumentation.lua)
+- [输入框模板](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_SharedXML/Shared/InputBox/InputBoxTemplates.xml)
+- [原生 Slider API](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleSliderAPIDocumentation.lua)
+- [游戏字体定义](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_Fonts_Shared/Shared/GameFonts.xml)
+- [Esc 窗口关闭机制](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_UIParentPanelManager/Shared/UIParentPanelManager.lua)

@@ -51,14 +51,21 @@ local function same(actual, expected, label)
     end
 end
 
-local function setup(saved, loggedIn)
+local function setup(saved, loggedIn, client)
+    client = client or {}
     local env = setmetatable({}, { __index = _G })
     env._G = env
     env.CarGOUIDB = saved
     env.SlashCmdList = {}
-    env.UIParent = { name = "UIParent" }
-    env.STANDARD_TEXT_FONT = "Fonts\\FRIZQT__.ttf"
-    local state = { frames = {}, errors = {}, messages = {}, loggedIn = loggedIn or false }
+    env.UISpecialFrames = {}
+    env.UIParent = { name = "UIParent", GetWidth = function() return 1920 end,
+        GetHeight = function() return 1080 end }
+    env.STANDARD_TEXT_FONT = client.standardFont or "Fonts\\FRIZQT__.ttf"
+    env.GameFontNormal = { template = "GameFontNormal" }
+    env.GameFontHighlight = { template = "GameFontHighlight" }
+    env.GameFontHighlightSmall = { template = "GameFontHighlightSmall" }
+    local state = { frames = {}, errors = {}, messages = {}, loggedIn = loggedIn or false,
+        fontWrites = 0, textWrites = 0, timers = 0 }
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
         state.messages[#state.messages + 1] = message
@@ -69,8 +76,14 @@ local function setup(saved, loggedIn)
     env.IsLoggedIn = function() return state.loggedIn end
     env.InCombatLockdown = function() return false end
     env.GetBuildInfo = function() return "12.1.0", "99999", "Sep 26 2026", 120100 end
+    env.GetLocale = function() return client.locale or "enUS" end
+    env.C_Timer = { After = function() error("Options must not schedule polling timers") end,
+        NewTicker = function() error("Options must not schedule polling tickers") end }
 
     local object = {}
+    function object:GetName() return self.name end
+    function object:GetParent() return self.parent end
+    function object:GetObjectType() return self.kind end
     function object:SetPoint(point, relative, relativePoint, x, y)
         self.point = { point, relative, relativePoint, x or 0, y or 0 }
     end
@@ -84,15 +97,39 @@ local function setup(saved, loggedIn)
     function object:GetHeight() return self.height end
     function object:SetScale(scale) self.scale = scale end
     function object:GetScale() return self.scale or 1 end
-    function object:Show() self.shown = true end
-    function object:Hide() self.shown = false end
+    function object:Show()
+        local wasShown = self:IsShown()
+        self.shown = true
+        if not wasShown and self.scripts.OnShow then self.scripts.OnShow(self) end
+    end
+    function object:Hide()
+        local wasShown = self:IsShown()
+        self.shown = false
+        if wasShown and self.scripts.OnHide then self.scripts.OnHide(self) end
+    end
     function object:IsShown() return self.shown ~= false end
-    function object:SetShown(shown) self.shown = not not shown end
+    function object:IsVisible()
+        return self:IsShown() and (not self.parent or not self.parent.IsVisible or self.parent:IsVisible())
+    end
+    function object:SetShown(shown) if shown then self:Show() else self:Hide() end end
     function object:SetAlpha(alpha) self.alpha = alpha end
     function object:SetFrameStrata(strata) self.strata = strata end
+    function object:SetClampedToScreen(value) self.clampedToScreen = value end
+    function object:SetFrameLevel(level) self.frameLevel = level end
+    function object:GetFrameLevel() return self.frameLevel or 1 end
     function object:EnableMouse(enabled) self.mouseEnabled = enabled end
-    function object:SetScript(event, callback) self.scripts[event] = callback end
+    function object:SetScript(event, callback)
+        assert(event ~= "OnUpdate" or callback == nil, "Options must not register OnUpdate scans")
+        self.scripts[event] = callback
+    end
     function object:GetScript(event) return self.scripts[event] end
+    function object:HookScript(event, callback)
+        local previous = self.scripts[event]
+        self:SetScript(event, function(...)
+            if previous then previous(...) end
+            callback(...)
+        end)
+    end
     function object:RegisterEvent(event) self.events[event] = true end
     function object:UnregisterEvent(event) self.events[event] = nil end
     function object:IsEventRegistered(event) return self.events[event] or false end
@@ -100,16 +137,25 @@ local function setup(saved, loggedIn)
     function object:SetFont(face, size, flags)
         assert(type(face) == "string" and type(size) == "number", "Invalid SetFont arguments")
         self.font = { face, size, flags or "" }
+        state.fontWrites = state.fontWrites + 1
         return true
     end
+    function object:SetFontObject(value) self.fontObject = value end
+    function object:SetNormalFontObject(value) self.fontObject = value end
+    function object:SetHighlightFontObject(value) self.highlightFontObject = value end
+    function object:SetDisabledFontObject(value) self.disabledFontObject = value end
     function object:GetFont() return unpack(self.font or {}) end
     local function requireFont(fontString)
-        assert(fontString.font or fontString.template,
+        local templateFont = fontString.template and (fontString.kind == "FontString"
+            or fontString.template == "UIPanelButtonTemplate" or fontString.template == "InputBoxTemplate")
+        assert(fontString.font or fontString.fontObject or templateFont,
             "FontString requires a font before setting or measuring text")
     end
     function object:SetText(text)
         requireFont(self)
         self.textValue = text
+        state.textWrites = state.textWrites + 1
+        if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
     end
     function object:GetText() return self.textValue end
     function object:GetStringWidth()
@@ -123,11 +169,88 @@ local function setup(saved, loggedIn)
     function object:SetTextColor(...) self.textColor = { ... } end
     function object:SetJustifyH(value) self.justifyH = value end
     function object:SetJustifyV(value) self.justifyV = value end
+    function object:SetWordWrap(value) self.wordWrap = value end
+    function object:SetNonSpaceWrap(value) self.nonSpaceWrap = value end
+    function object:SetSpacing(value) self.spacing = value end
     function object:SetShadowOffset(x, y) self.shadowOffset = { x, y } end
     function object:GetShadowOffset() return unpack(self.shadowOffset or { 0, 0 }) end
     function object:SetShadowColor(...) self.shadowColor = { ... } end
+    function object:SetBackdrop(value)
+        assert(self.template and self.template:find("BackdropTemplate", 1, true),
+            "Modern Retail SetBackdrop requires BackdropTemplate")
+        self.backdrop = value
+    end
+    function object:SetBackdropColor(...) self.backdropColor = { ... } end
+    function object:SetBackdropBorderColor(...) self.backdropBorderColor = { ... } end
+    function object:SetColorTexture(...) self.color = { ... } end
+    function object:SetTexture(value) self.texture = value end
+    function object:SetVertexColor(...) self.vertexColor = { ... } end
+    function object:SetTexCoord(...) self.texCoord = { ... } end
+    function object:SetDrawLayer(layer) self.layer = layer end
+    function object:SetNormalTexture(value) self.normalTexture = value end
+    function object:SetHighlightTexture(value) self.highlightTexture = value end
+    function object:SetPushedTexture(value) self.pushedTexture = value end
+    function object:SetDisabledTexture(value) self.disabledTexture = value end
+    function object:SetCheckedTexture(value) self.checkedTexture = value end
+    function object:SetAutoFocus(value) self.autoFocus = value end
+    function object:SetNumeric(value) self.numeric = value end
+    function object:SetMultiLine(value) self.multiLine = value end
+    function object:SetMaxLetters(value) self.maxLetters = value end
+    function object:SetTextInsets(...) self.textInsets = { ... } end
+    function object:SetFocus()
+        if state.focus and state.focus ~= self then state.focus:ClearFocus() end
+        state.focus, self.focused = self, true
+        if self.scripts.OnEditFocusGained then self.scripts.OnEditFocusGained(self) end
+    end
+    function object:ClearFocus()
+        local wasFocused = self.focused
+        self.focused = false
+        if state.focus == self then state.focus = nil end
+        if wasFocused and self.scripts.OnEditFocusLost then self.scripts.OnEditFocusLost(self) end
+    end
+    function object:HasFocus() return self.focused or false end
+    function object:HighlightText(...) self.highlight = { ... } end
+    function object:SetEnabled(value) self.enabled = not not value end
+    function object:Enable() self:SetEnabled(true) end
+    function object:Disable() self:SetEnabled(false) end
+    function object:IsEnabled() return self.enabled ~= false end
+    function object:SetChecked(value) self.checked = not not value end
+    function object:GetChecked() return self.checked or false end
+    function object:SetMinMaxValues(min, max) self.minValue, self.maxValue = min, max end
+    function object:GetMinMaxValues() return self.minValue, self.maxValue end
+    function object:SetValueStep(value) self.valueStep = value end
+    function object:SetObeyStepOnDrag(value) self.obeyStep = value end
+    function object:SetOrientation(value) self.orientation = value end
+    function object:SetThumbTexture(value)
+        self.thumbTexture = self:CreateTexture(nil, "ARTWORK")
+        self.thumbTexture:SetTexture(value)
+    end
+    function object:GetThumbTexture() return self.thumbTexture end
+    function object:SetValue(value)
+        if self.minValue then value = math.max(self.minValue, value) end
+        if self.maxValue then value = math.min(self.maxValue, value) end
+        local previous = self.value
+        self.value = value
+        if previous ~= value and self.scripts.OnValueChanged then
+            self.scripts.OnValueChanged(self, value, false)
+        end
+    end
+    function object:GetValue() return self.value end
+    function object:RegisterForClicks(...) self.clickTypes = { ... } end
+    function object:Click()
+        if not self:IsEnabled() then return end
+        if self.kind == "CheckButton" then self:SetChecked(not self:GetChecked()) end
+        if self.scripts.OnClick then self.scripts.OnClick(self, "LeftButton", false) end
+    end
+    function object:CreateTexture(name, layer)
+        local texture = setmetatable({ parent = self, name = name, layer = layer,
+            scripts = {}, events = {}, kind = "Texture" }, { __index = object })
+        if name then env[name] = texture end
+        return texture
+    end
     function object:CreateFontString(name, layer, template)
-        local fontString = setmetatable({ parent = self, name = name, layer = layer, template = template }, { __index = object })
+        local fontString = setmetatable({ parent = self, name = name, layer = layer,
+            template = template, scripts = {}, events = {}, kind = "FontString" }, { __index = object })
         if name then env[name] = fontString end
         return fontString
     end
@@ -136,6 +259,15 @@ local function setup(saved, loggedIn)
             events = {}, scripts = {}, shown = true }, { __index = object })
         state.frames[#state.frames + 1] = frame
         if name then env[name] = frame end
+        if template and template:find("OptionsSliderTemplate", 1, true) then
+            for _, suffix in ipairs({ "Low", "High", "Text" }) do
+                frame[suffix] = frame:CreateFontString(name and name .. suffix, "ARTWORK", "GameFontHighlightSmall")
+            end
+        elseif template and (template:find("CheckButtonTemplate", 1, true)
+            or template:find("UICheckButtonTemplate", 1, true)) then
+            frame.Text = frame:CreateFontString(name and name .. "Text", "ARTWORK", "GameFontNormal")
+            frame.text = frame.Text
+        end
         return frame
     end
     function state:fire(event, ...)
@@ -156,8 +288,8 @@ local function setup(saved, loggedIn)
     return env, addon, state
 end
 
-local function login(saved, late)
-    local env, addon, state = setup(saved, late)
+local function login(saved, late, client)
+    local env, addon, state = setup(saved, late, client)
     state:fire("ADDON_LOADED", "CarGOUI")
     if not late then state:fire("PLAYER_LOGIN") end
     equal(#state.errors, 0, "startup errors")
@@ -385,6 +517,357 @@ test("listener failures reach the error handler without stopping later listeners
     truthy(laterCalled, "listener after error runs")
     equal(#state.errors, 1, "reported listener error")
     truthy(string.find(state.errors[1], "expected test error", 1, true), "original error preserved")
+end)
+
+local function options(addon)
+    addon:ToggleOptions()
+    truthy(addon.optionsFrame and addon.optionsFrame:IsShown(), "Options opened")
+    return addon.optionsFrame, addon.optionsFrame.controls
+end
+
+local function typeText(editBox, value)
+    editBox:SetText(tostring(value))
+    local textChanged = editBox:GetScript("OnTextChanged")
+    if textChanged then textChanged(editBox, true) end
+end
+
+local function enter(editBox, value)
+    typeText(editBox, value)
+    local callback = editBox:GetScript("OnEnterPressed")
+    truthy(callback, "edit box has an Enter handler")
+    callback(editBox)
+end
+
+local function choose(dropdown, value)
+    dropdown:Click()
+    truthy(dropdown.menu and dropdown.menu:IsShown(), "dropdown menu opens")
+    for _, option in ipairs(dropdown.choices) do
+        if option.value == value then
+            option:Click()
+            equal(dropdown.menu:IsShown(), false, "dropdown closes after selection")
+            return
+        end
+    end
+    error("Missing dropdown option " .. tostring(value))
+end
+
+test("empty slash lazily creates and toggles one reusable Options window", function()
+    local env, addon, state = login(nil)
+    equal(addon.optionsFrame, nil, "no Options allocation at login")
+    local initialFrames, initialMessages = #state.frames, #state.messages
+    env.SlashCmdList.CARGOUI("")
+    local panel = addon.optionsFrame
+    truthy(panel and panel:IsShown(), "empty slash opens Options")
+    equal(panel:GetName(), "CarGOUIOptionsFrame", "ESC-addressable Options name")
+    equal(#state.messages, initialMessages, "empty slash does not print help")
+    truthy(#state.frames > initialFrames, "controls allocated on first open")
+    local allocated = #state.frames
+    local registrations = 0
+    for _, name in ipairs(env.UISpecialFrames) do
+        if name == panel:GetName() then registrations = registrations + 1 end
+    end
+    equal(registrations, 1, "ESC close registered once")
+    for _ = 1, 10 do
+        env.SlashCmdList.CARGOUI("  ")
+        equal(panel:IsShown(), false, "slash closes Options")
+        env.SlashCmdList.CARGOUI("")
+        equal(addon.optionsFrame, panel, "Options identity reused")
+        equal(panel:IsShown(), true, "slash reopens Options")
+    end
+    equal(#state.frames, allocated, "ten reopens allocate no frames")
+    env.SlashCmdList.CARGOUI("help")
+    truthy(#state.messages > initialMessages, "explicit help prints commands")
+    equal(panel:IsShown(), true, "help leaves panel alone")
+    equal(#state.errors, 0, "Options creation errors")
+end)
+
+test("settings API rejects malformed patches atomically and preserves DB identity", function()
+    local env, addon = login(nil)
+    local db, position, fontSettings, shadow = addon.db, addon.db.position, addon.db.font, addon.db.shadow
+    local before = copy(db)
+    local invalid = {
+        false, 12, "bad", { enabled = "yes" }, { position = false },
+        { position = { x = 10001 } }, { position = { y = 0 / 0 } },
+        { position = { x = math.huge } }, { font = true }, { font = { size = 7 } },
+        { font = { outline = "BOGUS" } }, { font = { face = "arbitrary\\asset.ttf" } },
+        { scale = 0.49 }, { scale = math.huge }, { shadow = false },
+        { shadow = { enabled = 1 } }, { position = { x = 12, y = -10001 }, enabled = false },
+        { enabled = false, font = { size = 30, outline = "INVALID" } },
+        { unknownSetting = true }, { position = { x = 12, z = 1 } },
+    }
+    for index, patch in ipairs(invalid) do
+        local ok, message = addon:UpdateSettings(patch)
+        equal(ok, false, "reject invalid patch " .. index)
+        truthy(type(message) == "string" and #message > 0, "validation reason " .. index)
+        same(addon.db, before, "invalid patch must be atomic " .. index)
+    end
+    truthy(addon:UpdateSettings({ position = { x = 40 }, font = { size = 28 }, shadow = { enabled = false } }),
+        "valid partial patch accepted")
+    equal(addon.db, db, "DB reference stable")
+    equal(env.CarGOUIDB, db, "SavedVariables references live DB")
+    equal(addon.db.position, position, "position reference stable")
+    equal(addon.db.font, fontSettings, "font reference stable")
+    equal(addon.db.shadow, shadow, "shadow reference stable")
+    anchor(addon, env, 40, 0)
+    font(addon, 28, "OUTLINE")
+end)
+
+test("all daily GUI controls route through shared settings and survive reload", function()
+    local env, addon, state = login(nil)
+    local panel, controls = options(addon)
+    local writes = 0
+    local update = addon.UpdateSettings
+    addon.UpdateSettings = function(self, patch)
+        writes = writes + 1
+        return update(self, patch)
+    end
+    local function changed(callback, label)
+        local before = writes
+        callback()
+        truthy(writes > before, label .. " uses shared UpdateSettings")
+    end
+    typeText(controls.x, "165")
+    typeText(controls.y, "-85")
+    changed(function() controls.applyPosition:Click() end, "position")
+    anchor(addon, env, 165, -85)
+    changed(function() controls.enabled:Click() end, "visibility")
+    equal(addon.db.enabled, false, "checkbox hides actual display")
+    equal(addon.frame:IsShown(), false, "actual display hidden")
+    controls.enabled:Click()
+    changed(function() controls.scale:SetValue(1.35) end, "scale slider")
+    equal(addon.db.scale, 1.35, "slider saves scale")
+    anchor(addon, env, 165, -85)
+    changed(function() enter(controls.scale.editBox, "1.6") end, "scale numeric field")
+    equal(addon.db.scale, 1.6, "numeric scale saved")
+    addon:SelectOptionsCategory("typography")
+    changed(function() controls.fontSize:SetValue(36) end, "font size slider")
+    font(addon, 36, "OUTLINE")
+    changed(function() enter(controls.fontSize.editBox, "32") end, "font size numeric field")
+    font(addon, 32, "OUTLINE")
+    changed(function() choose(controls.outline, "THICKOUTLINE") end, "outline dropdown")
+    font(addon, 32, "THICKOUTLINE")
+    truthy(controls.font.choices and #controls.font.choices >= 1, "font choices available")
+    changed(function() choose(controls.font, controls.font.choices[1].value) end, "font dropdown")
+    equal(addon.db.font.face, controls.font.choices[1].value, "font choice saved")
+    changed(function() controls.shadow:Click() end, "shadow checkbox")
+    equal(addon.db.shadow.enabled, false, "shadow checkbox saved")
+    controls.close:Click()
+    equal(panel:IsShown(), false, "close button works")
+    local _, reloaded = login(copy(env.CarGOUIDB))
+    same(reloaded.db, addon.db, "GUI changes persist through reload")
+    equal(reloaded.optionsFrame, nil, "reload still defers Options allocation")
+    equal(#state.errors, 0, "GUI interactions cause no errors")
+end)
+
+test("pending XY edits are atomic, preserved until Apply, and discarded on close", function()
+    local env, addon = login(nil)
+    local panel, controls = options(addon)
+    typeText(controls.x, "250")
+    typeText(controls.y, "not a number")
+    local before = copy(addon.db)
+    controls.applyPosition:Click()
+    same(addon.db, before, "invalid coordinate pair changes neither axis")
+    truthy(type(panel.feedback:GetText()) == "string" and #panel.feedback:GetText() > 0,
+        "invalid input has visible feedback")
+    controls.enabled:Click()
+    equal(controls.x:GetText(), "250", "unrelated update preserves pending X")
+    equal(controls.y:GetText(), "not a number", "unrelated update preserves pending Y")
+    enter(controls.y, "-125")
+    anchor(addon, env, 250, -125)
+    typeText(controls.x, "900")
+    controls.x:SetFocus()
+    controls.close:Click()
+    equal(controls.x:HasFocus(), false, "close clears keyboard focus")
+    addon:ToggleOptions()
+    equal(tonumber(controls.x:GetText()), 250, "reopen discards unapplied X")
+    equal(tonumber(controls.y:GetText()), -125, "reopen restores saved Y")
+    controls.centerPosition:Click()
+    anchor(addon, env, 0, 0)
+    equal(tonumber(controls.x:GetText()), 0, "center updates X field")
+    equal(tonumber(controls.y:GetText()), 0, "center updates Y field")
+end)
+
+test("invalid numeric edits show errors without changing saved values", function()
+    local _, addon = login(nil)
+    local panel, controls = options(addon)
+    for _, field in ipairs({ controls.fontSize.editBox, controls.scale.editBox }) do
+        for _, text in ipairs({ "", "invalid", "1e309", "-100" }) do
+            local before = copy(addon.db)
+            enter(field, text)
+            same(addon.db, before, "invalid numeric edit leaves settings unchanged")
+            truthy(panel.feedback:GetText() and #panel.feedback:GetText() > 0,
+                "numeric validation feedback is visible")
+        end
+    end
+end)
+
+test("categories expose working pages and disable unfinished features", function()
+    local _, addon = login(nil)
+    local panel = options(addon)
+    local found = {}
+    for _, category in ipairs(panel.categories) do found[category.key] = category end
+    for _, key in ipairs({ "general", "typography", "preview" }) do
+        truthy(found[key] and found[key]:IsEnabled(), key .. " category enabled")
+        truthy(panel.pages[key], key .. " page exists")
+        found[key]:Click()
+        truthy(panel.pages[key]:IsShown(), key .. " button activates page")
+        for other, page in pairs(panel.pages) do
+            if other ~= key then equal(page:IsShown(), false, "other pages hidden") end
+        end
+    end
+    for _, key in ipairs({ "mobility", "proc", "themes", "importExport" }) do
+        local button = found[key]
+        truthy(button, key .. " future category visible")
+        equal(button:IsEnabled(), false, key .. " future category disabled")
+        button:Click()
+        addon:SelectOptionsCategory(key)
+        truthy(panel.pages.preview:IsShown(), "unfinished category cannot activate")
+    end
+end)
+
+test("preview and dropdowns stop on category change and close, hidden refresh is idle", function()
+    local _, addon, state = login(nil)
+    local panel, controls = options(addon)
+    equal(panel.previewFrame:IsShown(), false, "no preview on General page")
+    addon:SelectOptionsCategory("preview")
+    equal(panel.previewFrame:IsShown(), true, "preview visible on Preview page")
+    addon:UpdateSettings({ font = { size = 40, outline = "" }, scale = 1.5, shadow = { enabled = false } })
+    local _, size, outline = panel.previewFrame.text:GetFont()
+    equal(size, 40, "visible preview updates font size")
+    equal(outline or "", "", "visible preview updates outline")
+    addon:SelectOptionsCategory("typography")
+    equal(panel.previewFrame:IsShown(), false, "preview stops when leaving page")
+    controls.outline:Click()
+    truthy(controls.outline.menu:IsShown(), "dropdown open before close")
+    addon:SelectOptionsCategory("general")
+    equal(controls.outline.menu:IsShown(), false, "category change dismisses dropdown")
+    addon:SelectOptionsCategory("typography")
+    controls.outline:Click()
+    panel:Hide()
+    equal(controls.outline.menu:IsShown(), false, "closing window dismisses menu")
+    addon:ToggleOptions()
+    addon:SelectOptionsCategory("preview")
+    panel:Hide()
+    equal(panel.previewFrame:IsShown(), false, "closing window hides preview")
+    local fontWrites, textWrites = state.fontWrites, state.textWrites
+    for _ = 1, 5 do addon:RefreshOptions() end
+    equal(state.fontWrites, fontWrites, "hidden refresh does not rerender preview font")
+    equal(state.textWrites, textWrites, "hidden refresh does not update control text")
+    local savedScale = addon.db.scale
+    controls.scale:SetValue(2.25)
+    equal(addon.db.scale, savedScale, "hidden slider event cannot update settings")
+    local calls = 0
+    local update = addon.UpdateSettings
+    addon.UpdateSettings = function(self, patch) calls = calls + 1; return update(self, patch) end
+    addon:ToggleOptions()
+    for _ = 1, 5 do addon:RefreshOptions() end
+    equal(calls, 0, "programmatic control refresh never writes settings")
+    for _, frame in ipairs(state.frames) do
+        equal(frame:GetScript("OnUpdate"), nil, "no frame runs permanent polling")
+    end
+end)
+
+test("reset requires confirmation and close cancels an unconfirmed reset", function()
+    local env, addon = login(nil)
+    addon:UpdateSettings({ position = { x = 90, y = 45 }, font = { size = 36 }, scale = 1.7 })
+    local panel, controls = options(addon)
+    local before = copy(addon.db)
+    controls.reset:Click()
+    same(addon.db, before, "first reset click does not mutate settings")
+    controls.close:Click()
+    addon:ToggleOptions()
+    controls.reset:Click()
+    same(addon.db, before, "closing cancels old reset confirmation")
+    typeText(controls.x, "999")
+    controls.reset:Click()
+    anchor(addon, env, 0, 0)
+    font(addon, 24, "OUTLINE")
+    equal(addon.db.scale, 1, "confirmed reset restores scale")
+    equal(tonumber(controls.x:GetText()), 0, "reset clears pending X")
+    equal(tonumber(controls.y:GetText()), 0, "reset refreshes Y")
+    truthy(panel:IsShown(), "reset keeps Options open")
+end)
+
+test("Escape from any editable field closes Options and releases input focus", function()
+    local _, addon = login(nil)
+    local panel, controls = options(addon)
+    for _, editBox in ipairs({ controls.x, controls.y, controls.fontSize.editBox, controls.scale.editBox }) do
+        if not panel:IsShown() then addon:ToggleOptions() end
+        editBox:SetFocus()
+        local escape = editBox:GetScript("OnEscapePressed")
+        truthy(escape, "editable field has Escape handler")
+        escape(editBox)
+        equal(panel:IsShown(), false, "Escape closes Options")
+        equal(editBox:HasFocus(), false, "Escape releases keyboard focus")
+    end
+end)
+
+test("preview fits maximum settings and slider steps remain in range", function()
+    local _, addon = login(nil)
+    local panel, controls = options(addon)
+    for _, value in ipairs({ 0.5, 0.5000001, 1.049999999, 2.999999999, 3 }) do
+        controls.scale:SetValue(value)
+        truthy(addon:IsNumberInRange(addon.db.scale, addon.limits.scale), "rounded scale stays valid")
+        truthy(math.abs(addon.db.scale * 20 - math.floor(addon.db.scale * 20 + 0.5)) < 0.00001,
+            "slider produces 0.05 increments")
+    end
+    addon:UpdateSettings({ font = { size = 72 }, scale = 3 })
+    addon:SelectOptionsCategory("preview")
+    local preview = panel.previewFrame
+    truthy(preview.text:GetStringWidth() * preview.text:GetScale() <= preview:GetWidth() - 32 + 0.001,
+        "maximum-size preview fits horizontal bounds")
+    truthy(preview.text:GetStringHeight() * preview.text:GetScale() <= preview:GetHeight() - 32 + 0.001,
+        "maximum-size preview fits vertical bounds")
+    equal(addon.db.scale, 3, "fitting preview does not alter actual scale setting")
+    equal(addon.db.font.size, 72, "fitting preview does not alter actual font setting")
+    equal(addon.frame:GetScale(), 3, "display keeps requested scale")
+end)
+
+test("interactive controls stay inside their pages and panel fits small screens", function()
+    local env, addon, state = login(nil)
+    local panel = options(addon)
+    local containers = { [panel] = true }
+    for _, page in pairs(panel.pages) do containers[page] = true end
+    for _, frame in ipairs(state.frames) do
+        local point = frame.point
+        if containers[frame.parent] and point and point[1] == "TOPLEFT"
+            and point[2] == frame.parent and point[3] == "TOPLEFT" then
+            local x, y = point[4], point[5]
+            truthy(x >= 0 and y <= 0, "control starts inside parent")
+            truthy(x + frame:GetWidth() <= frame.parent:GetWidth(), "control fits parent width")
+            truthy(-y + frame:GetHeight() <= frame.parent:GetHeight(), "control fits parent height")
+        end
+    end
+    panel:Hide()
+    env.UIParent.GetWidth = function() return 640 end
+    env.UIParent.GetHeight = function() return 480 end
+    addon:ToggleOptions()
+    truthy(panel:GetWidth() * panel:GetScale() <= 640, "panel fits narrow viewport")
+    truthy(panel:GetHeight() * panel:GetScale() <= 480, "panel fits short viewport")
+end)
+
+test("font menu applies each supported face and localized client font persists", function()
+    local _, addon = login(nil, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("typography")
+    local foundFriz, foundClient = false, false
+    for _, entry in ipairs(controls.font.choices) do
+        choose(controls.font, entry.value)
+        equal(addon.db.font.face, entry.value, "font dropdown writes chosen face")
+        local face = addon.frame.text:GetFont()
+        equal(face, entry.value, "font dropdown changes display face")
+        if entry.value == "Fonts\\FRIZQT__.ttf" then foundFriz = true end
+        if entry.value == "Fonts\\ARKai_T.ttf" then foundClient = true end
+    end
+    truthy(foundFriz, "Friz Quadrata remains selectable")
+    truthy(foundClient, "localized client font selectable")
+    local chosen = addon.db.font.face
+    local _, reloaded = login(copy(addon.db), false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
+    equal(reloaded.db.font.face, chosen, "supported saved font survives reload")
+    local ok = addon:UpdateSettings({ font = { face = "fonts\\frizqt__.TTF" } })
+    truthy(ok, "supported font accepted case-insensitively")
+    equal(addon.db.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
+    equal(panel:IsShown(), true, "localized Options created successfully")
 end)
 
 print("All " .. total .. " offline smoke tests passed.")

@@ -1,9 +1,10 @@
 local _, addon = ...
 
 local function PrintHelp()
-    addon:Print("Alpha 0.1 Phase 1 commands:")
-    addon:Print("/cargoui status | show | hide | reset")
+    addon:Print("/cargoui opens or closes Options. All display settings are available there.")
+    addon:Print("Optional commands: /cargoui help | status | show | hide | reset")
     addon:Print("/cargoui position <x> <y>  (-10000 to 10000; right/up are positive)")
+    addon:Print("/cargoui font <friz|arial|morpheus|skurri|default>")
     addon:Print("/cargoui fontsize <8-72>")
     addon:Print("/cargoui outline <none|outline|thickoutline>")
     addon:Print("/cargoui scale <0.5-3> | shadow <on|off>")
@@ -11,71 +12,80 @@ end
 
 local function PrintStatus()
     local db = addon.db
-    addon:Print(string.format("%s | %s | CENTER (%g, %g) | font %g | %s | scale %g | shadow %s",
+    local face = db.font.face
+    for _, font in ipairs(addon.fonts) do
+        if font.value == face then face = font.label; break end
+    end
+    addon:Print(string.format("%s | %s | CENTER (%g, %g) | %s %g | %s | scale %g | shadow %s",
         addon.version, db.enabled and "shown" or "hidden",
-        db.position.x, db.position.y, db.font.size,
+        db.position.x, db.position.y, face, db.font.size,
         db.font.outline == "" and "no outline" or db.font.outline,
         db.scale, db.shadow.enabled and "on" or "off"))
 end
+
+local fontAliases = {
+    friz = "Fonts\\FRIZQT__.ttf",
+    arial = "Fonts\\ARIALN.TTF",
+    morpheus = "Fonts\\MORPHEUS.TTF",
+    skurri = "Fonts\\skurri.ttf",
+}
 
 function addon:HandleSlashCommand(message)
     local args = {}
     for word in string.gmatch(message or "", "%S+") do
         args[#args + 1] = string.lower(word)
     end
-    local command = args[1] or "help"
-    local db = self.db
+    if #args == 0 then
+        self:ToggleOptions()
+        return
+    end
+    local command, patch = args[1]
 
-    if command == "help" and #args <= 1 then
+    if command == "help" and #args == 1 then
         PrintHelp()
         return
     elseif command == "status" and #args == 1 then
         PrintStatus()
         return
     elseif (command == "show" or command == "hide") and #args == 1 then
-        db.enabled = command == "show"
+        patch = { enabled = command == "show" }
     elseif command == "position" and #args == 3 then
-        local x, y = tonumber(args[2]), tonumber(args[3])
-        if not self:IsNumberInRange(x, self.limits.offset)
-            or not self:IsNumberInRange(y, self.limits.offset) then
-            self:Print("Position requires two numbers from -10000 to 10000.")
+        -- Keep invalid text in the patch so shared validation rejects it instead of omitting it.
+        patch = { position = { x = tonumber(args[2]) or args[2], y = tonumber(args[3]) or args[3] } }
+    elseif command == "font" and #args == 2 then
+        local face = fontAliases[args[2]]
+        if args[2] == "default" then
+            local supported, canonicalFace = self:IsSupportedFont(STANDARD_TEXT_FONT)
+            face = supported and canonicalFace or self.defaults.font.face
+        end
+        if not face then
+            self:Print("Font must be friz, arial, morpheus, skurri, or default. Type /cargoui help for help.")
             return
         end
-        db.position.x, db.position.y = x, y
+        patch = { font = { face = face } }
     elseif command == "fontsize" and #args == 2 then
-        local size = tonumber(args[2])
-        if not self:IsNumberInRange(size, self.limits.fontSize) then
-            self:Print("Font size must be a number from 8 to 72.")
-            return
-        end
-        db.font.size = size
+        patch = { font = { size = tonumber(args[2]) or args[2] } }
     elseif command == "outline" and #args == 2 then
-        local outline = args[2] == "none" and "" or string.upper(args[2])
-        if not self.outlines[outline] then
-            self:Print("Outline must be none, outline, or thickoutline.")
-            return
-        end
-        db.font.outline = outline
+        patch = { font = { outline = args[2] == "none" and "" or string.upper(args[2]) } }
     elseif command == "scale" and #args == 2 then
-        local scale = tonumber(args[2])
-        if not self:IsNumberInRange(scale, self.limits.scale) then
-            self:Print("Scale must be a number from 0.5 to 3.")
-            return
-        end
-        db.scale = scale
+        patch = { scale = tonumber(args[2]) or args[2] }
     elseif command == "shadow" and #args == 2
         and (args[2] == "on" or args[2] == "off") then
-        db.shadow.enabled = args[2] == "on"
+        patch = { shadow = { enabled = args[2] == "on" } }
     elseif command == "reset" and #args == 1 then
         self:ResetDatabase()
         self:Print("Settings reset to defaults.")
         return
     else
-        self:Print("Invalid command. Type /cargoui for help.")
+        self:Print("Invalid command. Type /cargoui help for help.")
         return
     end
 
-    self:ApplySettings()
+    local valid, errorMessage = self:UpdateSettings(patch)
+    if not valid then
+        self:Print(errorMessage .. " Type /cargoui help for help.")
+        return
+    end
     PrintStatus()
 end
 
