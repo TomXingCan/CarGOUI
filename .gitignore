@@ -1,0 +1,26 @@
+# Python caches and local test environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
+
+# Generated packages, builds, and test artifacts
+*.zip
+/build/
+/dist/
+/work/
+/test-results/
+/tests/runtime/
+*.log
+*.tmp
