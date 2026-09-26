@@ -9,6 +9,7 @@
 Bootstrap.lua
 Shared\SpellState.lua
 Shared\Adapter.lua
+Shared\ProcDefinitions.lua
 Shared\FreeMoveDefinitions.lua
 Classes\Mage\Bootstrap.lua
 Classes\Mage\MobilityEntries.lua
@@ -29,4 +30,8 @@ Classes\Rogue\MobilityDefinitions.lua
 Classes\Shaman\MobilityDefinitions.lua
 Classes\Warlock\MobilityDefinitions.lua
 Classes\Warrior\MobilityDefinitions.lua
+Classes\DeathKnight\ProcDefinitions.lua
+Classes\Paladin\ProcDefinitions.lua
+Classes\Priest\ProcDefinitions.lua
+Classes\Warlock\ProcDefinitions.lua
 Complete.lua

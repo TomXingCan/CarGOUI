@@ -47,6 +47,11 @@ function addon:AcquireAuraReminder(entry, auraID, textOnly)
     local pool = self.reminderFrames.nativeAura
     if not pool then pool = {}; self.reminderFrames.nativeAura = pool end
     local frame = pool[entry.id]
+    if frame and (frame.auraHandle.auraID ~= auraID or frame.auraHandle.textOnly ~= textOnly
+        or frame.reminderEntry.class ~= entry.class or frame.reminderEntry.specID ~= entry.specID) then
+        self:DisableAuraReminder(frame)
+        return nil, "A stable reminder region cannot reuse a native slot for another Aura or scope."
+    end
     if not frame then
         frame = CreateFrame("Frame", nil, UIParent)
         frame:SetFrameStrata("MEDIUM")

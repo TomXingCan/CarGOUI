@@ -2,8 +2,6 @@ local _, addon = ...
 
 local events = { "SPELL_ACTIVATION_OVERLAY_SHOW", "SPELL_ACTIVATION_OVERLAY_HIDE",
     "PLAYER_ENTERING_WORLD", "CVAR_UPDATE", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED" }
-local locations = { LeftRight = { "Left", "Right" }, TopBottom = { "Top", "Bottom" },
-    LeftRightOutside = { "LeftOutside", "RightOutside" } }
 local OnProcEvent
 
 local function Public(value)
@@ -28,7 +26,7 @@ local function PublicText(value)
 end
 
 local function Sources(definition)
-    return definition.overlaySources or { definition }
+    return definition.nativeSources or definition.overlaySources or { definition }
 end
 
 local function Trace(self, event, id, texture, location, scale, result)
@@ -58,8 +56,10 @@ end
 
 function addon:GetProcDefinitions()
     local adapter = self.activeClassAdapter
-    if adapter and adapter.classToken == "MAGE" and adapter.GetProcDefinitions then
-        local _, spec = self:GetCurrentModuleIdentity()
+    if adapter and adapter.procCapability and adapter.procCapability.version == 1
+        and type(adapter.GetProcDefinitions) == "function" then
+        local class, spec = self:GetCurrentModuleIdentity()
+        if class ~= adapter.classToken then return {} end
         local definitions = adapter:GetProcDefinitions(spec) or {}
         for _, definition in ipairs(definitions) do
             for _, entry in ipairs(definition.regions) do
@@ -82,7 +82,9 @@ function addon:GetProcRegionOverlayState(entry)
     end
     local shown, hidden
     for _, source in ipairs(Sources(definition)) do
-        local states = self.procOverlayStates and self.procOverlayStates[source.overlayID]
+        local matches = not source.regions
+        for _, region in ipairs(source.regions or {}) do if region.id == entry.id then matches = true; break end end
+        local states = matches and self.procOverlayStates and self.procOverlayStates[source.stateKey or source.overlayID]
         local state = states and states[key]
         if state then
             if state.shown and (not shown or (state.sequence or 0) > (shown.sequence or 0)) then
@@ -107,14 +109,14 @@ function addon:StopProc()
     self.procByRegion, self.procOverlaySources, self.procRegionDiagnostics = nil, nil, nil
 end
 
-function addon:RenderProcState()
+function addon:RenderProcState(changedDefinitions)
     if not self.procTracking then return end
     local visible = CVar("displaySpellActivationOverlays", true)
     local opacity = CVar("spellActivationOverlayOpacity")
     local keep = {}
-    self.procRegionDiagnostics = {}
+    self.procRegionDiagnostics = self.procRegionDiagnostics or {}
     self.procStatusReason = "Native aura tracking; Lua does not read aura presence, stacks or time."
-    for _, definition in ipairs(self.procDefinitions) do
+    for _, definition in ipairs(changedDefinitions or self.procDefinitions) do
         for _, entry in ipairs(definition.regions) do
             local state = self:GetProcRegionOverlayState(entry)
             -- Bootstrap regular mapped timer auras in the native container.
@@ -148,8 +150,10 @@ function addon:RenderProcState()
             end
         end
     end
-    for id, frame in pairs(self.reminderFrames and self.reminderFrames.nativeAura or {}) do
-        if frame.reminderEntry.kind == "proc" and not keep[id] then self:DisableAuraReminder(frame) end
+    if not changedDefinitions then
+        for id, frame in pairs(self.reminderFrames and self.reminderFrames.nativeAura or {}) do
+            if frame.reminderEntry.kind == "proc" and not keep[id] then self:DisableAuraReminder(frame) end
+        end
     end
 end
 
@@ -167,15 +171,12 @@ function addon:ConfigureProc()
         self:StopProc()
         self.procOverlayStates = {}
     end
-    self.procClass, self.procSpec, self.procDefinitions = class, spec, definitions
-    self.procByOverlay, self.procOverlaySources, self.procByRegion = {}, {}, {}
-    for _, definition in ipairs(definitions) do
-        for _, source in ipairs(Sources(definition)) do
-            self.procByOverlay[source.overlayID] = definition
-            self.procOverlaySources[source.overlayID] = source
-        end
-        for _, entry in ipairs(definition.regions) do self.procByRegion[entry.id] = definition end
+    if self.procDefinitions ~= definitions then
+        local compiled, conflict = self:CompileProcDefinitions(definitions, class, spec)
+        if not compiled then self:StopProc(); self.procStatusReason = conflict; return end
+        self.procByOverlay, self.procByRegion = compiled.byOverlay, compiled.byRegion
     end
+    self.procClass, self.procSpec, self.procDefinitions = class, spec, definitions
     self.procTracking, self.procStatusReason = true, "Native aura tracking; Lua does not read aura presence, stacks or time."
     for _, event in ipairs(events) do self:RegisterEvent(event, OnProcEvent) end
     self:RenderProcState()
@@ -183,16 +184,19 @@ end
 
 OnProcEvent = function(self, event, id, texture, locationType, scale)
     if not self.procTracking then return end
+    local changed, seen = {}, {}
+    local function Changed(definition)
+        if not seen[definition.id] then changed[#changed + 1] = definition; seen[definition.id] = true end
+    end
     if event == "SPELL_ACTIVATION_OVERLAY_SHOW" then
         if not ID(id) or not ID(texture) or not Public(locationType) or not Scale(scale) then
             Trace(self, event, id, texture, locationType, scale, "ignored: non-public/invalid event argument")
             return
         end
-        local definition = self.procByOverlay[id]
-        local source = self.procOverlaySources[id]
-        if not definition or not source or texture ~= source.textureID then
+        local bindings = self.procByOverlay[id]
+        if not bindings then
             Trace(self, event, id, texture, locationType, scale,
-                definition and "ignored: texture mismatch" or "ignored: owner not mapped in current specialization")
+                "ignored: owner not mapped in current specialization")
             return
         end
         local location
@@ -203,20 +207,23 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
             Trace(self, event, id, texture, locationType, scale, "ignored: location enum unavailable")
             return
         end
-        Trace(self, event, id, texture, locationType, scale, "accepted: " .. definition.id)
-        local shown = locations[location] or { location }
-        local state = self.procOverlayStates[id] or {}
-        self.procOverlayStates[id] = state
-        for _, entry in ipairs(definition.regions) do
-            local key = entry.nativeLocation or entry.location
-            if not state[key] then state[key] = { shown = false, scale = source.scale or definition.scale } end
+        for _, binding in ipairs(bindings) do
+            local definition, source = binding.definition, binding.source
+            if source.textureID == texture and source.locationTypeName == location then
+                Trace(self, event, id, texture, locationType, scale, "accepted: " .. definition.id)
+                local state = self.procOverlayStates[source.stateKey] or {}
+                self.procOverlayStates[source.stateKey] = state
+                for _, entry in ipairs(source.regions) do
+                    local key = entry.nativeLocation or entry.location
+                    -- Stock ignores SHOW with its display CVar off. Merely
+                    -- enabling it later cannot replay this graphical state.
+                    state[key] = { shown = CVar("displaySpellActivationOverlays", true),
+                        scale = scale, sequence = self.procEventSequence }
+                end
+                Changed(definition)
+            end
         end
-        for _, key in ipairs(shown) do
-            -- Stock SHOW is ignored when this CVar is off; later enabling it
-            -- does not replay that ignored graphic. Preserve that public fact.
-            if state[key] then state[key] = { shown = CVar("displaySpellActivationOverlays", true),
-                scale = scale, sequence = self.procEventSequence } end
-        end
+        if #changed == 0 then Trace(self, event, id, texture, locationType, scale, "ignored: texture/location mismatch"); return end
     elseif event == "SPELL_ACTIVATION_OVERLAY_HIDE" then
         if not Public(id) or (id ~= nil and not ID(id)) then
             Trace(self, event, id, nil, nil, nil, "ignored: non-public/invalid owner")
@@ -224,17 +231,21 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
         end
         Trace(self, event, id, nil, nil, nil, id == nil and "accepted: hide all graphical owners"
             or (self.procByOverlay[id] and "accepted: hide this graphical owner" or "ignored: owner not mapped in current specialization"))
-        for overlayID, definition in pairs(self.procByOverlay) do
-            if id == nil or id == overlayID then
-                local state = {}
-                for _, entry in ipairs(definition.regions) do
-                    state[entry.nativeLocation or entry.location] = { shown = false,
-                        scale = self.procOverlaySources[overlayID].scale or definition.scale,
+        if id ~= nil and not self.procByOverlay[id] then return end
+        local function HideBindings(bindings)
+            for _, binding in ipairs(bindings) do
+                local source = binding.source
+                local state = self.procOverlayStates[source.stateKey] or {}
+                for _, entry in ipairs(source.regions) do
+                    state[entry.nativeLocation or entry.location] = { shown = false, scale = source.scale,
                         sequence = self.procEventSequence }
                 end
-                self.procOverlayStates[overlayID] = state
+                self.procOverlayStates[source.stateKey] = state
+                Changed(binding.definition)
             end
         end
+        if id then HideBindings(self.procByOverlay[id])
+        else for _, bindings in pairs(self.procByOverlay) do HideBindings(bindings) end end
     elseif event == "CVAR_UPDATE" then
         if not Public(id) or (id ~= "displaySpellActivationOverlays" and id ~= "spellActivationOverlayOpacity") then return end
     elseif event == "PLAYER_ENTERING_WORLD" then
@@ -243,7 +254,27 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
         self.procOverlayStates = {}
         Trace(self, event, nil, nil, nil, nil, "native aura resync; cleared public graphical gate history")
     end
-    self:RenderProcState()
+    self:RenderProcState(#changed > 0 and changed or nil)
+end
+
+-- Lightweight catalog invalidation is independent of Mobility and active
+-- Proc business listeners. Empty/disabled specs need it to discover a newly
+-- learned eligible talent without starting an aura monitor or cooldown query.
+local function OnProcCatalogChanged(self)
+    if not self.initialized then return end
+    local adapter = self.activeClassAdapter
+    if not adapter or not adapter.procCapability then return end
+    if adapter.InvalidateProcDefinitions then adapter:InvalidateProcDefinitions() end
+    if adapter.RebuildPreviewEntries then
+        adapter:RebuildPreviewEntries()
+        self.previewEntries = adapter.previewEntries
+    end
+    self:ConfigureProc()
+    if self.RefreshPreview then self:RefreshPreview() end
+    if self.RefreshOptions then self:RefreshOptions() end
+end
+for _, event in ipairs({ "SPELLS_CHANGED", "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED" }) do
+    addon:RegisterEvent(event, OnProcCatalogChanged)
 end
 
 function addon:GetProcDiagnostics()

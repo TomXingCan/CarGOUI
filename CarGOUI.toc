@@ -17,6 +17,7 @@ UI\ReminderStyle.lua
 UI\Display.lua
 Modules\Proc\AuraState.lua
 UI\ProcDisplay.lua
+Modules\Proc\Definitions.lua
 Modules\Proc\Runtime.lua
 Modules\Mobility\Runtime.lua
 Modules\Mobility\FreeMove.lua

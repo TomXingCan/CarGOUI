@@ -31,6 +31,27 @@ for path in native_sources:
     assert path.relative_to(root).as_posix() in declared, "Native reminder source must be TOC-loaded and audited"
 runtime = "\n".join(code(path.read_text(encoding="utf-8")) for path in native_sources)
 mapping = code((data_root / "Classes/Mage/ProcDefinitions.lua").read_text(encoding="utf-8"))
+class_mappings = sorted((data_root / "Classes").glob("*/ProcDefinitions.lua"))
+data_toc = (data_root / "CarGOUI_Data.toc").read_text(encoding="utf-8").replace("\\", "/")
+for path in class_mappings:
+    assert path.relative_to(data_root).as_posix() in data_toc, "Every Proc class source must be TOC loaded"
+    text = code(path.read_text(encoding="utf-8"))
+    assert not re.search(r"CreateFrame|CreateFont|C_UnitAuras|RegisterEvent|C_Timer|CarGOUIDB|SetDuration|OnUpdate|GetTime", text)
+    if path.parent.name != "Mage":
+        assert "RegisterProcFactory" in text and "ProcDefinition" in text
+        assert "evidence" in text, "Every admitted class catalog needs pinned mapping evidence"
+print(f"PASS All {len(class_mappings)} shipped Proc class catalogs use lazy data-only factories with explicit evidence")
+shared = code((data_root / "Shared/ProcDefinitions.lua").read_text(encoding="utf-8"))
+proc_runtime = code((root / "Modules/Proc/Runtime.lua").read_text(encoding="utf-8"))
+compiler = code((root / "Modules/Proc/Definitions.lua").read_text(encoding="utf-8"))
+assert 'adapter.classToken == "MAGE"' not in proc_runtime
+assert "adapter.procCapability.version == 1" in proc_runtime and "CompileProcDefinitions" in proc_runtime
+assert "RegisterProcFactory" in shared and "requiresAnyKnown" in shared and "requiresKnown" in shared
+assert "byRegion[region.id]" in compiler and "binding.source.shared" in compiler
+assert "source.textureID == texture and source.locationTypeName == location" in proc_runtime
+assert 'auraHandle.auraID ~= auraID' in code((root / "UI/ProcDisplay.lua").read_text(encoding="utf-8"))
+assert "proc_sources_69933.lua" not in toc and "fixtures" not in data_toc
+print("PASS Proc capability, conflict validation, exact graphical dispatch and immutable Aura provider guards are explicit")
 absent(runtime, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_SPELLCAST",
                  r"UnitBuff\s*\(", r"UnitAura\s*\(", r"C_UnitAuras", r"GetTime\s*\(",
                  r"pcall\s*\(", r"GetRemainingDuration\s*\(", r"GetFormattedText\s*\(",

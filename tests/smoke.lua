@@ -110,7 +110,8 @@ local function setup(saved, loggedIn, client)
         bindings = {}, formatters = {}, curves = {}, curveEvaluations = {},
         spellReads = {}, knownReads = {}, overrideReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0,
         loadedModules = {}, moduleNamespaces = {}, loadedFiles = {}, moduleLoads = 0,
-        auraSlots = {}, auraFonts = {}, nativeAuraUpdates = 0, auraReads = 0 }
+        auraSlots = {}, auraFonts = {}, nativeAuraUpdates = 0, auraReads = 0,
+        procKnown = client.procKnown or {}, procKnownReads = {} }
     if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
@@ -328,6 +329,24 @@ local function setup(saved, loggedIn, client)
             return state.mobility.spells[id]
         end
         env.C_SpellBook = { IsSpellKnown = function(id)
+            -- This offline-only allowlist is learned metadata, not permission
+            -- to query cooldowns, replacements, or hidden Proc aura IDs. The
+            -- production factory remains lazy for the active class/spec.
+            local data = state.moduleNamespaces.CarGOUI_Data
+            local adapter = data and data.adapters and data.adapters[state.classToken]
+            local factory = adapter and adapter.procFactory
+            if factory and (state.procDriverFactory ~= factory or state.procDriverSpec ~= state.specID) then
+                state.procDriverFactory, state.procDriverSpec, state.procDriverIDs = factory, state.specID, {}
+                for _, definition in ipairs(state.specID and factory(state.specID) or {}) do
+                    for _, field in ipairs({ "requiresKnown", "requiresAnyKnown", "excludesKnown" }) do
+                        for _, driver in ipairs(definition[field] or {}) do state.procDriverIDs[driver] = true end
+                    end
+                end
+            end
+            if factory and state.procDriverIDs[id] then
+                state.procKnownReads[#state.procKnownReads + 1] = { id = id, class = state.classToken, spec = state.specID }
+                return state.procKnown[id] or false
+            end
             truthy(state.allowedSpellIDs[id], "learning queries stay inside explicitly permitted current-class IDs")
             state.knownReads[#state.knownReads + 1] = id
             return state.mobility.known[id] or false
@@ -5766,6 +5785,49 @@ test("combat event snapshot cleanup stops TEST once even when old preview callba
     state:flushTimers()
     equal(nativeText(addon), "No Shimmer\n15.0", "legitimate gameplay event coalescer retains true original recharge")
     equal(#state.errors, 0, "old snapshot callbacks remain harmless after unregister")
+end)
+
+test("non-Mage Frost Death Knight tracks separately filtered finite native Proc regions in combat", function()
+    local env, addon, state = login(nil, false, { classToken = "DEATHKNIGHT", specID = 251,
+        proc = {}, procKnown = { [59057] = true, [51128] = true },
+        mobility = { known = {}, spells = {} },
+        allowedSpellIDs = { [48265] = true, [444347] = true, [212552] = true } })
+    truthy(addon:UpdateSettings({ mobility = { enabled = false } }), "Mobility can be disabled independently")
+    equal(#addon:GetProcDefinitions(), 3, "current spec instantiates three audited providers")
+    truthy(addon.procTracking, "real non-Mage Proc remains active without Mobility")
+    equal(#state.spellReads, 0, "Proc activation does not query movement cooldowns")
+    for _, record in ipairs(state.procKnownReads) do
+        truthy(record.id == 59057 or record.id == 51128, "learning checks only actual DK drivers, never hidden second aura438833")
+    end
+    local rime = "deathknight_frost_rime_top"
+    local left, right = "deathknight_frost_killing_machine_left", "deathknight_frost_killing_machine_second_right"
+    state.inCombat = true
+    putAura(state, 59052, 11, 1, true)
+    putAura(state, 51124, 9, 2, true)
+    putAura(state, 438833, 7, 1, true)
+    showProc(env, state, 59052, 450930, "Top")
+    showProc(env, state, 51124, 458740, "Left")
+    showProc(env, state, 438833, 458740, "Right")
+    equal(procText(addon, state, rime), "11.0", "Rime uses its real native duration")
+    equal(procText(addon, state, left), "9.0", "left provider is independent")
+    equal(procText(addon, state, right), "7.0", "right uses its own finite aura, not inferred stacks")
+    state.proc.auras[438833] = nil; state:fire("UNIT_AURA", "player")
+    equal(procText(addon, state, right), "", "consuming right aura immediately clears only right")
+    equal(procText(addon, state, left), "9.0", "remaining left timer is not cleared with another aura")
+    state:advance(2)
+    equal(procText(addon, state, rime), "9.0", "native duration continues in combat")
+    putAura(state, 59052, 17, 1, true)
+    equal(procText(addon, state, rime), "17.0", "refresh binds the real new duration")
+    state.inCombat = false; options(addon)
+    truthy(addon:SetPreview("single", rime), "audited current non-Mage region is available in existing Test Mode")
+    equal(procFrame(addon, rime).alpha, 0, "preview suppresses its live wrapper only")
+    addon:StopPreview(); addon:CloseOptions()
+    truthy(procFrame(addon, rime).alpha > 0, "live region returns after stopping preview and closing Options")
+    equal(procText(addon, state, rime), "17.0", "Options never becomes live state provider")
+    state:advance(17)
+    equal(procText(addon, state, rime), "", "natural expiry has no fabricated remaining time")
+    equal(state.realReads, 0, "no Lua aura, cooldown, or stack read occurs")
+    equal(#state.errors, 0, "non-Mage native lifecycle produces no mock contract errors")
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

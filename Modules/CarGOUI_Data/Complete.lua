@@ -5,6 +5,7 @@ data.host.dataFileManifest = {
     "Bootstrap.lua",
     "Shared/SpellState.lua",
     "Shared/Adapter.lua",
+    "Shared/ProcDefinitions.lua",
     "Shared/FreeMoveDefinitions.lua",
     "Classes/Mage/Bootstrap.lua",
     "Classes/Mage/MobilityEntries.lua",
@@ -25,6 +26,10 @@ data.host.dataFileManifest = {
     "Classes/Shaman/MobilityDefinitions.lua",
     "Classes/Warlock/MobilityDefinitions.lua",
     "Classes/Warrior/MobilityDefinitions.lua",
+    "Classes/DeathKnight/ProcDefinitions.lua",
+    "Classes/Paladin/ProcDefinitions.lua",
+    "Classes/Priest/ProcDefinitions.lua",
+    "Classes/Warlock/ProcDefinitions.lua",
     "Complete.lua",
 }
 data.host.dataCodeFileCount = #data.host.dataFileManifest

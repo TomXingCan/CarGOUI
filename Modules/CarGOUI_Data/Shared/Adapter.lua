@@ -122,7 +122,8 @@ local function SelectEntries(self, definitions)
         end
     end
     table.sort(entries, function(a, b) return (a.slot or 1) < (b.slot or 1) end)
-    self.entries, self.mobilityEntries, self.previewEntries, self.selectionIssues = entries, entries, entries, issues
+    self.entries, self.mobilityEntries, self.selectionIssues = entries, entries, issues
+    self:RebuildPreviewEntries()
     self.selectionFamilies = retained
 end
 
@@ -132,6 +133,7 @@ function methods:ActivateEntries(specID, force)
     if not issecretvalue or not C_SpellBook or not C_SpellBook.IsSpellKnown or not C_Spell or not C_Spell.GetOverrideSpell then
         self.entries, self.mobilityEntries, self.previewEntries, self.selectionFamilies = {}, {}, {}, {}
         self.selectionIssues = { Issue("Unsupported", "Public learning / override APIs are unavailable.") }
+        self:RebuildPreviewEntries()
         return true
     end
     local candidates = {}
@@ -147,19 +149,29 @@ end
 function methods:DeactivateEntries()
     self.active, self.specID, self.entries, self.mobilityEntries, self.previewEntries, self.selectionIssues = false, nil, nil, nil, nil, nil
     self.selectionFamilies, self.entryCache = nil, nil
+    if self.InvalidateProcDefinitions then self:InvalidateProcDefinitions() end
     if data.ClearAbilityStateCache then data:ClearAbilityStateCache() end
 end
 function methods:GetMobilityEntry() return self.entries and self.entries[1] end
 function methods:GetMobilityEntries() return self.entries or {} end
-function methods:GetPreviewEntries()
+function methods:RebuildPreviewEntries()
     local entries = {}
     for _, entry in ipairs(self.entries or {}) do
         -- Keep safety diagnostics for unsupported live branches, but do not
         -- advertise excluded return/free-recast mechanisms as usable samples.
         if not entry.definition.unsupportedReason then entries[#entries + 1] = entry end
     end
+    if self.procCapability and self.GetProcDefinitions then
+        for _, definition in ipairs(self:GetProcDefinitions(self.specID)) do
+            if definition.preview then
+                for _, region in ipairs(definition.regions) do entries[#entries + 1] = region end
+            end
+        end
+    end
+    self.previewEntries = entries
     return entries
 end
+function methods:GetPreviewEntries() return self.previewEntries or {} end
 function methods:NeedsMobilityEvents()
     return self.selectionFamilies and #self.selectionFamilies > 0 or false
 end

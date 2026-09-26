@@ -312,7 +312,7 @@ local function RefreshAppearanceControls(panel)
         SetSlider(controls.appearanceScale, style.scale)
     end
     panel.appearanceHint:SetText(panel.appearanceKind == "proc"
-        and "Mage native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples."
+        and "Native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples."
         or "All Mobility skills and specializations in your current class share these settings. Live uses the detected skill.")
 end
 
@@ -495,8 +495,8 @@ function addon:RefreshOptions()
     controls.procEnabled:SetEnabled(#procChoices > 0)
     controls.procEnabled:SetChecked(#procChoices > 0 and self:GetProcConfig().enabled or false)
     panel.procStatus:SetText(#procChoices > 0
-        and "Displays countdowns on supported Blizzard Mage Proc graphics. Test Mode shows separate samples."
-        or "Real Proc monitoring is not available for this class / specialization.")
+        and "Displays countdowns on supported Blizzard Proc graphics. Test Mode shows separate samples."
+        or "No verified timed native Proc regions are available for this specialization / talent selection.")
     controls.procEntry:SetEntries(procChoices)
     controls.previewEntry:SetEntries(previewChoices)
     if not procAllowed[panel.selectedProcEntry] then

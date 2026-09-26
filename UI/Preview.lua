@@ -17,7 +17,8 @@ local function CreateGuidance(frame, entry)
         local shape = guide:CreateTexture(nil, "BACKGROUND")
         shape:SetAllPoints(guide)
         shape:SetTexture(region.texture)
-        shape:SetTexCoord(region.flipH and 1 or 0, region.flipH and 0 or 1, 0, 1)
+        shape:SetTexCoord(region.flipH and 1 or 0, region.flipH and 0 or 1,
+            region.flipV and 1 or 0, region.flipV and 0 or 1)
         shape:SetVertexColor(0.65, 0.83, 1, 0.35)
         guide.shape = shape
     end
