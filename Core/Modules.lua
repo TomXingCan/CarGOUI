@@ -80,7 +80,13 @@ end
 
 function addon:GetPreviewEntries()
     local adapter = CurrentAdapter(self)
-    return adapter and adapter:GetPreviewEntries() or noEntries
+    local entries = adapter and adapter:GetPreviewEntries() or noEntries
+    local freeMove = self.GetFreeMovePreviewEntry and self:GetFreeMovePreviewEntry()
+    if not freeMove then return entries end
+    local result = {}
+    for _, entry in ipairs(entries) do result[#result + 1] = entry end
+    result[#result + 1] = freeMove
+    return result
 end
 
 function addon:GetDefinedPreviewEntries() return self.previewEntries end

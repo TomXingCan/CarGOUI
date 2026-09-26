@@ -1,7 +1,7 @@
 local addonName, addon = ...
 
 addon.name = addonName
-addon.version = "0.1.0-alpha.11"
+addon.version = "0.1.0-alpha.12"
 addon.initialized = false
 addon.enabled = false
 -- The unified Data package registers isolated adapters through this host.

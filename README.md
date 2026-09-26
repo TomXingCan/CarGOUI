@@ -1,8 +1,8 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.11**，目标 WoW Retail 12.1.0（Interface 120100）。在 alpha.10 上新增其余 12 职业的真实 Mobility 适配器，按当前专精、实际学习状态及原生替换关系选择技能，并行显示各技能的真实冷却/下一次充能倒计时。保留全部 Header / Body 主题、Options 交互及用户实测的 Blink / Shimmer 判断代码。
+当前版本 **0.1.0-alpha.12**，目标 WoW Retail 12.1.0（Interface 120100），数据/API 核查固定 build 69933。在 alpha.11 上新增法师三系的原生 Proc 数字计时，以及已由用户确认的 **Time Spiral → Free move**。保留现有普通 Mobility、主题、Options 与全部配置，不扩展其他特殊返回、传送门或免费重施机制。
 
-**职业适配器存在不等于所有天赋分支已通过战斗验收。** 普通冷却、充能和特殊返回/免费重施分开记录；已知无法准确判定的分支明确报告限制。逐技能及专精的实现、离线验证、客户端待验收和缺口见 [真实 Mobility 覆盖表](docs/MOBILITY_COVERAGE.md)。本轮没有真实 Proc 或 Free Move。
+法师 Proc 已接入真实原生 Aura 槽位，不是 Test Mode 样例。**源码及离线测试完成不代表真实客户端战斗验收完成。** Clearcasting 图形所属 Aura 276743、冰指右侧隐藏 Aura 126084 的实际匹配/持续时间需要目标客户端确认；缺失时保持无数字，不猜测替代 Aura 或层数。详见 [法师 Proc 覆盖表](docs/MAGE_PROC_COVERAGE.md)、[API 核查](docs/PROC_API_AUDIT.md) 和 [本轮安装/验收](docs/UPGRADE_ALPHA12.md)。
 
 ## 安装与升级
 
@@ -28,7 +28,7 @@
 
 ## 操作
 
-Options 仍是左分类、右选项。Header、Body 背景、侧栏空白、边框与静态说明区域均可左键拖动整个窗口。按钮、滑块、输入框、下拉菜单及滚动条保留正常操作，不要求修饰键。松开、关闭或 Esc 结束拖动，位置保存与屏幕约束保留。General 与 Mobility 的开关/XY 都编辑当前职业的同一份 Mobility 配置。关闭 Mobility 也隐藏它的样例，不影响 Proc 样例。
+Options 仍是左分类、右选项。Header、Body 背景、侧栏空白、边框与静态说明区域均可左键拖动整个窗口。按钮、滑块、输入框、下拉菜单及滚动条保留正常操作，不要求修饰键。松开、关闭或 Esc 结束拖动，位置保存与屏幕约束保留。General 与 Mobility 的开关/XY 都编辑当前职业的同一份 Mobility 配置。关闭 Mobility 也停止 Free move 并隐藏 Mobility 样例，不影响真实 Proc；Proc 页面可独立启停本专精的数字。
 
 Mobility / Proc → Appearance 提供 Font、Font Size、Outline、Shadow、Scale。菜单、勾选框和滑块立即生效；输入数字后按 Enter，没有 Apply。切换上下文、分类或关闭窗口会丢弃未提交输入。`Reset this context's style` 仅重置当前样式，不改坐标或其他范围。
 
@@ -36,7 +36,7 @@ Mobility / Proc → Appearance 提供 Font、Font Size、Outline、Shadow、Scal
 
 字体内置 Friz Quadrata、Arial Narrow、Morpheus、Skurri（必要时提供 Client default）。工厂样式为 Friz Quadrata 24、OUTLINE、阴影开启、Scale 1。字号 8–72，缩放 0.5–3，新编辑 XY -10000–10000。缩放不会放大已有坐标。
 
-Test Mode 使用外部游戏空间的固定 `8.0` 样例并标记 TEST。Proc **Preview only**，仍仅现有法师区域：奥法 Clearcasting 左右、火法 Hot Streak 左右、冰法 Fingers of Frost 左右和 Brain Freeze 上方。区域坐标独立，未实现真实 Buff 监控。没有新增未经核查的映射。
+Test Mode 使用外部游戏空间的固定 `8.0` 样例并标记 TEST；Free move 样例只有文字。法师 Proc 菜单复用已核查的当前专精区域。样例与原生 Aura/计时隔离，不向真实槽位写入样例状态。未实现且已移出范围的 Mobility 候选不再进入可选预览。
 
 关闭窗口、Stop test、进战斗或切专精会停止样例并清理旧临时状态。Live 继续按真实 API 更新；正在测试同一区域时只暂时抑制对应 live 输出。提醒和引导不可拖动，没有 Unlock Mode。
 
@@ -56,11 +56,23 @@ Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标
 
 可读充能至少一次时隐藏；耗尽后显示 `No <Ability>` 与真实恢复时间；恢复一次即消失。不可施法、目标、距离、资源、沉默和控制不作为耗尽。法师 Blink 1953 / Shimmer 212653 的已验证判断主体保持原文件不变。新增原生路径与限制见 [API 核查](docs/MOBILITY_API_AUDIT.md)，原法师记录保留于 [Mage 战斗核查](docs/Mobility-Combat-API-Audit.md)。
 
-`Native tracking` 表示显隐交给原生接口，Lua 不宣称知道最终 Ready / Depleted；`Tracking` 表示原生计时控制零值和到期输出。特殊免费重施、条件返回等尚无可靠契约的分支报告 `Unsupported`，未通过规则或元数据校验的秘密多充能分支报告 `Restricted`。不会用样例、固定 CD、施法记录或秘密值反读填补。
+`Native tracking` 表示显隐交给原生接口，Lua 不宣称知道最终 Ready / Depleted；`Tracking` 表示原生计时控制零值和到期输出。既有技能路径遇到范围外的条件返回等机制仍保留安全检查并报告 `Unsupported`，未通过规则或元数据校验的秘密多充能分支报告 `Restricted`。不会用样例、固定 CD、施法记录或秘密值反读填补。
 
 每个技能族有稳定的预设槽位；第一个位于原职业 Mobility 锚点，其余按定义向下每槽 84 个 UI 单位排列。不可用技能的空槽不引起其他技能跳位；本职业 XY 一起平移这组槽位。法师 Blink/Shimmer 的原位置 ID、坐标和外观不变。所有技能共享本职业 Mobility 样式，不创建逐技能字体。已有 Test Mode 菜单可选择当前活动技能或同时预览；测试单个条目只暂时抑制该条目的 live。
 
-[升级与游戏内验收步骤](docs/UPGRADE_ALPHA11.md) 包括并行耗尽、错开使用、GCD、恢复一次、替换、切专精、关闭 Preview/Options 与诊断取样。
+历史普通 Mobility 实现与逐项限制见 [Mobility 覆盖表](docs/MOBILITY_COVERAGE.md)。范围外机制不再作为开发阻塞项或本轮必测任务。
+
+## 真实法师 Proc 与 Free move
+
+Proc 正式显示仅包含职业色数字，放在对应暴雪图形区域的视觉中点。以原生图形根框体的实际缩放/布局、核验的区域几何和 SHOW 事件缩放定位，叠加原有区域 XY；不读取图形子框体的显隐、Buff 或数字，不修改暴雪图形。旧存档的偏移不清空；默认中点由真实原生布局决定，不再以旧样例绝对坐标代替。
+
+奥法覆盖 Clearcasting、Arcane Soul、Overpowered Missiles；火法覆盖 Hot Streak、Heating Up、**Pyroclasm（需读条的炎爆/烈焰风暴增益）**、Hyperthermia；冰法覆盖 Fingers of Frost 左右和 Brain Freeze。保留的 Fury of the Sun King 图形行仅在实际原生 SHOW 事件后接入，不作为当前可用天赋展示样例。图形 ID、Buff ID、纹理、大小和区域分别记录，详见覆盖表。
+
+客户端原生 `CustomAuraContainerTemplate` 以 `HELPFUL + includeSpellIDs` 筛选自身 Aura，在原生侧管理触发、消耗、刷新和到期。数字使用原生复制的 DurationTextBinding；Lua 不查询/比较秘密 Buff、剩余时间或层数。正式显示没有技能名、图标和背景。没有原生 Aura 或原生接口缺失时不制造替代时间。原生图形缺乏通用历史重放接口，重载时使用已核查图形所属 Aura 的原生匹配启动；相关图形实际出现条件仍列入实机验收。
+
+Free move 的含义已确认是 Time Spiral 374968 赋予的职业接收增益，而非 Hover 的移动施法。原生槽位只匹配当前职业的接收 Aura，真实存在时显示 `Free move`，消耗或到期时消失；不加倒计时，不计施法次数。使用本职业 Mobility 字体和坐标组，固定预设在第一条普通 Mobility 上方 84 UI 单位，不清除其他技能提醒。
+
+关闭 Options/停止 Test Mode/进入战斗不停止真实监控。关闭 Proc 只停用 Proc 槽位与该模块的事件；关闭 Mobility 只停用 Mobility 与 Free move。原生容器停用后以透明但保持显示的公开父容器完成一次原生清理，避免隐藏父框体冻结清理流程。
 ## 加载、诊断和限制
 
 登录识别当前受支持职业后请求原生按需加载的 `CarGOUI_Data`。同一 Data TOC 列出的文件、静态定义会一起加载；职业子目录本身不具备独立按需加载能力。本轮 13 职业的适配器定义会一起加载，只有当前职业的定义工厂与实际学习筛选执行；不能声称其他职业代码未加载。
@@ -69,7 +81,7 @@ Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标
 
 **架构取舍：统一两个顶级目录不满足此前严格逐职业文件/存档完全不载入的目标。** 核心账号级 `CarGOUIDB` 仍可能恢复所有已保存职业记录；仅当前范围被访问/初始化，并不等于其他记录未加载。配置不删除、不压缩、不强制 GC。实际开销须以客户端测量评估，不能用目录数或 ZIP 大小代替。
 
-Mobility → `Copy diagnostics` / `Refresh snapshot` 现有入口记录四层边界：模块加载状态、活动条目实例、配置载入/访问情况、监听及活动/已分配绑定数量。额外按需读取游戏运行时内存 KB、累计 CPU ms；未开启 scriptProfile 时 CPU 标为不可用。没有新增按钮、后台采样、强制 GC、全库扫描或轮询。缓存框体和已加载代码不会假称卸载。详见[加载与实机测量](docs/LOAD_BOUNDARIES.md)。
+Mobility → `Copy diagnostics` / `Refresh snapshot` 现有入口记录四层边界：模块加载状态、活动条目实例、配置载入/访问情况、监听及活动/已分配绑定数量。额外按需读取游戏运行时内存 KB、累计 CPU ms；未开启 scriptProfile 时 CPU 标为不可用。原生 Aura 槽位单独记录分配数/请求启用数；后者不是可见 Buff 数。复制的原生计时绑定状态不反读。无后台采样、强制 GC、全库扫描或轮询。缓存框体和已加载代码不会假称卸载。详见[加载与实机测量](docs/LOAD_BOUNDARIES.md)。
 
 ## 迁移和验收
 
@@ -77,12 +89,12 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 离线测试保留战斗秘密值与战斗标志分别模拟的回归，并验证范围隔离、延迟初始化、加载/订阅/绑定有界、主题和草稿行为。交付报告记录**最终 ZIP 解包后的测试**及 SHA256。
 
-**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及法师 Header/Body 正常；新增真实技能路径、alpha.10 新主题视觉、本包的战斗回归及 CPU/内存仍待客户端验收。离线测试只能验证提供的 API 响应下的行为，不能证明客户端所有天赋/热修/秘密值语义。Body 主题覆盖与真实 Mobility 覆盖始终分别记录。
+**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及法师 Header/Body 正常；新增 Proc/Free move、alpha.11 非 Mage 技能路径、alpha.10 新主题视觉、本包战斗回归及 CPU/内存仍待客户端验收。离线测试只能验证提供的 API 响应下的行为，不能证明客户端所有天赋/热修/秘密值语义。Body 主题覆盖与真实 Mobility 覆盖始终分别记录。
 
 ## 源码结构
 
-`Core/`：初始化、事件、配置校验迁移、按需加载、诊断；`Config/`：工厂默认、英文文案、命令；`Database/`：通用样式上下文与主题映射；`UI/`：共用提醒、Preview、Options、品牌/主题；`Modules/Mobility/Runtime.lua`：当前活动技能事件引擎；`Modules/CarGOUI_Data/`：统一 LoD TOC、职业注册、`Shared/` 状态引擎与各 `Classes/` 私有定义/适配器；`tests/`：Lua 5.1 离线测试与静态检查。
+`Core/`：初始化、事件、配置校验迁移、按需加载、诊断；`Config/`：工厂默认、英文文案、命令；`Database/`：通用样式上下文与主题映射；`UI/`：共用提醒、Preview、Options、品牌/主题；`Modules/Mobility/`：当前活动技能事件引擎与 Free move；`Modules/Proc/`：原生 Aura 槽位与图形事件生命周期；`UI/ProcDisplay.lua`：合法原生位置和字体边界；`Modules/CarGOUI_Data/`：统一 LoD TOC、职业注册、`Shared/` 状态引擎与各 `Classes/` 私有定义/适配器；`tests/`：Lua 5.1 离线测试与静态检查。
 
-运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
+运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`、`python tests/check_proc_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
 
-本轮安装与验收见 [UPGRADE_ALPHA11.md](docs/UPGRADE_ALPHA11.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables，本轮无新增配置迁移。
+本轮安装与验收见 [UPGRADE_ALPHA12.md](docs/UPGRADE_ALPHA12.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables，本轮无新增配置迁移。

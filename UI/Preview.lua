@@ -54,6 +54,7 @@ function addon:UpdatePreviewGuidance(frame, entry, enabled)
         -- Position edits move the timer relative to Blizzard's stationary shape.
         -- A guide that followed that timer would hide the effect of the offset.
         guide:SetPoint("CENTER", UIParent, "CENTER", entry.anchor.x, entry.anchor.y)
+        if self.AnchorProcReminder then self:AnchorProcReminder(guide, entry, { scale = 1 }, true) end
     else
         guide:SetPoint("CENTER", frame, "CENTER", 0, 0)
     end
@@ -93,6 +94,8 @@ function addon:StopPreview(skipLiveRefresh)
     self:UnregisterEvent("PLAYER_REGEN_DISABLED", OnPreviewCombat)
     -- Re-query the live APIs, not a pre-preview snapshot. Options may be closed.
     if not skipLiveRefresh and self.RefreshMobility then self:RefreshMobility() end
+    if not skipLiveRefresh and self.RenderProcState then self:RenderProcState() end
+    if not skipLiveRefresh and self.RenderFreeMoveState then self:RenderFreeMoveState() end
 end
 
 function addon:RefreshPreview()
@@ -122,12 +125,14 @@ function addon:RefreshPreview()
         end
     end
     if self.RenderMobilityState then self:RenderMobilityState() end
+    if self.RenderProcState then self:RenderProcState() end
+    if self.RenderFreeMoveState then self:RenderFreeMoveState() end
 end
 
 function addon:SetPreview(mode, entryId, styleKey)
     if mode == "off" then self:StopPreview(); return true end
     if InCombatLockdown() then
-        return false, "Test Mode is unavailable in combat. Live Mobility remains active."
+        return false, "Test Mode is unavailable in combat. Live reminders remain active."
     end
     if mode ~= "single" and mode ~= "all" then
         return false, "Choose a valid Test Mode."

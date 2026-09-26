@@ -11,6 +11,9 @@ function addon:GetRuntimeLoadDiagnostics()
     local result = { modules = self:GetModuleLoadReport(), events = self:GetEventDiagnostics(),
         liveFrames = 0, previewFrames = 0, allocatedBindings = 0, activeBindings = 0,
         activeSkills = 0, unavailableSkills = 0,
+        nativeAuraFrames = 0, nativeAuraSlots = 0, nativeAuraEnabledSlots = 0,
+        nativeAuraDurationSlots = 0, nativeAuraTextSlots = 0,
+        nativeAuraTemplateBindings = self.nativeAuraDurationTemplate and 1 or 0,
         pendingTasks = self.mobilityPending and 1 or 0,
         previewMode = self.previewState and self.previewState.mode or "off" }
     for _, state in ipairs(self.mobilityStates or {}) do
@@ -23,11 +26,18 @@ function addon:GetRuntimeLoadDiagnostics()
     for channel, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
             if channel == "live" then result.liveFrames = result.liveFrames + 1
-            elseif channel == "preview" then result.previewFrames = result.previewFrames + 1 end
+            elseif channel == "preview" then result.previewFrames = result.previewFrames + 1
+            elseif channel == "nativeAura" then result.nativeAuraFrames = result.nativeAuraFrames + 1 end
             if frame.durationBinding then result.allocatedBindings = result.allocatedBindings + 1 end
             -- Our own public lifecycle flag, never alpha/text/secret visibility.
             if frame.mobilityBindingActive then result.activeBindings = result.activeBindings + 1 end
         end
+    end
+    for _, handle in pairs(self.nativeAuraSlots or {}) do
+        result.nativeAuraSlots = result.nativeAuraSlots + 1
+        if handle.enabled then result.nativeAuraEnabledSlots = result.nativeAuraEnabledSlots + 1 end
+        if handle.textOnly then result.nativeAuraTextSlots = result.nativeAuraTextSlots + 1
+        else result.nativeAuraDurationSlots = result.nativeAuraDurationSlots + 1 end
     end
     return result
 end
@@ -75,10 +85,20 @@ function addon:GetLoadDiagnosticsText()
         "Configuration access: only current class Mobility / requested current spec Proc is normalized; legacy backup remains loaded.",
         "Runtime: active skills=" .. report.activeSkills .. ", unavailable selected skills=" .. report.unavailableSkills
             .. ", pending event tasks=" .. report.pendingTasks,
-        "Subscriptions: native events=" .. events.events .. ", callbacks=" .. events.callbacks,
+        "Core subscriptions: events=" .. events.events .. ", callbacks=" .. events.callbacks,
         "Subscriptions by event: " .. table.concat(eventNames, ", "),
         "Cached frames (may be inactive): live=" .. report.liveFrames .. ", preview=" .. report.previewFrames,
-        "Native bindings: allocated=" .. report.allocatedBindings .. ", active=" .. report.activeBindings,
+        "Mobility native bindings: allocated=" .. report.allocatedBindings .. ", active=" .. report.activeBindings,
+        "Aura wrappers=" .. report.nativeAuraFrames .. "; native slots allocated=" .. report.nativeAuraSlots
+            .. "; requested enabled slots=" .. report.nativeAuraEnabledSlots .. " (not visible aura count)",
+        "Aura presentation: duration slots=" .. report.nativeAuraDurationSlots
+            .. "; static-text slots=" .. report.nativeAuraTextSlots
+            .. "; addon binding templates=" .. report.nativeAuraTemplateBindings,
+        "Aura bindings: copied bindings and their active state are native-private and are not introspected.",
+        "Native aura lifecycle: enabled slots request UNIT_AURA tracking; disabled slots clear on the next native dirty pass.",
+        "Native aura containers retain one static AURA_DATA_PROVIDER_SWITCH listener each; these are not core callbacks or active aura scans.",
+        self.GetProcDiagnostics and self:GetProcDiagnostics() or "Proc: not initialized.",
+        self.GetFreeMoveDiagnostics and self:GetFreeMoveDiagnostics() or "Free move: not initialized.",
         "Preview: " .. report.previewMode .. "; native alpha is not read back.",
         SamplePerformance(names),
         "CPU/memory are explicit client snapshots, not package-size estimates; compare deltas across the acceptance steps.",

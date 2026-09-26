@@ -80,3 +80,14 @@ No real WoW client exists in this development environment. Offline Lua/Python me
 6. With no supported learned skill or disabled Mobility, theme still works, no cooldown bindings run. Learning/re-enabling activates only the new relevant set.
 
 For CPU, compare cumulative deltas over equal-duration activity intervals and state whether profiling was enabled (including its overhead). Record CarGOUI and CarGOUI_Data separately. Natural GC and client activity can affect memory; no forced GC is used. All actual client CPU/memory, new ability combat behavior and repeated-spec measurements remain pending, not inferred from mocks.
+
+
+## alpha.12 native Proc / Free move addendum
+
+The shared Data TOC now includes current-specialization Mage Proc factories and a small class-to-Time-Spiral receiver index. Those static files load together with all other listed Data files. Only the current Mage specialization's Proc region definitions and the current class's one Free move entry are instantiated. This does not change the shared SavedVariables boundary.
+
+Proc uses one native AuraContainer slot per current mapped region, with a stable cache key; old-spec slots are disabled and reused on return. Free move owns its separate current-class slot and no countdown binding. Aura presence/timing and copied native bindings remain inside Blizzard's implementation; diagnostics count requested enabled slots rather than claiming a visible aura count. Core event counts exclude Blizzard-owned listeners.
+
+Disabling a slot removes its active UNIT_AURA subscription immediately and queues one native clear pass. The public container and parent wrapper stay shown at alpha zero so that pass can clear the old assignment and copied duration binding. Cached native containers retain their static aura-data-provider-switch subscription; no claim is made that every native subscription or allocated frame is unloaded. No addon ticker, per-frame scan, buff enumeration or forced collection was added.
+
+Actual client CPU and memory remain unmeasured; the alpha.12 package report supplies only offline object/lifecycle tests. Validate current client behavior with UPGRADE_ALPHA12.md. The historical sections above describe their recorded releases, not a proof of native-aura internals.

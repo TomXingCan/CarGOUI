@@ -365,7 +365,7 @@ function addon:UpdateSettings(patch)
     local class = self:GetPlayerContext()
     local schema = { options = optionsSchema, enabled = BooleanSetting, position = positionSchema,
         mobility = { enabled = BooleanSetting, style = styleSchema, position = positionSchema, preferences = Preferences },
-        proc = { style = styleSchema, regions = {} }, styles = {}, reminders = {} }
+        proc = { enabled = BooleanSetting, style = styleSchema, regions = {} }, styles = {}, reminders = {} }
     local entries = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
         entries[entry.id] = entry

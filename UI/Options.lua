@@ -312,7 +312,7 @@ local function RefreshAppearanceControls(panel)
         SetSlider(controls.appearanceScale, style.scale)
     end
     panel.appearanceHint:SetText(panel.appearanceKind == "proc"
-        and "Preview only: real Proc / Buff monitoring is not implemented. All regions in this specialization share one style; positions stay independent."
+        and "Mage native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples."
         or "All Mobility skills and specializations in your current class share these settings. Live uses the detected skill.")
 end
 
@@ -492,6 +492,11 @@ function addon:RefreshOptions()
             procChoices[#procChoices + 1] = { value = entry.id, label = entry.label }
         end
     end
+    controls.procEnabled:SetEnabled(#procChoices > 0)
+    controls.procEnabled:SetChecked(#procChoices > 0 and self:GetProcConfig().enabled or false)
+    panel.procStatus:SetText(#procChoices > 0
+        and "Displays countdowns on supported Blizzard Mage Proc graphics. Test Mode shows separate samples."
+        or "Real Proc monitoring is not available for this class / specialization.")
     controls.procEntry:SetEntries(procChoices)
     controls.previewEntry:SetEntries(previewChoices)
     if not procAllowed[panel.selectedProcEntry] then
@@ -810,12 +815,14 @@ function addon:CreateOptions()
     panel.previewStatus = Label(page, "", 0, -324, 470, 48)
 
     local proc = panel.pages.proc
-    Label(proc, "Preview only — real Proc / Buff monitoring is not implemented. Styles and previews use only the already defined regions for your current specialization.", 0, -34, 470, 62)
+    panel.controls.procEnabled = CheckBox(panel, proc, "Enable Proc timers", 0, -32,
+        function(value) return { proc = { enabled = value } } end)
+    panel.procStatus = Label(proc, "", 0, -68, 470, 40)
     local procChoices = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
         if entry.kind == "proc" then procChoices[#procChoices + 1] = { value = entry.id, label = entry.label } end
     end
-    panel.controls.procEntry = Dropdown(panel, proc, "Proc region (Preview only)", 0, -110, procChoices, nil, function(key)
+    panel.controls.procEntry = Dropdown(panel, proc, "Proc region", 0, -110, procChoices, nil, function(key)
         ClearEdits(panel)
         panel.selectedProcEntry = key
         addon:RefreshOptions()

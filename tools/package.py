@@ -55,6 +55,9 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--git", default="git")
     args = parser.parse_args()
+    # Child tests run inside the extracted addon, so their paths must not be
+    # reinterpreted relative to that new working directory.
+    args.output = args.output.resolve()
     repo = Path(__file__).resolve().parent.parent
     command = [args.git, "-c", "safe.directory=" + repo.as_posix(), "-C", str(repo)]
     def git(*arguments):
@@ -65,7 +68,7 @@ def main():
     files = {path: git("show", "HEAD:" + path) for path in git("ls-tree", "-r", "--name-only", "HEAD").decode().splitlines()}
     version = next(line.split(":", 1)[1].strip() for line in files["CarGOUI.toc"].decode().splitlines() if line.startswith("## Version:"))
     args.output.mkdir(parents=True, exist_ok=True)
-    target = args.output / ("CarGOUI-" + version + "-Real-Mobility.zip")
+    target = args.output / ("CarGOUI-" + version + "-Mage-Proc.zip")
     installed = install_files(files)
     digest = write_archive(installed, target)
     extraction = args.output / ("package-check-" + digest[:12])
@@ -77,7 +80,7 @@ def main():
              "Archive: " + target.name, "SHA256: " + digest,
              "Verification: extracted final installer; no real WoW client acceptance."]
     failed = False
-    for test in ("run_tests.py", "check_mobility_static.py", "check_styles_theme_static.py"):
+    for test in ("run_tests.py", "check_mobility_static.py", "check_styles_theme_static.py", "check_proc_static.py"):
         result = subprocess.run([sys.executable, str(extraction / "CarGOUI/tests" / test)],
                                 cwd=extraction / "CarGOUI", env=os.environ,
                                 capture_output=True, text=True, encoding="utf-8")

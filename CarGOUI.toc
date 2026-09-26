@@ -1,8 +1,8 @@
 ## Interface: 120100
 ## Title: CarGOUI
-## Notes: Class Mobility cooldown reminders, settings and separate simulated previews.
+## Notes: Class Mobility, Mage native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.11
+## Version: 0.1.0-alpha.12
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua
@@ -15,7 +15,11 @@ Config\Locale.lua
 Core\Database.lua
 UI\ReminderStyle.lua
 UI\Display.lua
+Modules\Proc\AuraState.lua
+UI\ProcDisplay.lua
+Modules\Proc\Runtime.lua
 Modules\Mobility\Runtime.lua
+Modules\Mobility\FreeMove.lua
 Core\Diagnostics.lua
 UI\Preview.lua
 UI\Branding.lua

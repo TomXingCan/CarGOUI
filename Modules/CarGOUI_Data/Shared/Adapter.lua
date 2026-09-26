@@ -151,7 +151,15 @@ function methods:DeactivateEntries()
 end
 function methods:GetMobilityEntry() return self.entries and self.entries[1] end
 function methods:GetMobilityEntries() return self.entries or {} end
-function methods:GetPreviewEntries() return self.entries or {} end
+function methods:GetPreviewEntries()
+    local entries = {}
+    for _, entry in ipairs(self.entries or {}) do
+        -- Keep safety diagnostics for unsupported live branches, but do not
+        -- advertise excluded return/free-recast mechanisms as usable samples.
+        if not entry.definition.unsupportedReason then entries[#entries + 1] = entry end
+    end
+    return entries
+end
 function methods:NeedsMobilityEvents()
     return self.selectionFamilies and #self.selectionFamilies > 0 or false
 end

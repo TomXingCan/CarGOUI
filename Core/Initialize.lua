@@ -50,6 +50,8 @@ addon:RegisterEvent("ADDON_LOADED", OnAddonLoaded)
 function addon:OnClassModuleAvailable()
     if not self.initialized then return end
     self:StopPreview(true)
+    if self.StopProc then self:StopProc() end
+    if self.StopFreeMove then self:StopFreeMove() end
     self:HideLiveMobility()
     self.mobilityState, self.mobilityStates = nil, nil
     self:RefreshActiveEntries()
@@ -70,6 +72,8 @@ local function OnConfigurationContextChanged(self, event, unit)
     -- Tear down temporary state before switching catalogs. The saved class
     -- Mobility record survives all spec changes; cached frames remain reusable.
     self:StopPreview(true)
+    if self.StopProc then self:StopProc() end
+    if self.StopFreeMove then self:StopFreeMove() end
     self:HideLiveMobility()
     self.mobilityState, self.mobilityStates = nil, nil
     self:EnsureCurrentClassModule()

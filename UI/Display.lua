@@ -59,6 +59,9 @@ function addon:LayoutReminder(frame, entry)
     frame:ClearAllPoints()
     frame:SetPoint(position.anchor or "CENTER", UIParent, position.anchor or "CENTER", x / style.scale, y / style.scale)
 
+    if entry.kind == "proc" and self.AnchorProcReminder then
+        self:AnchorProcReminder(frame, entry, style)
+    end
     self:ApplyFontSettings(frame.text, style)
 end
 
@@ -68,7 +71,7 @@ function addon:RenderReminder(frame, entry, content, testMode)
     local enabled = self:GetReminderEnabled(entry)
     local text = content.timer or ""
     if entry.kind == "mobility" and content.message then
-        text = content.message .. "\n" .. text
+        text = entry.textOnly and content.message or (content.message .. "\n" .. text)
     end
     frame.text:SetText(text)
     frame:SetSize(math.max(1, frame.text:GetStringWidth()) + 8,
@@ -85,7 +88,12 @@ function addon:RefreshReminderStyle(key)
     for _, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
             if frame.styleKey == key and frame.reminderEntry then
-                self:LayoutReminder(frame, frame.reminderEntry)
+                if frame.nativeAuraOwned then
+                    -- Touch only the public wrapper and our Font object.
+                    self:StyleAuraReminder(frame)
+                else
+                    self:LayoutReminder(frame, frame.reminderEntry)
+                end
                 if frame.mobilityOwned then
                     local size = self:GetReminderStyle(key).font.size
                     frame:SetSize(size * 16, size * 3)
@@ -104,6 +112,8 @@ end
 function addon:ApplySettings()
     if not self.db then return end
     if self.ConfigureMobility then self:ConfigureMobility() end
+    if self.ConfigureProc then self:ConfigureProc() end
+    if self.ConfigureFreeMove then self:ConfigureFreeMove() end
     if self.RefreshPreview then self:RefreshPreview() end
 end
 

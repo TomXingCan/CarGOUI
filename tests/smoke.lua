@@ -109,7 +109,8 @@ local function setup(saved, loggedIn, client)
         faction = client.faction or "Alliance", factionReads = 0, gradientWrites = 0,
         bindings = {}, formatters = {}, curves = {}, curveEvaluations = {},
         spellReads = {}, knownReads = {}, overrideReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0,
-        loadedModules = {}, moduleNamespaces = {}, loadedFiles = {}, moduleLoads = 0 }
+        loadedModules = {}, moduleNamespaces = {}, loadedFiles = {}, moduleLoads = 0,
+        auraSlots = {}, auraFonts = {}, nativeAuraUpdates = 0, auraReads = 0 }
     if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
@@ -259,6 +260,11 @@ local function setup(saved, loggedIn, client)
             self.disableCalls = (self.disableCalls or 0) + 1
             self:SetEnabled(false)
         end
+        function binding:Assign(other)
+            for _, key in ipairs({ "format", "components", "formatter", "modifier", "interval", "expiredText", "zeroText" }) do
+                self[key] = other[key]
+            end
+        end
         function binding:SetToDefaults()
             self.enabled, self.duration, self.fontString = false, nil, nil
             self.format, self.components, self.formatter = nil, nil, nil
@@ -294,6 +300,7 @@ local function setup(saved, loggedIn, client)
     end }
     if client.nativeBindingUnavailable then env.C_DurationUtil = nil end
     function state:nativeTick()
+        if self.refreshNativeAuras then self:refreshNativeAuras() end
         for _, binding in ipairs(self.bindings) do
             if binding.enabled then binding:UpdateFontString() end
         end
@@ -416,7 +423,10 @@ local function setup(saved, loggedIn, client)
         self.shown = false
         if wasShown and self.scripts.OnHide then self.scripts.OnHide(self) end
     end
-    function object:IsShown() return self.shown ~= false end
+    function object:IsShown()
+        assert(not self.nativeAuraRestricted, "Addon must not read secure native aura child visibility")
+        return self.shown ~= false
+    end
     function object:IsVisible()
         return self:IsShown() and (not self.parent or not self.parent.IsVisible or self.parent:IsVisible())
     end
@@ -478,7 +488,10 @@ local function setup(saved, loggedIn, client)
         state.textWrites = state.textWrites + 1
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
     end
-    function object:GetText() return self.textValue end
+    function object:GetText()
+        assert(not self.nativeAuraRestricted, "Addon must not read secure native aura text")
+        return self.textValue
+    end
     function object:GetStringWidth()
         if self.nativeDurationText then
             state.liveMeasurements = state.liveMeasurements + 1
@@ -686,7 +699,135 @@ local function setup(saved, loggedIn, client)
         end
         return frame
     end
+    if client.proc then
+        state.proc = client.proc
+        state.proc.auras = state.proc.auras or {}
+        state.proc.cvars = state.proc.cvars or { displaySpellActivationOverlays = true, spellActivationOverlayOpacity = "1" }
+        env.C_CVar = { GetCVarBool = function(name) return state.proc.cvars[name] end,
+            GetCVar = function(name) return state.proc.cvars[name] end }
+        env.Enum.ScreenLocationType = {}
+        for index, name in ipairs({ "Center", "Left", "Right", "Top", "Bottom", "TopLeft", "TopRight",
+                "LeftRight", "TopBottom", "LeftRightOutside", "LeftOutside", "RightOutside" }) do
+            env.Enum.ScreenLocationType[name] = index
+        end
+        env.SpellActivationOverlayFrame = env.CreateFrame("Frame", "SpellActivationOverlayFrame", env.UIParent)
+        env.SpellActivationOverlayFrame:SetSize(256 * 0.8, 256 * 0.8)
+        env.SpellActivationOverlayFrame:SetPoint("CENTER", env.UIParent, "CENTER", 0, 0)
+        env.SpellActivationOverlayFrame:SetScale(state.proc.overlayScale or 1)
+        env.CustomAuraContainerMixin = {}
+        env.C_XMLUtil = { GetTemplateInfo = function(name)
+            equal(name, "CustomAuraContainerTemplate", "only the verified aura template is probed")
+            return not state.proc.templateUnavailable and {} or nil
+        end }
+        env.CreateFont = function(name)
+            local font = setmetatable({ kind = "Font", name = name, scripts = {}, events = {} }, { __index = object })
+            state.auraFonts[#state.auraFonts + 1] = font
+            if name then env[name] = font end
+            return font
+        end
+        local createFrame = env.CreateFrame
+        local function NativeVisible(container)
+            -- This is native test machinery, not an addon-accessible aura read.
+            return container.enabled and container:IsVisible()
+        end
+        function state:refreshNativeAuras()
+            for _, slot in ipairs(self.auraSlots) do
+                -- A native dirty pass is postponed while any public ancestor is
+                -- hidden. Addon shutdown must leave the wrapper shown/alpha=0.
+                if slot.container:IsVisible() then
+                local candidate
+                if NativeVisible(slot.container) then
+                    for _, aura in pairs(self.proc.auras) do
+                        local id = nativeValue(aura.spellID)
+                        if slot.filters.includeSpellIDs[id] and aura.helpful ~= false then
+                            local item = aura.duration and durations[aura.duration]
+                            if not item or item.total == 0 or self.clock < item.start + item.total / item.rate then
+                                candidate = aura; break
+                            end
+                        end
+                    end
+                end
+                slot.nativeAura, slot.nativeShown = candidate, candidate ~= nil
+                local binding = slot.nativeBinding
+                if binding then
+                    binding.duration = candidate and candidate.duration or nil
+                    binding.enabled = candidate ~= nil and candidate.duration ~= nil
+                    binding:UpdateFontString()
+                end
+                self.nativeAuraUpdates = self.nativeAuraUpdates + 1
+                slot.container.nativeAuraDirty = false
+                end
+            end
+        end
+        function state:nativeAuraText(container)
+            self:nativeTick()
+            local text = {}
+            local ancestor = container
+            while ancestor do
+                if ancestor.shown == false or nativeValue(ancestor.alpha) == 0 then return "" end
+                ancestor = ancestor.parent
+            end
+            for _, slot in ipairs(self.auraSlots) do
+                if slot.container == container and slot.nativeShown and NativeVisible(container) then
+                    for _, child in ipairs(slot.children) do
+                        text[#text + 1] = child.nativeRenderedText or child.textValue or ""
+                    end
+                end
+            end
+            return table.concat(text, "")
+        end
+        function state:activeAuraSlots()
+            local count = 0
+            for _, slot in ipairs(self.auraSlots) do if NativeVisible(slot.container) then count = count + 1 end end
+            return count
+        end
+        env.CreateFrame = function(kind, name, parent, template)
+            local frame = createFrame(kind, name, parent, template)
+            if template and template:find("CustomAuraContainerTemplate", 1, true) then
+                equal(kind, "AuraContainer", "custom native aura template uses native AuraContainer type")
+                frame.nativeAuraContainer = true
+                frame.enabled = false
+                function frame:SetUnit(unit) equal(unit, "player", "only player helpful auras are configured"); self.unit = unit end
+                function frame:SetEnabled(value)
+                    equal(type(value), "boolean", "native container enable is public lifecycle state")
+                    self.enabled = value
+                    self.nativeAuraDirty = true
+                end
+                function frame:AddAuraSlot(key, filter, configuration)
+                    equal(filter, "HELPFUL", "Proc native filtering is helpful-player only")
+                    truthy(configuration.candidateFilters.includeSpellIDs, "candidate filters declare audited aura IDs")
+                    for id, enabled in pairs(configuration.candidateFilters.includeSpellIDs) do
+                        truthy(type(id) == "number" and not isSecret(id) and enabled == true, "native spell filter is static public mapping")
+                    end
+                    local slot = { container = self, key = key, filters = configuration.candidateFilters, children = {} }
+                    local button = createFrame("Button", nil, self)
+                    slot.button = button
+                    function button:SetDurationText(text, options)
+                        local binding = env.C_DurationUtil.CreateDurationTextBinding()
+                        binding:Assign(options.binding)
+                        binding:SetFontString(text)
+                        slot.nativeBinding = binding
+                    end
+                    local createFontString = button.CreateFontString
+                    function button:CreateFontString(...)
+                        local text = createFontString(self, ...)
+                        slot.children[#slot.children + 1] = text
+                        return text
+                    end
+                    state.auraSlots[#state.auraSlots + 1] = slot
+                    configuration.initializeFrame(button)
+                    -- Simulates the native restriction boundary after initialization.
+                    button.nativeAuraRestricted = true
+                    for _, text in ipairs(slot.children) do text.nativeAuraRestricted = true end
+                    state:refreshNativeAuras()
+                    return button
+                end
+            end
+            return frame
+        end
+    end
     function state:fire(event, ...)
+        if event == "UNIT_AURA" and self.refreshNativeAuras then self:refreshNativeAuras() end
         if event == "PLAYER_LOGIN" then self.loggedIn = true end
         if event == "PLAYER_REGEN_DISABLED" then self.inCombat = true end
         if event == "PLAYER_REGEN_ENABLED" then self.inCombat = false end
@@ -1481,13 +1622,16 @@ test("preview catalog separates Mage specs and gives each Proc region its own an
             truthy(entry.anchor.x ~= 0 or entry.anchor.y ~= 0, "Proc timers do not use global screen center")
         end
     end
-    for specID, expected in pairs({ [62] = 3, [63] = 3, [64] = 4 }) do
+    for specID, expected in pairs({ [62] = 7, [63] = 9, [64] = 5 }) do
         state.specID = specID
         local entries = addon:GetPreviewEntries()
         equal(#entries, expected, "defined entries for current Mage spec")
         local regions = {}
         for _, entry in ipairs(entries) do
-            equal(entry.specID, specID, "no cross-spec reminder entry")
+            if entry.freeMove then
+                equal(entry.class, "MAGE", "Free move uses current class scope across every spec")
+                equal(entry.specID, nil, "Free move is not duplicated by specialization")
+            else equal(entry.specID, specID, "no cross-spec reminder entry") end
             if entry.kind == "proc" then
                 local key = entry.anchor.x .. ":" .. entry.anchor.y
                 truthy(not regions[key], "separate Proc regions have separate centers")
@@ -1496,7 +1640,9 @@ test("preview catalog separates Mage specs and gives each Proc region its own an
         end
     end
     state.classToken = "WARRIOR"
-    equal(#addon:GetPreviewEntries(), 0, "unsupported class has no fabricated preview entries")
+    local warriorPreviews = addon:GetPreviewEntries()
+    equal(#warriorPreviews, 1, "unlearned Warrior has only its confirmed Free move preview")
+    truthy(warriorPreviews[1].freeMove and warriorPreviews[1].class == "WARRIOR", "no foreign Mage Proc or fake ordinary skill")
     equal(state.realReads, 0, "catalog does not query real aura/cooldown state")
 end)
 
@@ -1527,7 +1673,9 @@ test("external single/all preview renders fixed samples and cleans up on stop an
         reminderAnchor(frame, entry, addon, env)
         truthy(frame.guidance and frame.guidance:IsShown(), "test mode explains target visual region")
         truthy(frame.guidance:GetFrameLevel() < frame:GetFrameLevel(), "test guidance stays behind readable timer text")
-        if entry.kind == "mobility" then
+        if entry.freeMove then
+            equal(frame.text:GetText(), "Free move", "Free move preview is text only with no synthetic time")
+        elseif entry.kind == "mobility" then
             truthy(frame.text:GetText():find("No Shimmer", 1, true), "Mobility uses sample label")
             truthy(frame.text:GetText():find("8.0", 1, true), "Mobility uses fixed sample time")
         else
@@ -1614,9 +1762,9 @@ test("specialization changes clear obsolete previews and unsupported classes dis
     state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
     equal(countKeys(visiblePreviews(addon)), 0, "spec switch stops obsolete simulated content")
     controls.previewAll:Click()
-    equal(countKeys(visiblePreviews(addon)), 4, "new user Preview starts current Frost entries")
-    for id in pairs(visiblePreviews(addon)) do truthy(id:find("mage_frost_", 1, true), "old spec samples hidden") end
-    state.classToken = "WARRIOR"
+    equal(countKeys(visiblePreviews(addon)), 5, "new Preview includes current Frost regions plus class-level Free move")
+    for id in pairs(visiblePreviews(addon)) do truthy(id:find("mage_frost_", 1, true) or id == "free_move_mage", "old spec samples hidden") end
+    state.classToken = "UNKNOWN"
     state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
     equal(countKeys(visiblePreviews(addon)), 0, "unsupported class removes stale samples")
     equal(controls.previewSingle:IsEnabled(), false, "unsupported single-preview action disabled")
@@ -1636,7 +1784,9 @@ test("preview validation, visibility and shared renderer keep sample state separ
     equal(addon:SetPreview("single", "missing-entry"), false, "unknown entry rejected")
     truthy(addon:SetPreview("all"), "all preview started")
     addon:UpdateSettings({ enabled = false })
-    equal(countKeys(visiblePreviews(addon)), #entries - 1, "Mobility enable preference does not hide independent Proc previews")
+    local procCount = 0
+    for _, candidate in ipairs(entries) do if candidate.kind == "proc" then procCount = procCount + 1 end end
+    equal(countKeys(visiblePreviews(addon)), procCount, "Mobility disable hides ordinary and Free move while preserving Proc samples")
     local mobilityFrame = addon.previewFrames[entries[1].id]
     truthy(not mobilityFrame:IsShown() and not mobilityFrame.guidance:IsVisible(), "disabled Mobility hides its own sample and guide")
     addon:UpdateSettings({ enabled = true })
@@ -2849,7 +2999,8 @@ test("automatic Appearance context discards drafts while Proc regions share a sp
         truthy(key ~= "classSelector" and key ~= "specSelector" and key ~= "profileSelector" and key ~= "loadModule", "no added context-management buttons")
     end
     local file = assert(io.open(root .. "/UI/Options.lua", "r")); local source = file:read("*a"); file:close()
-    truthy(source:find("Preview only", 1, true), "Proc is explicitly preview only")
+    truthy(not source:find("real Proc / Buff monitoring is not implemented", 1, true), "obsolete Proc-only sample claim is removed")
+    truthy(panel.procStatus:GetText():find("Test Mode", 1, true) and panel.procStatus:GetText():find("separate", 1, true), "Proc page distinguishes native runtime from sample mode")
 end)
 
 test("Blink Shimmer and all Mage specs share every Mobility preference without merging Proc", function()
@@ -3099,7 +3250,7 @@ test("native class loading distinguishes files active data saved configuration a
     local report = mage:GetRuntimeLoadDiagnostics()
     equal(ms.moduleLoads, 1, "unified native data package loads exactly once")
     equal(report.modules.fileStatus, "loaded; current adapter active", "Data file status and current adapter activity are explicit")
-    equal(report.modules.previewEntries, 3, "only Fire catalog entries instantiated")
+    equal(report.modules.previewEntries, 8, "only audited active Fire catalog entries instantiated")
     equal(countKeys(mage.mobilityEntries), 1, "no unrelated spec Mobility entry instantiated")
     equal(mage.db.classes.MAGE.proc[62], nil, "unused Arcane config not initialized")
     equal(report.activeSkills, 1, "one effective current skill")
@@ -4114,10 +4265,17 @@ test("every non-Mage variant selects independently through learned state and nat
                             equal(addon:GetMobilityStatus(definition.id).status, "Unsupported", "blocked return-stage remains explicitly unsupported")
                             equal(#state.spellReads, beforeReads, "unsupported mechanism makes no timer-state queries")
                             equal(textFor(addon, definition.id), "", "unsupported mechanism cannot show invented countdown")
+                            for _, preview in ipairs(addon:GetPreviewEntries()) do
+                                truthy(preview.freeMove, "excluded return variant cannot masquerade as an available sample")
+                            end
                         else
                             tested = tested + 1
                             equal(addon:GetMobilityStatus(definition.id).status, "Depleted", "actual API fixture reports zero uses/cooldown")
                             equal(textFor(addon, definition.id), "No " .. variant.spellName .. "\n18.0", "real object supplies arbitrary timer, not metadata duration")
+                            local available = {}
+                            for _, preview in ipairs(addon:GetPreviewEntries()) do available[preview.id] = true end
+                            truthy(available[definition.id], "supported ordinary variant retains its external Preview")
+                            truthy(available["free_move_" .. class:lower()], "confirmed class receiver has its independent text-only Preview")
                             if item.charges then item.charges = 1 else item.cooldownDuration = 0 end
                             syncEvent(state, "SPELL_UPDATE_CHARGES")
                             equal(addon:GetMobilityStatus(definition.id).status, "Ready", "first recovery/actual reset hides active skill")
@@ -4261,7 +4419,7 @@ test("free-return talents stay explicitly unsupported without false exhaustion o
         equal(frame.durationBinding.enabled, false, "obsolete outbound timer detached")
         equal(textFor(addon, fixture.family), "", "no misleading No-skill reminder during unsupported mechanism")
         options(addon)
-        truthy(addon:SetPreview("single", fixture.family), "clearly labeled external sample remains usable for styling")
+        equal(addon:SetPreview("single", fixture.family), false, "excluded free-return mechanism is not offered as a usable Preview")
         addon:StopPreview()
         equal(addon:GetMobilityStatus(fixture.family).status, "Unsupported", "preview never upgrades unsupported live status")
         state.mobility.known[fixture.talent] = nil
@@ -4375,10 +4533,500 @@ test("Mage additional conditional returns remain honest unsupported entries and 
     syncEvent(state, "SPELLS_CHANGED")
     equal(addon:GetMobilityStatus("mage_alter_time").status, "Unsupported", "Alter Time return stage retains exact blocker")
     equal(#addon:GetMobilityEntries(), 3, "replacement does not duplicate Alter Time family")
-    options(addon); addon:SetPreview("single", "mage_reflection")
+    options(addon)
+    equal(addon:SetPreview("single", "mage_reflection"), false, "excluded unimplemented return cannot appear as a usable Preview")
     equal(nativeText(addon), "No Shimmer\n15.0", "preview of separate return family cannot hide actual Shimmer")
     addon:StopPreview(); state:nativeTick()
     equal(nativeText(addon), "No Shimmer\n15.0", "stopping sample preserves primary real countdown")
+end)
+
+-- Native aura fixtures emulate only the documented display contract. They do
+-- not prove secure execution, retail aura filtering, or live overlay geometry.
+local function auraFixture(specID)
+    local env, addon, state = login(nil, false, { specID = specID or 63, proc = {} })
+    return env, addon, state
+end
+
+test("native helpful aura slots handle opaque trigger partial stacks refresh expiry and consumption", function()
+    local env, addon, state = auraFixture()
+    local parent = env.CreateFrame("Frame", nil, env.UIParent)
+    parent:SetSize(200, 100)
+    local handle = assert(addon:CreateNativeAuraSlot(parent, "native_fixture_hot_streak", 48108))
+    handle:SetEnabled(true)
+    equal(state:nativeAuraText(handle.container), "", "no aura never fabricates timer")
+    state.proc.auras[1] = { spellID = secret(48108), applications = secret(2), duration = state:duration(96, 17, true) }
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "13.0", "native slot renders actual opaque remaining duration")
+    state.inCombat = true
+    state.proc.auras[1].applications = secret(1)
+    state:advance(2)
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "11.0", "partial consumption retains native timer and remaining layer")
+    state.proc.auras[1].duration = state:duration(state.clock, 19, true)
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "19.0", "refresh supplies new real native duration without fixed lifetime")
+    state:advance(19)
+    equal(state:nativeAuraText(handle.container), "", "native expiry removes timer with no addon polling")
+    state.proc.auras[1].duration = state:duration(state.clock, 23, true)
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "23.0", "retrigger after expiration reuses native display")
+    state.proc.auras[1] = nil
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "", "full consumption clears instantly on aura event")
+    equal(state.realReads, 0, "addon never reads a secret or public aura through Lua APIs")
+    equal(state.liveMeasurements, 0, "native aura text never enters string measurement")
+    equal(#state.errors, 0, "no native secret read or lifecycle errors")
+end)
+
+test("native aura presence and data secrecy are independent from the combat flag", function()
+    for _, inCombat in ipairs({ false, true }) do
+        for _, restricted in ipairs({ false, true }) do
+            local env, addon, state = auraFixture()
+            local parent = env.CreateFrame("Frame", nil, env.UIParent)
+            local handle = assert(addon:CreateNativeAuraSlot(parent, "native_fixture_independent", 44544))
+            handle:SetEnabled(true)
+            state.inCombat = inCombat
+            state.proc.auras[1] = { spellID = restricted and secret(44544) or 44544,
+                applications = restricted and secret(2) or 2, duration = state:duration(90, 29, restricted) }
+            state:fire("UNIT_AURA", "player")
+            equal(state:nativeAuraText(handle.container), "19.0", "all four combat/secrecy combinations use native countdown")
+            state.proc.auras[1] = nil
+            state:fire("UNIT_AURA", "player")
+            equal(state:nativeAuraText(handle.container), "", "all four combinations clear on actual absence")
+            equal(#state.errors, 0, "no opaque data escapes native fixture")
+        end
+    end
+end)
+
+test("native slot reuse remains tied to one audited aura and releases display work on disable", function()
+    local env, addon, state = auraFixture()
+    local parent = env.CreateFrame("Frame", nil, env.UIParent)
+    local handle = assert(addon:CreateNativeAuraSlot(parent, "native_fixture_stable", 48108))
+    local allocatedSlots, allocatedBindings, allocatedFonts = #state.auraSlots, #state.bindings, #state.auraFonts
+    for index = 1, 20 do
+        equal(addon:CreateNativeAuraSlot(parent, "native_fixture_stable", 48108), handle, "slot handle is bounded and reusable")
+        handle:SetEnabled(true)
+        state.proc.auras[1] = { spellID = secret(48108), duration = state:duration(state.clock, index + 5, true) }
+        state:fire("UNIT_AURA", "player")
+        truthy(state:nativeAuraText(handle.container) ~= "", "matching aura gets current native timer")
+        handle:SetEnabled(false)
+        equal(state:nativeAuraText(handle.container), "", "disabled native slot is empty")
+        equal(handle.container.enabled, false, "disabled container no longer owns active aura subscriptions")
+        truthy(handle.container:IsShown(), "disabled shown ancestor permits queued native cleanup")
+    end
+    equal(addon:CreateNativeAuraSlot(parent, "native_fixture_stable", 44544), nil, "cached timer cannot be silently reassigned to another aura")
+    equal(#state.auraSlots, allocatedSlots, "repeated lifecycle creates no additional native slots")
+    equal(#state.bindings, allocatedBindings, "repeated lifecycle creates no additional timer bindings")
+    equal(#state.auraFonts, allocatedFonts, "repeated lifecycle creates no additional font objects")
+    equal(state:activeTimers(), 0, "native slot lifecycle adds no addon polling timers")
+end)
+
+test("Free move native helper displays only text for its independently filtered aura", function()
+    local env, addon, state = auraFixture()
+    local parent = env.CreateFrame("Frame", nil, env.UIParent)
+    local before = #state.bindings
+    local handle = assert(addon:CreateNativeAuraSlot(parent, "native_fixture_free_move", 375240, "Free move"))
+    handle:SetEnabled(true)
+    equal(#state.bindings, before, "text-only helper allocates no countdown binding")
+    state.proc.auras[1] = { spellID = secret(375240), duration = state:duration(95, 21, true) }
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "Free move", "no duration or skill name is added")
+    state.proc.auras[1] = { spellID = secret(358267), duration = state:duration(95, 21, true) }
+    state:fire("UNIT_AURA", "player")
+    equal(state:nativeAuraText(handle.container), "", "Hover duration cannot activate Time Spiral text")
+    equal(state.realReads, 0, "static aura filter avoids any addon-side aura query")
+end)
+
+local function procFrame(addon, id)
+    return assert(addon.reminderFrames and addon.reminderFrames.nativeAura and addon.reminderFrames.nativeAura[id],
+        "missing live native Proc region " .. id)
+end
+local function procText(addon, state, id)
+    return state:nativeAuraText(procFrame(addon, id).auraHandle.container)
+end
+local function putAura(state, id, duration, stacks, restricted)
+    state.proc.auras[id] = { spellID = restricted and secret(id) or id,
+        applications = restricted and secret(stacks or 1) or stacks or 1,
+        duration = state:duration(state.clock, duration, restricted) }
+    state:fire("UNIT_AURA", "player")
+end
+local function showProc(env, state, id, texture, location, scale)
+    state:fire("SPELL_ACTIVATION_OVERLAY_SHOW", id, texture, env.Enum.ScreenLocationType[location], scale or 1, 255, 255, 255)
+end
+
+test("Mage mappings preserve separate aura overlay region identities and include cast-time Pyroclasm", function()
+    local _, addon, state = auraFixture(63)
+    local all, regions, IDs = 0, 0, {}
+    local expected = { [62] = { [276743] = true, [451038] = true, [1277009] = true },
+        [63] = { [48108] = true, [48107] = true, [269651] = true, [383874] = true, [383883] = true },
+        [64] = { [44544] = true, [126084] = true, [190446] = true } }
+    for _, spec in ipairs({ 62, 63, 64 }) do
+        state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        local found = {}
+        for _, definition in ipairs(addon:GetProcDefinitions()) do
+            truthy(expected[spec][definition.overlayID], "only audited current-spec native graph rows")
+            equal(definition.auraID, definition.overlayID, "exact audited aura matches graph; no guessed Buff alias")
+            truthy(not found[definition.overlayID], "native graph identity is unique within spec")
+            found[definition.overlayID] = true; all = all + 1
+            for _, entry in ipairs(definition.regions) do
+                truthy(not IDs[entry.id], "each native visual region retains independent position ID")
+                IDs[entry.id] = true; regions = regions + 1
+                equal(entry.kind, "proc", "native region uses Proc style/config namespace")
+                equal(entry.specID, spec, "only current specialization styles apply")
+            end
+        end
+        same(found, expected[spec], "audited mapping is complete for current spec")
+    end
+    equal(all, 11, "eleven audited native graph rows including event-only historical row")
+    equal(regions, 16, "sixteen independently positioned graph regions")
+    truthy(IDs.mage_fire_pyroclasm_top, "cast-time Pyroclasm is distinct from Hot Streak")
+    truthy(IDs.mage_frost_fingers_left and IDs.mage_frost_fingers_right, "native second-stack graph is not inferred by Lua")
+    equal(state.realReads, 0, "mapping and state changes perform no addon aura/cooldown reads")
+end)
+
+test("Fire live native timers coexist across Hot Streak Heating Up and Pyroclasm with independent lifecycle", function()
+    local env, addon, state = auraFixture(63)
+    truthy(addon.procTracking, "real Proc monitoring starts at login without Options or Test Mode")
+    state.inCombat = true
+    putAura(state, 48108, 17, 1, true)
+    putAura(state, 48107, 11, 1, true)
+    putAura(state, 269651, 23, 2, true)
+    showProc(env, state, 48108, 449490, "LeftRight", 1)
+    showProc(env, state, 48107, 449490, "LeftRight", 0.5)
+    showProc(env, state, 269651, 457658, "Top", 0.7)
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "17.0", "Hot Streak left actual time")
+    equal(procText(addon, state, "mage_fire_hot_streak_right"), "17.0", "Hot Streak right actual time")
+    equal(procText(addon, state, "mage_fire_heating_up_left"), "11.0", "Heating Up has separate smaller graphic timer")
+    equal(procText(addon, state, "mage_fire_pyroclasm_top"), "23.0", "Pyroclasm time is not Hot Streak time")
+    state:advance(3)
+    state.proc.auras[269651].applications = secret(1)
+    state.proc.auras[48108] = nil
+    state:fire("UNIT_AURA", "player")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 48108)
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "", "consumed Hot Streak removes its regions")
+    equal(procText(addon, state, "mage_fire_pyroclasm_top"), "20.0", "partially consumed Pyroclasm remains active")
+    equal(procText(addon, state, "mage_fire_heating_up_left"), "8.0", "another simultaneous Proc is untouched")
+    putAura(state, 269651, 29, 2, true)
+    equal(procText(addon, state, "mage_fire_pyroclasm_top"), "29.0", "refresh uses fresh native aura duration")
+    state:advance(29)
+    equal(procText(addon, state, "mage_fire_pyroclasm_top"), "", "natural expiry clears actual aura")
+    equal(state.liveMeasurements, 0, "real Proc timer never enters ordinary string sizing")
+    equal(state.realReads, 0, "secret aura data stays inside native matching and timing")
+    equal(#state.errors, 0, "live secret Proc path has no addon errors")
+end)
+
+test("Frost native first and second stack regions clear independently while Brain Freeze remains", function()
+    local env, addon, state = auraFixture(64)
+    putAura(state, 44544, 14, 2, true)
+    putAura(state, 126084, 14, 1, true)
+    putAura(state, 190446, 19, 1, true)
+    showProc(env, state, 44544, 449489, "Left", 1)
+    showProc(env, state, 126084, 449489, "Right", 1)
+    showProc(env, state, 190446, 450930, "Top", 1)
+    equal(procText(addon, state, "mage_frost_fingers_left"), "14.0", "first native Fingers region")
+    equal(procText(addon, state, "mage_frost_fingers_right"), "14.0", "second native Fingers region")
+    state.proc.auras[44544].applications = secret(1)
+    state.proc.auras[126084] = nil
+    state:fire("UNIT_AURA", "player"); state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 126084)
+    equal(procText(addon, state, "mage_frost_fingers_left"), "14.0", "one charge consumed does not clear the first region")
+    equal(procText(addon, state, "mage_frost_fingers_right"), "", "absent native second-stack aura clears only its region")
+    equal(procText(addon, state, "mage_frost_brain_freeze_top"), "19.0", "different Proc remains independent")
+    state.proc.auras[44544] = nil; state:fire("UNIT_AURA", "player")
+    equal(procText(addon, state, "mage_frost_fingers_left"), "", "fully consumed first effect disappears")
+end)
+
+test("Proc layout follows stock graph edges scales and independent saved region offsets", function()
+    local env, addon, state = auraFixture(63)
+    env.SpellActivationOverlayFrame:SetScale(1.5)
+    addon:UpdateReminderStyle("proc:MAGE:63", { font = { size = 35 }, scale = 2 })
+    truthy(addon:UpdateSettings({ reminders = { mage_fire_heating_up_left = { position = { x = 13, y = -7 } },
+        mage_fire_hot_streak_right = { position = { x = -9, y = 3 } } } }), "existing per-region coordinates stay editable")
+    showProc(env, state, 48107, 449490, "LeftRight", 0.5)
+    showProc(env, state, 48108, 449490, "LeftRight", 1)
+    local small, large = procFrame(addon, "mage_fire_heating_up_left"), procFrame(addon, "mage_fire_hot_streak_right")
+    local point, relative, relativePoint, x, y = small:GetPoint()
+    equal(point, "CENTER", "timer own visual center")
+    equal(relative, env.SpellActivationOverlayFrame, "live timer is tied to current stock overlay root")
+    equal(relativePoint, "LEFT", "left bracket uses native root left edge")
+    equal(x * small:GetScale(), -25.6 * 1.5 + 13, "small bracket center includes stock scale and saved X exactly once")
+    equal(y * small:GetScale(), -7, "saved Y independent of scale migration")
+    local _, _, largeEdge, largeX, largeY = large:GetPoint()
+    equal(largeEdge, "RIGHT", "opposite bracket owns its native edge")
+    equal(largeX * large:GetScale(), 51.2 * 1.5 - 9, "large bracket center is not reused for smaller bracket")
+    equal(largeY * large:GetScale(), 3, "other region position remains independent")
+    same(small.auraHandle.font.textColor, { 0.25, 0.78, 0.92, 1 }, "Proc digits use player class color")
+    equal(small.auraHandle.font.font[2], 35, "native child inherits current spec shared font")
+end)
+
+test("native graph lifecycle rejects unrelated or secret payloads and reused graphs cannot inherit old timers", function()
+    local env, addon, state = auraFixture(63)
+    local id, texture, region = 383883, 457658, "mage_fire_fury_sun_king_top"
+    putAura(state, id, 27, 1, true)
+    equal(procText(addon, state, region), "", "event-only graph is not invented from an old historical mapping")
+    showProc(env, state, id, texture + 1, "Top", 0.7)
+    equal(procText(addon, state, region), "", "wrong graphic never establishes a mapping")
+    state:fire("SPELL_ACTIVATION_OVERLAY_SHOW", secret(id), texture, env.Enum.ScreenLocationType.Top, 0.7)
+    equal(procText(addon, state, region), "", "opaque event identity is not decoded")
+    showProc(env, state, id, texture, "Top", 0.7)
+    equal(procText(addon, state, region), "27.0", "actual matching native graph enables its exact aura slot")
+    local frame = procFrame(addon, region)
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", id)
+    equal(procText(addon, state, region), "", "graph hide detaches its timer")
+    truthy(frame:IsShown(), "public wrapper stays shown for deferred native cleanup")
+    putAura(state, 269651, 13, 1, true)
+    showProc(env, state, 269651, 457658, "Top", 0.7)
+    equal(procText(addon, state, "mage_fire_pyroclasm_top"), "13.0", "same stock texture reused by other effect gets its own real time")
+    equal(procText(addon, state, region), "", "historical timer cannot remain on a reused native graphic")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", nil)
+    equal(procText(addon, state, "mage_fire_pyroclasm_top"), "", "hide-all releases every observed graph")
+end)
+
+test("Options Preview and class settings leave real Proc and Mobility ownership independent", function()
+    local env, addon, state = login(nil, false, { specID = 63, proc = {}, mobility = {
+        known = { [212653] = true, [1953] = true }, override = 212653,
+        spells = { [212653] = { charges = 0, maxCharges = 2, chargeStart = 95, chargeDuration = 20,
+            cooldownStart = 100, cooldownDuration = 20, secretCharges = true, secretDuration = true } } } })
+    putAura(state, 48108, 18, 1, true)
+    local live = currentLive(addon)
+    options(addon); truthy(addon:SetPreview("single", "mage_fire_hot_streak_left"), "existing Test Mode can select Proc region")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "", "matching live region is independently suppressed during sample")
+    equal(procText(addon, state, "mage_fire_hot_streak_right"), "18.0", "other native region continues")
+    addon:StopPreview()
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "18.0", "stop sample restores current real aura")
+    addon.optionsFrame:Hide()
+    truthy(addon.procTracking, "closed Options does not stop Proc subscription")
+    truthy(addon.mobilityTracking, "closed Options does not stop Mobility subscription")
+    local duration, alpha = live.durationBinding.duration, live.alpha
+    addon:UpdateReminderStyle("proc:MAGE:63", { font = { size = 38 } })
+    equal(live.durationBinding.duration, duration, "Proc style change does not rebind real Mobility timer")
+    equal(live.alpha, alpha, "Proc style never replaces secret Mobility visibility")
+    equal(procFrame(addon, "mage_fire_hot_streak_left").auraHandle.font.font[2], 38, "native Proc font updates without restricted child access")
+    truthy(addon:UpdateSettings({ proc = { enabled = false } }), "existing Proc module switch supports disable")
+    state:nativeTick()
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "", "disabled Proc stops native slot")
+    equal(addon:GetEventDiagnostics().perEvent.SPELL_ACTIVATION_OVERLAY_SHOW, nil, "disable removes own overlay subscription")
+    truthy(addon.mobilityTracking, "disabling Proc never disables Mobility")
+    equal(nativeText(addon), "No Shimmer\n15.0", "real Mobility still uses accepted path")
+    truthy(addon:UpdateSettings({ proc = { enabled = true } }), "reenabling synchronizes native aura")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "18.0", "reenabling reads current native aura not stale cached timer")
+end)
+
+test("Proc specialization cycles and reload keep scoped styles coordinates slots and listeners bounded", function()
+    local env, addon, state = auraFixture(62)
+    addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 37 }, scale = 1.3 })
+    addon:UpdateSettings({ reminders = { mage_arcane_clearcasting_left = { position = { x = 19, y = -8 } } } })
+    putAura(state, 276743, 22, 2, true)
+    local mobility = copy(addon:GetMobilityConfig())
+    for _, spec in ipairs({ 63, 64, 62 }) do state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player") end
+    local slots, bindings, fonts = #state.auraSlots, #state.bindings, #state.auraFonts
+    local callbacks = addon:GetEventDiagnostics().callbacks
+    for index = 1, 12 do
+        for _, spec in ipairs({ 63, 64, 62 }) do
+            state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+            state:nativeTick()
+            for _, frame in pairs(addon.reminderFrames.nativeAura) do
+                if frame.reminderEntry.kind == "proc" and frame.reminderEntry.specID ~= spec then
+                    equal(frame.auraHandle.enabled, false, "previous spec slot is detached")
+                end
+            end
+        end
+    end
+    equal(#state.auraSlots, slots, "spec cycles do not allocate unbounded native children")
+    equal(#state.bindings, bindings, "spec cycles do not accumulate native bindings")
+    equal(#state.auraFonts, fonts, "spec cycles do not accumulate font objects")
+    equal(addon:GetEventDiagnostics().callbacks, callbacks, "spec cycles do not accumulate event callbacks")
+    equal(procFrame(addon, "mage_arcane_clearcasting_left").auraHandle.font.font[2], 37, "returning Arcane restores current spec style")
+    equal(addon:GetReminderPosition(procFrame(addon, "mage_arcane_clearcasting_left").reminderEntry).x, 19, "regional saved coordinate remains")
+    same(addon:GetMobilityConfig(), mobility, "Proc spec changes leave Mage Mobility config untouched")
+    local saved = copy(addon.db)
+    local _, reloaded, fresh = login(saved, false, { specID = 62, proc = {} })
+    putAura(fresh, 276743, 31, 1, true)
+    syncEvent(fresh, "PLAYER_ENTERING_WORLD")
+    equal(procText(reloaded, fresh, "mage_arcane_clearcasting_left"), "31.0", "reload synchronizes actual aura without waiting for another cast")
+    equal(reloaded:GetProcConfig().style.font.size, 37, "reload preserves scoped Proc appearance")
+    state.classToken, state.specID = "WARRIOR", 71; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(addon.procTracking, false, "non-Mage does not retain Mage Proc monitoring")
+    equal(addon:GetEventDiagnostics().perEvent.SPELL_ACTIVATION_OVERLAY_SHOW, nil, "non-Mage retains no Proc overlay listener")
+    for _, frame in pairs(addon.reminderFrames.nativeAura) do
+        if frame.reminderEntry.kind == "proc" then equal(frame.auraHandle.enabled, false, "all Mage slots inactive off-class") end
+    end
+end)
+
+test("Time Spiral Free move covers all thirteen class receiver auras without ordinary skill queries", function()
+    local receivers = { DEATHKNIGHT = 375226, DEMONHUNTER = 375229, DRUID = 375230,
+        EVOKER = 375234, HUNTER = 375238, MAGE = 375240, MONK = 375252,
+        PALADIN = 375253, PRIEST = 375254, ROGUE = 375255, SHAMAN = 375256,
+        WARLOCK = 375257, WARRIOR = 375258 }
+    local tested = 0
+    for _, row in ipairs(themeRoster) do
+        local class, spec = row[1], row[2][1][1]
+        local _, addon, state = login(nil, false, { classToken = class, specID = spec, proc = {} })
+        local entry = assert(addon:GetFreeMoveEntry())
+        equal(entry.auraID, receivers[class], "correct audited receiver for " .. class)
+        equal(entry.sourceCastID, 374968, "cast identity remains distinct from receiver aura")
+        equal(entry.class, class, "receiver entry uses current class Mobility configuration")
+        equal(entry.specID, nil, "receiver configuration is not specialization-scoped")
+        truthy(addon.freeMoveTracking, "confirmed receiver initializes even with no ordinary learned Mobility")
+        equal(procText(addon, state, entry.id), "", "absent receiver shows no Free move")
+        putAura(state, 374968, 30, 1, true)
+        equal(procText(addon, state, entry.id), "", "caster spell ID cannot impersonate receiver aura")
+        putAura(state, receivers[class], 30, 1, true)
+        equal(procText(addon, state, entry.id), "Free move", "native secret receiver presence shows text")
+        state.proc.auras[receivers[class]] = nil; state:fire("UNIT_AURA", "player")
+        equal(procText(addon, state, entry.id), "", "consumed receiver disappears without manual counting")
+        putAura(state, receivers[class], 3, 1, true); state:advance(3)
+        equal(procText(addon, state, entry.id), "", "natural receiver expiry removes native text")
+        equal(state.realReads, 0, "receiver tracking never starts unrelated ordinary cooldown queries")
+        if class ~= "MAGE" then
+            equal(addon.procTracking, false, "non-Mage never activates Mage Proc mapping")
+            equal(#state.auraSlots, 1, "non-Mage only allocates its one confirmed receiver slot")
+        end
+        local found = false
+        for _, preview in ipairs(addon:GetPreviewEntries()) do
+            if preview.id == entry.id then
+                found = true; truthy(preview.textOnly and preview.freeMove, "existing preview exposes the actual text-only feature")
+                equal(preview.sample.timer, "", "no fabricated Free move countdown")
+            end
+        end
+        truthy(found, "current class receiver has external Preview support")
+        tested = tested + 1
+    end
+    equal(tested, 13, "all audited current-client receiver classes tested")
+end)
+
+test("Free move presence style Preview and disable never clear other Mobility or Proc", function()
+    local env, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 95, chargeDuration = 20,
+            cooldownStart = 100, cooldownDuration = 20, secretCharges = true, secretDuration = true }, { proc = {} })
+    putAura(state, 48108, 19, 1, true)
+    putAura(state, 375240, 17, 1, true)
+    equal(procText(addon, state, "free_move_mage"), "Free move", "Time Spiral's receiver appears beside ordinary depletion")
+    equal(nativeText(addon), "No Shimmer\n15.0", "Free move does not globally erase ordinary skill alerts")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "19.0", "Proc remains independent of Free move")
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 33 }, scale = 1.4 })
+    local free = procFrame(addon, "free_move_mage")
+    equal(free.auraHandle.font.font[2], 33, "Free move shares current class Mobility font")
+    equal(free:GetScale(), 1.4, "Free move shares class Mobility scale")
+    equal(procFrame(addon, "mage_fire_hot_streak_left").auraHandle.font.font[2], 24, "Mobility changes do not affect Proc spec style")
+    options(addon)
+    truthy(addon:SetPreview("single", "free_move_mage"), "existing Test Mode supports the confirmed Free move entry")
+    equal(addon.previewFrames.free_move_mage.text:GetText(), "Free move", "sample is text only")
+    equal(procText(addon, state, "free_move_mage"), "", "single Free move sample suppresses only corresponding live text")
+    equal(nativeText(addon), "No Shimmer\n15.0", "Free move sample does not hide depleted Shimmer")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "19.0", "Free move sample does not hide Proc")
+    state.proc.auras[375240] = nil; state:fire("UNIT_AURA", "player")
+    addon:StopPreview()
+    equal(procText(addon, state, "free_move_mage"), "", "stopping sample follows current consumed effect, not cached presence")
+    addon.optionsFrame:Hide()
+    putAura(state, 375240, 12, 1, true)
+    equal(procText(addon, state, "free_move_mage"), "Free move", "closed Options does not stop receiver tracking")
+    addon:UpdateSettings({ enabled = false }); state:nativeTick()
+    equal(addon.freeMoveTracking, false, "class Mobility disable stops Free move")
+    equal(free.auraHandle.enabled, false, "class disable detaches native receiver listener")
+    equal(procText(addon, state, "free_move_mage"), "", "class disable clears receiver display")
+    truthy(addon.procTracking, "class Mobility disable leaves independent Proc active")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "19.0", "Proc timer survives Mobility disable")
+    addon:UpdateSettings({ enabled = true })
+    equal(procText(addon, state, "free_move_mage"), "Free move", "reenabling follows currently active real receiver")
+    equal(nativeText(addon), "No Shimmer\n15.0", "ordinary native charge path resumes unchanged")
+end)
+
+test("native aura template absence reports unsupported without simulated combat substitutes", function()
+    local _, addon, state = login(nil, false, { proc = { templateUnavailable = true } })
+    equal(addon.procTracking, false, "missing native aura template does not claim real Proc support")
+    equal(addon.freeMoveTracking, false, "same missing API prevents falsely claiming receiver support")
+    equal(#state.auraSlots, 0, "unsupported template creates no hidden substitute slots")
+    truthy(addon:GetProcDiagnostics():find("CustomAuraContainerTemplate", 1, true), "diagnostic names exact missing native contract")
+    truthy(addon:GetFreeMoveDiagnostics():find("CustomAuraContainerTemplate", 1, true), "Free move blocker names exact native contract")
+    equal(state.realReads, 0, "fallback never probes restricted auras or guesses duration")
+end)
+
+test("disabled stock overlay preference does not replay ignored graph events on later CVar enable", function()
+    local env, addon, state = auraFixture(63)
+    state.proc.cvars.displaySpellActivationOverlays = false
+    state:fire("CVAR_UPDATE", "displaySpellActivationOverlays")
+    putAura(state, 48108, 17, 1, true)
+    showProc(env, state, 48108, 449490, "LeftRight", 1)
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "", "native SHOW ignored while the stock preference is disabled")
+    state.proc.cvars.displaySpellActivationOverlays = true
+    state:fire("CVAR_UPDATE", "displaySpellActivationOverlays")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "", "enabling stock setting does not invent a graph for an ignored SHOW")
+    showProc(env, state, 48108, 449490, "LeftRight", 1)
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "17.0", "subsequent actual native SHOW enables the current aura timer")
+    state.proc.cvars.spellActivationOverlayOpacity = "0.35"
+    state:fire("CVAR_UPDATE", "spellActivationOverlayOpacity")
+    equal(procFrame(addon, "mage_fire_hot_streak_left").alpha, 0.35, "Proc follows public stock opacity preference without alpha readback")
+    putAura(state, 375240, 8, 1, true)
+    equal(procText(addon, state, "free_move_mage"), "Free move", "stock graphic settings do not gate independent Mobility receiver")
+end)
+
+test("Proc Options checkbox releases native slots after one pass and diagnostics never infer aura presence", function()
+    local _, addon, state = auraFixture(63)
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("proc")
+    truthy(controls.procEnabled:IsEnabled() and controls.procEnabled:GetChecked(), "existing Proc switch operates on current spec")
+    local before = addon:GetRuntimeLoadDiagnostics()
+    truthy(before.nativeAuraEnabledSlots > 0, "configured native slots exist before any matching aura")
+    equal(before.nativeAuraTextSlots, 1, "Free move owns one text-only native slot")
+    truthy(before.nativeAuraDurationSlots > 0, "Proc owns native duration slots")
+    truthy(addon:GetProcDiagnostics():find("not a count of visible auras", 1, true), "diagnostic does not claim presence knowledge")
+    putAura(state, 48108, 18, 1, true)
+    equal(addon:GetRuntimeLoadDiagnostics().nativeAuraEnabledSlots, before.nativeAuraEnabledSlots,
+        "actual aura trigger does not become a Lua visible-aura count")
+    controls.procEnabled:Click()
+    equal(addon:GetProcConfig().enabled, false, "checkbox saves spec-specific Proc enablement immediately")
+    state:nativeTick()
+    for _, slot in ipairs(state.auraSlots) do
+        if slot.nativeBinding then
+            equal(slot.container.enabled, false, "Proc native listeners are disabled")
+            equal(slot.nativeBinding.enabled, false, "one shown native dirty pass clears the copied binding")
+        end
+    end
+    truthy(addon.freeMoveTracking, "Proc checkbox does not disable class Free move")
+    equal(addon:GetRuntimeLoadDiagnostics().nativeAuraEnabledSlots, 1, "only Free move receiver remains requested")
+    controls.procEnabled:Click()
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "18.0", "checkbox reenable synchronizes the already active real aura")
+    equal(addon:GetRuntimeLoadDiagnostics().nativeAuraSlots, before.nativeAuraSlots, "reenable reuses the same bounded native slots")
+    truthy(panel.procStatus:GetText():find("Test Mode", 1, true) and panel.procStatus:GetText():find("separate", 1, true), "working controls retain honest mode separation")
+end)
+
+test("missing or secret stock geometry disables Proc with precise diagnostics and safely resumes on layout recovery", function()
+    local env, addon, state = mobilityLogin(212653,
+        { charges = 0, maxCharges = 2, chargeStart = 95, chargeDuration = 20,
+            cooldownStart = 100, cooldownDuration = 20, secretCharges = true, secretDuration = true }, { proc = {} })
+    putAura(state, 48108, 19, 1, true)
+    putAura(state, 375240, 19, 1, true)
+    local frame = procFrame(addon, "mage_fire_hot_streak_left")
+    local mobility = currentLive(addon)
+    local nativeTimer, nativeAlpha, reads = mobility.durationBinding.duration, mobility.alpha, state.realReads
+    local stock = env.SpellActivationOverlayFrame
+    local saved = copy(addon.db)
+    equal(procText(addon, state, frame.entryId), "19.0", "initial real Proc is correctly anchored")
+    env.SpellActivationOverlayFrame = nil
+    state:fire("UI_SCALE_CHANGED")
+    equal(frame.auraHandle.enabled, false, "missing stock root disables native Proc instead of inventing a center")
+    equal(procText(addon, state, frame.entryId), "", "old anchored timer does not survive missing geometry")
+    truthy(addon:GetProcDiagnostics():find("stock Proc layout root", 1, true), "diagnostic identifies the missing stock layout root")
+    equal(procText(addon, state, "free_move_mage"), "Free move", "missing Proc layout does not disable unrelated class receiver")
+    state:advance(2)
+    env.SpellActivationOverlayFrame = stock
+    local getScale = stock.GetEffectiveScale
+    stock.GetEffectiveScale = function() return secret(1.5) end
+    state:fire("UI_SCALE_CHANGED")
+    equal(frame.auraHandle.enabled, false, "secret layout scale is not compared or used for positioning")
+    equal(procText(addon, state, frame.entryId), "", "secret geometry remains safely undisplayed")
+    truthy(addon:GetProcDiagnostics():find("not available as public geometry", 1, true), "diagnostic identifies restricted geometry precisely")
+    stock.GetEffectiveScale = getScale
+    state:fire("UI_SCALE_CHANGED")
+    equal(frame.auraHandle.enabled, true, "public stock geometry recovery resumes native slots")
+    equal(procText(addon, state, frame.entryId), "17.0", "recovered timer follows actual continuing aura duration")
+    truthy(not addon:GetProcDiagnostics():find("not available as public geometry", 1, true), "recovered diagnostics do not retain stale geometry blocker")
+    equal(mobility.durationBinding.duration, nativeTimer, "geometry failure and recovery do not rebind Mobility time")
+    equal(mobility.alpha, nativeAlpha, "geometry failure and recovery preserve secret Mobility visibility")
+    equal(nativeText(addon), "No Shimmer\n13.0", "Mobility continues its actual existing recharge")
+    equal(state.realReads, reads, "geometry updates do not query ordinary cooldowns or aura APIs")
+    same(addon.db, saved, "temporary geometry limitations do not reset user appearance or coordinates")
+    equal(#state.errors, 0, "secret geometry never reaches arithmetic or string conversion")
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

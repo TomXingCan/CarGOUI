@@ -2,15 +2,17 @@
 ## Title: CarGOUI - Data (internal)
 ## Notes: Automatically loaded class adapter definitions. Only the current class is activated.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.11
+## Version: 0.1.0-alpha.12
 ## Dependencies: CarGOUI
 ## LoadOnDemand: 1
 
 Bootstrap.lua
 Shared\SpellState.lua
 Shared\Adapter.lua
+Shared\FreeMoveDefinitions.lua
 Classes\Mage\Bootstrap.lua
 Classes\Mage\MobilityEntries.lua
+Classes\Mage\ProcDefinitions.lua
 Classes\Mage\PreviewEntries.lua
 Classes\Mage\SpellState.lua
 Classes\Mage\Register.lua

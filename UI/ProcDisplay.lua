@@ -1,0 +1,92 @@
+local _, addon = ...
+
+local function Number(value)
+    return issecretvalue and not issecretvalue(value) and type(value) == "number"
+        and value == value and value > -math.huge and value < math.huge
+end
+
+-- Public stock layout: Blizzard_FrameXML/SpellActivationOverlay.lua, build
+-- 69933. Anchor to the stock root's edges, not a fixed screen-center offset.
+-- Only geometry is read; no native child, visibility, alpha or aura is read.
+function addon:AnchorProcReminder(frame, entry, style, guideOnly)
+    local root = SpellActivationOverlayFrame
+    local location = entry.nativeLocation or entry.location
+    if not root or not location or not root.GetEffectiveScale or not UIParent.GetEffectiveScale then
+        return false, "The stock Proc layout root or mapped location is unavailable."
+    end
+    local nativeScale, uiScale = root:GetEffectiveScale(), UIParent:GetEffectiveScale()
+    if not Number(nativeScale) or not Number(uiScale) or nativeScale <= 0 or uiScale <= 0 then
+        return false, "The stock Proc layout scale is not available as public geometry."
+    end
+    local observed = self.procOverlayStates and self.procOverlayStates[entry.overlayID]
+    local regionState = observed and observed[location]
+    local scale = regionState and regionState.scale or entry.nativeScale or 1
+    if not Number(scale) or scale <= 0 or scale > 10 then
+        return false, "The native Proc region scale is unavailable or unsupported."
+    end
+    local half, gap = 128 * 0.8 * scale / 2, 128 * 0.8
+    local point, x, y = "CENTER", 0, 0
+    if location == "Left" then point, x = "LEFT", -half
+    elseif location == "Right" then point, x = "RIGHT", half
+    elseif location == "LeftOutside" then point, x = "LEFT", -gap - half
+    elseif location == "RightOutside" then point, x = "RIGHT", gap + half
+    elseif location == "Top" then point, y = "TOP", half
+    elseif location == "Bottom" then point, y = "BOTTOM", -half
+    elseif location == "TopLeft" then point, x, y = "TOPLEFT", -half, half
+    elseif location == "TopRight" then point, x, y = "TOPRIGHT", half, half
+    elseif location ~= "Center" then return false, "The native Proc region location is not mapped." end
+    local offset = guideOnly and { x = 0, y = 0 } or self:GetReminderPosition(entry)
+    local ratio = nativeScale / uiScale
+    frame:ClearAllPoints()
+    frame:SetPoint("CENTER", root, point, (x * ratio + offset.x) / style.scale,
+        (y * ratio + offset.y) / style.scale)
+    return true
+end
+
+function addon:AcquireAuraReminder(entry, auraID, textOnly)
+    self:CreateDisplay()
+    local pool = self.reminderFrames.nativeAura
+    if not pool then pool = {}; self.reminderFrames.nativeAura = pool end
+    local frame = pool[entry.id]
+    if not frame then
+        frame = CreateFrame("Frame", nil, UIParent)
+        frame:SetFrameStrata("MEDIUM")
+        frame:SetFrameLevel(15)
+        frame:EnableMouse(false)
+        frame:SetAlpha(0)
+        frame:Show()
+        frame.entryId, frame.channel, frame.nativeAuraOwned = entry.id, "nativeAura", true
+        local handle, reason = self:CreateNativeAuraSlot(frame, entry.id, auraID, textOnly)
+        if not handle then frame:Hide(); return nil, reason end
+        frame.auraHandle, frame.text = handle, handle.font
+        pool[entry.id] = frame
+    end
+    frame.reminderEntry, frame.styleKey = entry, self:GetReminderStyleKey(entry)
+    self:StyleAuraReminder(frame)
+    return frame
+end
+
+function addon:StyleAuraReminder(frame)
+    local entry = frame.reminderEntry
+    local style = self:GetReminderStyle(frame.styleKey or entry)
+    frame:SetScale(style.scale)
+    frame:SetSize(style.font.size * 12, style.font.size * 2)
+    -- Our Font object changes style without accessing the denied native child.
+    self:ApplyFontSettings(frame.auraHandle.font, style)
+    if entry.kind == "proc" then
+        frame.procGeometryReady, frame.procGeometryReason = self:AnchorProcReminder(frame, entry, style)
+    else
+        local offset = self:GetReminderPosition(entry)
+        frame:ClearAllPoints()
+        frame:SetPoint(offset.anchor, UIParent, offset.anchor,
+            (entry.anchor.x + offset.x) / style.scale, (entry.anchor.y + offset.y) / style.scale)
+    end
+end
+
+function addon:DisableAuraReminder(frame)
+    frame:SetAlpha(0)
+    frame.auraHandle:SetEnabled(false)
+    -- Do not hide: the native one-shot disable pass must be able to clear its
+    -- assignment and copied binding. No aura/secret state is read back.
+    frame:Show()
+end
