@@ -4,12 +4,12 @@ local function PrintHelp()
     addon:Print("/cui opens or closes Options. All display settings are available there. /cargoui remains an alias.")
     addon:Print("Optional commands: /cui help | status | show | hide | reset")
     addon:Print("/cui position <x> <y>  (-10000 to 10000; right/up are positive)")
-    addon:Print("Choose a reminder in Mobility or Proc to edit its independent Appearance.")
+    addon:Print("Mobility Appearance is per class; Proc Appearance is per current class and specialization.")
 end
 
 local function PrintStatus()
-    local db = addon.db
-    addon:Print(string.format("%s | %s | CENTER (%g, %g) | independent reminder styles",
+    local db = addon:GetMobilityConfig()
+    addon:Print(string.format("%s | %s | CENTER (%g, %g) | current class Mobility",
         addon.version, db.enabled and "shown" or "hidden",
         db.position.x, db.position.y))
 end
@@ -38,11 +38,11 @@ function addon:HandleSlashCommand(message)
         patch = { position = { x = tonumber(args[2]) or args[2], y = tonumber(args[3]) or args[3] } }
     elseif command == "font" or command == "fontsize" or command == "outline"
         or command == "scale" or command == "shadow" then
-        self:Print("Global reminder style commands are retired. Open /cui, choose an entry in Mobility or Proc, and edit Appearance.")
+        self:Print("Global reminder style commands are retired. Open /cui, open Mobility or Proc, and edit Appearance.")
         return
     elseif command == "reset" and #args == 1 then
         self:ResetDatabase()
-        self:Print("Settings reset to defaults.")
+        self:Print("Current class and Options settings reset to defaults.")
         return
     else
         self:Print("Invalid command. Type /cui help for help.")

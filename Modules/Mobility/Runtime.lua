@@ -21,7 +21,7 @@ end
 
 function addon:RenderMobilityState()
     local state = self.mobilityState
-    if not self.mobilityTracking or not self.db.enabled or not state or not state.duration then
+    if not self.mobilityTracking or not self:GetMobilityConfig().enabled or not state or not state.duration then
         self:HideLiveMobility()
         return
     end
@@ -72,13 +72,14 @@ end
 
 function addon:ConfigureMobility()
     local entry = self:GetMobilityEntry()
-    local enabled = entry and self.db.mobility.enabled and self.db.enabled
+    local enabled = entry and self:GetMobilityConfig().enabled
     if enabled and (not C_Timer or not C_Timer.NewTimer) then
         enabled = false
         self.mobilityState = { status = "Unsupported", reason = "Event scheduling API is unavailable.", path = "none", entry = entry }
     elseif not enabled then
         self.mobilityState = { status = entry and "Disabled" or "Unsupported", entry = entry, path = "none",
-            reason = entry and "Enable Mobility and General > Show reminders to monitor." or "Mage Blink / Shimmer only." }
+            reason = entry and "Enable Mobility for the current class to monitor."
+                or self.classModuleReason or "Mage Blink / Shimmer only." }
     end
     if self.mobilityTracking ~= not not enabled then
         self.mobilityTracking = not not enabled
@@ -120,5 +121,6 @@ function addon:GetMobilityDiagnostics()
         "Saved position ID: " .. (entry and entry.id or "none"),
         "Charge/timing fields: not logged; restricted fields are never serialized.",
         "Native timing / combat behavior requires validation in this client.",
+        self.GetLoadDiagnosticsText and self:GetLoadDiagnosticsText() or "Loading diagnostics unavailable.",
     }, "\n")
 end

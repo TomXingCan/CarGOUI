@@ -4,7 +4,10 @@ function addon:Initialize()
     if self.initialized then
         return
     end
+    self:EnsureCurrentClassModule()
+    self:RefreshActiveEntries()
     self:InitializeDatabase()
+    self.configurationClass, self.configurationSpec = self:GetPlayerContext()
     self:RegisterSlashCommands()
     self.initialized = true
 end
@@ -22,6 +25,7 @@ end
 
 local function OnPlayerLogin(self)
     self:UnregisterEvent("PLAYER_LOGIN", OnPlayerLogin)
+    self:Initialize()
     self:Enable()
 end
 
@@ -30,10 +34,11 @@ local function OnAddonLoaded(self, _, loadedAddon)
         return
     end
 
-    -- WoW has restored this addon's SavedVariables before ADDON_LOADED.
-    self:Initialize()
+    -- SavedVariables are restored here, but wait for player identity and known
+    -- skills before resolving legacy Mage scope during normal login.
     self:UnregisterEvent("ADDON_LOADED", OnAddonLoaded)
     if IsLoggedIn() then
+        self:Initialize()
         self:Enable()
     else
         self:RegisterEvent("PLAYER_LOGIN", OnPlayerLogin)
@@ -41,6 +46,37 @@ local function OnAddonLoaded(self, _, loadedAddon)
 end
 
 addon:RegisterEvent("ADDON_LOADED", OnAddonLoaded)
+
+function addon:OnClassModuleAvailable()
+    if not self.initialized then return end
+    self:StopPreview(true)
+    self:HideLiveMobility()
+    self.mobilityState = nil
+    self:RefreshActiveEntries()
+    self:RefreshConfigurationContext()
+    self.configurationClass, self.configurationSpec = self:GetPlayerContext()
+    self:ApplySettings()
+    if self.RefreshOptions then self:RefreshOptions() end
+end
+
+local function OnConfigurationContextChanged(self, event, unit)
+    if not self.initialized then return end
+    if event == "PLAYER_SPECIALIZATION_CHANGED" then
+        if issecretvalue and issecretvalue(unit) then return end
+        if unit and unit ~= "player" then return end
+    end
+    local class, spec = self:GetPlayerContext()
+    if class == self.configurationClass and spec == self.configurationSpec then return end
+    -- Tear down temporary state before switching catalogs. The saved class
+    -- Mobility record survives all spec changes; cached frames remain reusable.
+    self:StopPreview(true)
+    self:HideLiveMobility()
+    self.mobilityState = nil
+    self:EnsureCurrentClassModule()
+    self:OnClassModuleAvailable()
+end
+addon:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnConfigurationContextChanged)
+addon:RegisterEvent("PLAYER_ENTERING_WORLD", OnConfigurationContextChanged)
 
 -- Style recovery is not tied to the Mage module's enabled state. This also
 -- updates any reused Preview/future reminder frames after entering the world.

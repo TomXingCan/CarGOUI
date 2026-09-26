@@ -41,6 +41,17 @@ function addon:UnregisterEvent(event, callback)
     end
 end
 
+-- Explicit diagnostic snapshot only; does not inspect callbacks or engine state.
+function addon:GetEventDiagnostics()
+    local result = { events = 0, callbacks = 0, perEvent = {} }
+    for event, callbacks in pairs(listeners) do
+        result.events = result.events + 1
+        result.callbacks = result.callbacks + #callbacks
+        result.perEvent[event] = #callbacks
+    end
+    return result
+end
+
 eventFrame:SetScript("OnEvent", function(_, event, ...)
     local callbacks = listeners[event]
     if not callbacks then

@@ -1,3 +1,5 @@
+> Current alpha.8 configuration/loading changes: [CONFIG_SCOPES.md](CONFIG_SCOPES.md) and [LOAD_BOUNDARIES.md](LOAD_BOUNDARIES.md). Historical per-entry/global configuration paths below are superseded. Mage business files now reside in Modules/CarGOUI_Mage.
+
 # Alpha 0.1 — Options, Test Mode, branding and Mage Mobility
 
 This phase extends the existing standalone Options frame and `UpdateSettings` pipeline. All UI remains English, including zhCN clients. `/cui` is primary; `/cargoui` resolves to the same slash handler.

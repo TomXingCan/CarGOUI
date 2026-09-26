@@ -2,13 +2,12 @@
 ## Title: CarGOUI
 ## Notes: Mage Blink/Shimmer mobility reminders, settings and separate simulated previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.7
+## Version: 0.1.0-alpha.8
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua
 Core\Events.lua
-Database\MobilityEntries.lua
-Database\PreviewEntries.lua
+Core\Modules.lua
 Database\AppearanceEntries.lua
 Database\Themes.lua
 Config\Defaults.lua
@@ -16,8 +15,8 @@ Config\Locale.lua
 Core\Database.lua
 UI\ReminderStyle.lua
 UI\Display.lua
-Modules\Mobility\SpellState.lua
 Modules\Mobility\Runtime.lua
+Core\Diagnostics.lua
 UI\Preview.lua
 UI\Branding.lua
 UI\Theme.lua

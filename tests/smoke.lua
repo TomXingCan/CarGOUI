@@ -19,7 +19,10 @@ for line in toc:lines() do
 end
 toc:close()
 assert(#files > 0, "CarGOUI.toc contains no Lua files")
-local total = 0
+local moduleRoot = root .. "/Modules/CarGOUI_Mage"
+local probe = io.open(moduleRoot .. "/CarGOUI_Mage.toc", "r")
+if probe then probe:close() else moduleRoot = root .. "/../CarGOUI_Mage" end
+local total, failed = 0, 0
 
 local function equal(actual, expected, label)
     if actual ~= expected then
@@ -94,7 +97,8 @@ local function setup(saved, loggedIn, client)
         inCombat = client.inCombat or false, clock = 100, pendingTimers = {},
         faction = client.faction or "Alliance", factionReads = 0, gradientWrites = 0,
         bindings = {}, formatters = {}, curves = {}, curveEvaluations = {},
-        spellReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0 }
+        spellReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0,
+        loadedModules = {}, loadedFiles = {}, moduleLoads = 0 }
     if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
@@ -659,8 +663,35 @@ local function setup(saved, loggedIn, client)
     end
     local addon = {}
     state.addon = addon
+    env.C_AddOns = {
+        IsAddOnLoaded = function(name)
+            return state.loadedModules[name] == true, state.loadedModules[name] == true
+        end,
+        LoadAddOn = function(name)
+            equal(name, "CarGOUI_Mage", "only current implemented class module may load")
+            truthy(not state.inCombat, "native LoD loading must defer combat")
+            if client.moduleUnavailable then return false, "MISSING" end
+            if state.loadedModules[name] then return true end
+            state.moduleLoads = state.moduleLoads + 1
+            local namespace = {}
+            local moduleTOC = assert(io.open(moduleRoot .. "/CarGOUI_Mage.toc", "r"))
+            for line in moduleTOC:lines() do
+                local path = line:gsub("^%s+", ""):gsub("%s+$", ""):gsub("\\", "/")
+                if path ~= "" and path:sub(1, 1) ~= "#" then
+                    local chunk = assert(loadfile(moduleRoot .. "/" .. path))
+                    state.loadedFiles[#state.loadedFiles + 1] = name .. "/" .. path
+                    setfenv(chunk, env); chunk(name, namespace)
+                end
+            end
+            moduleTOC:close()
+            state.loadedModules[name] = true
+            state:fire("ADDON_LOADED", name)
+            return true
+        end,
+    }
     for _, file in ipairs(files) do
         local chunk = assert(loadfile(root .. "/" .. file))
+        state.loadedFiles[#state.loadedFiles + 1] = "CarGOUI/" .. file
         setfenv(chunk, env)
         chunk("CarGOUI", addon)
     end
@@ -676,20 +707,21 @@ local function login(saved, late, client)
 end
 
 local function savedPosition(addon, env, x, y)
-    equal(addon.db.position.x, x, "saved horizontal reminder offset")
-    equal(addon.db.position.y, y, "saved vertical reminder offset")
+    equal(addon:GetMobilityConfig().position.x, x, "saved horizontal reminder offset")
+    equal(addon:GetMobilityConfig().position.y, y, "saved vertical reminder offset")
 end
 
 local function savedFont(addon, size, outline)
-    equal(addon.db.styles.mobility_shimmer.font.face, "Fonts\\FRIZQT__.ttf", "saved font face")
-    equal(addon.db.styles.mobility_shimmer.font.size, size, "saved font size")
-    equal(addon.db.styles.mobility_shimmer.font.outline, outline, "saved font outline")
+    equal(addon:GetMobilityConfig().style.font.face, "Fonts\\FRIZQT__.ttf", "saved font face")
+    equal(addon:GetMobilityConfig().style.font.size, size, "saved font size")
+    equal(addon:GetMobilityConfig().style.font.outline, outline, "saved font outline")
 end
 
 local function test(name, callback)
-    callback()
     total = total + 1
-    print("PASS " .. name)
+    local ok, message = pcall(callback)
+    if ok then print("PASS " .. name)
+    else failed = failed + 1; print("FAIL " .. name .. ": " .. tostring(message)) end
 end
 
 test("TOC declares the Retail target, SavedVariables and unique load entries", function()
@@ -709,14 +741,16 @@ test("fresh install initializes once and waits for PLAYER_LOGIN", function()
     equal(env.CarGOUIDB, nil, "unrelated ADDON_LOADED must not initialize DB")
     truthy(not addon.initialized, "unrelated AddOn initialized CarGOUI")
     state:fire("ADDON_LOADED", "CarGOUI")
-    truthy(addon.initialized, "own ADDON_LOADED initializes")
+    truthy(not addon.initialized, "normal login waits for player identity before migration")
+    equal(env.CarGOUIDB, nil, "DB is not migrated before identity is ready")
+    state:fire("PLAYER_LOGIN")
+    truthy(addon.initialized, "login initializes")
     equal(addon.db, env.CarGOUIDB, "saved variables reference")
-    equal(addon.db.schemaVersion, 4, "schema version migrated")
-    equal(addon.frame, nil, "display before login")
+    equal(addon.db.schemaVersion, 5, "schema version migrated")
+    truthy(not addon.frame or not addon.frame:IsShown(), "no fabricated reminder display")
     equal(env.SLASH_CARGOUI1, "/cui", "primary slash")
     equal(env.SLASH_CARGOUI2, "/cargoui", "compatibility slash")
     equal(type(env.SlashCmdList.CARGOUI), "function", "slash callback")
-    state:fire("PLAYER_LOGIN")
     truthy(addon.enabled, "enabled after login")
     truthy(not addon.frame or not addon.frame:IsShown(), "no obsolete live placeholder at login")
     savedPosition(addon, env, 0, 0)
@@ -737,7 +771,7 @@ test("valid SavedVariables survive a simulated reload", function()
     local env, addon = login(saved)
     savedPosition(addon, env, 125, -75)
     savedFont(addon, 32, "THICKOUTLINE")
-    equal(addon.db.styles.mobility_shimmer.scale, 1.25, "saved scale")
+    equal(addon:GetMobilityConfig().style.scale, 1.25, "saved scale")
     equal(addon.db.futureOption.value, 42, "unrelated key preserved")
     local env2, addon2 = login(copy(env.CarGOUIDB))
     savedPosition(addon2, env2, 125, -75)
@@ -756,7 +790,7 @@ end)
 test("malformed SavedVariables and non-finite numbers recover safely", function()
     for _, malformed in ipairs({ false, 17, "invalid" }) do
         local _, addon = login(malformed)
-        equal(addon.db.styles.mobility_shimmer.font.size, 24, "invalid root reset")
+        equal(addon:GetMobilityConfig().style.font.size, 24, "invalid root reset")
     end
     local env, addon = login({ schemaVersion = "invalid", enabled = "yes",
         position = { x = math.huge, y = 0 / 0 },
@@ -764,19 +798,19 @@ test("malformed SavedVariables and non-finite numbers recover safely", function(
         scale = math.huge, shadow = { enabled = "yes" }, other = "preserve me" })
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
-    equal(addon.db.enabled, true, "invalid enabled setting")
-    equal(addon.db.styles.mobility_shimmer.scale, 1, "invalid scale")
-    equal(addon.db.styles.mobility_shimmer.shadow.enabled, true, "invalid shadow")
+    equal(addon:GetMobilityConfig().enabled, true, "invalid enabled setting")
+    equal(addon:GetMobilityConfig().style.scale, 1, "invalid scale")
+    equal(addon:GetMobilityConfig().style.shadow.enabled, true, "invalid shadow")
     equal(addon.db.other, "preserve me", "unrelated setting")
     local _, addon2 = login({ position = true, font = "bad", shadow = 9, scale = -1 })
-    equal(addon2.db.position.x, 0, "malformed position")
-    equal(addon2.db.styles.mobility_shimmer.font.size, 24, "malformed font")
-    equal(addon2.db.styles.mobility_shimmer.shadow.enabled, true, "malformed shadow")
+    equal(addon2:GetMobilityConfig().position.x, 0, "malformed position")
+    equal(addon2:GetMobilityConfig().style.font.size, 24, "malformed font")
+    equal(addon2:GetMobilityConfig().style.shadow.enabled, true, "malformed shadow")
     local env3, addon3 = login({ position = { x = 10001, y = -10001 },
         font = { size = 73 }, scale = 3.01 })
     savedPosition(addon3, env3, 0, 0)
     savedFont(addon3, 24, "OUTLINE")
-    equal(addon3.db.styles.mobility_shimmer.scale, 1, "finite out-of-range scale")
+    equal(addon3:GetMobilityConfig().style.scale, 1, "finite out-of-range scale")
 end)
 
 test("slash commands retain positions visibility and reset but cannot edit global appearance", function()
@@ -784,13 +818,13 @@ test("slash commands retain positions visibility and reset but cannot edit globa
     local command = env.SlashCmdList.CARGOUI
     command("help"); command("status"); command("position 35 -60")
     savedPosition(addon, env, 35, -60)
-    local appearance = copy(addon.db.styles)
+    local appearance = copy(addon:GetMobilityConfig().style)
     for _, legacy in ipairs({ "fontsize 30", "outline none", "outline thickoutline", "scale 1.2", "shadow off" }) do
         command(legacy)
-        same(addon.db.styles, appearance, "legacy global style command cannot modify reminder styles")
+        same(addon:GetMobilityConfig().style, appearance, "legacy global style command cannot modify reminder styles")
     end
-    command("hide"); equal(addon.db.enabled, false, "hidden state saved")
-    command("show"); equal(addon.db.enabled, true, "shown state saved")
+    command("hide"); equal(addon:GetMobilityConfig().enabled, false, "hidden state saved")
+    command("show"); equal(addon:GetMobilityConfig().enabled, true, "shown state saved")
     local prior = copy(addon.db)
     for _, invalid in ipairs({ "position nope 10", "position 10", "position 1e309 1",
         "position 10001 0", "position 0 -10001", "show extra", "reset extra", "unknowncommand" }) do
@@ -807,7 +841,7 @@ test("saved hidden state remains hidden on reload", function()
     local env, addon = login(nil)
     env.SlashCmdList.CARGOUI("hide")
     local _, reloaded = login(copy(addon.db))
-    equal(reloaded.db.enabled, false, "hidden preference persisted")
+    equal(reloaded:GetMobilityConfig().enabled, false, "hidden preference persisted")
     truthy(not reloaded.frame or not reloaded.frame:IsShown(), "reload shows no live placeholder")
 end)
 
@@ -934,7 +968,7 @@ end)
 
 test("settings API rejects malformed patches atomically and preserves DB identity", function()
     local env, addon = login(nil)
-    local db, position, fontSettings, shadow = addon.db, addon.db.position, addon.db.font, addon.db.shadow
+    local db, position, fontSettings, shadow = addon.db, addon:GetMobilityConfig().position, addon:GetMobilityConfig().style.font, addon:GetMobilityConfig().style.shadow
     local before = copy(db)
     local invalid = {
         false, 12, "bad", { enabled = "yes" }, { position = false },
@@ -956,22 +990,22 @@ test("settings API rejects malformed patches atomically and preserves DB identit
         "valid partial patch accepted")
     equal(addon.db, db, "DB reference stable")
     equal(env.CarGOUIDB, db, "SavedVariables references live DB")
-    equal(addon.db.position, position, "position reference stable")
-    equal(addon.db.font, fontSettings, "font reference stable")
-    equal(addon.db.shadow, shadow, "shadow reference stable")
+    equal(addon:GetMobilityConfig().position, position, "position reference stable")
+    equal(addon:GetMobilityConfig().style.font, fontSettings, "font reference stable")
+    equal(addon:GetMobilityConfig().style.shadow, shadow, "shadow reference stable")
     savedPosition(addon, env, 40, 0)
     savedFont(addon, 24, "OUTLINE")
 end)
 
-test("daily per-entry Appearance controls use shared validation and survive reload", function()
+test("daily automatic-context Appearance controls use shared validation and survive reload", function()
     local env, addon, state = login(nil)
     local panel, controls = options(addon)
     local writes = 0
     local update = addon.UpdateSettings
     addon.UpdateSettings = function(self, patch)
         if patch.styles then
-            truthy(patch.styles.mobility_shimmer, "selected style is the target")
-            for key in pairs(patch.styles) do equal(key, "mobility_shimmer", "only selected style is patched") end
+            truthy(patch.styles["mobility:MAGE"], "current class style is the target")
+            for key in pairs(patch.styles) do equal(key, "mobility:MAGE", "only selected style is patched") end
             writes = writes + 1
         end
         return update(self, patch)
@@ -979,15 +1013,15 @@ test("daily per-entry Appearance controls use shared validation and survive relo
     local function changed(callback, label)
         local before = writes
         callback()
-        truthy(writes > before, label .. " uses shared per-entry validation")
+        truthy(writes > before, label .. " uses shared context validation")
     end
     typeText(controls.x, "165"); enter(controls.y, "-85")
     savedPosition(addon, env, 165, -85)
-    controls.enabled:Click(); equal(addon.db.enabled, false, "checkbox hides reminders")
+    controls.enabled:Click(); equal(addon:GetMobilityConfig().enabled, false, "checkbox hides reminders")
     controls.enabled:Click()
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     changed(function() controls.appearanceScale:SetValue(1.35) end, "scale slider")
-    equal(addon.db.styles.mobility_shimmer.scale, 1.35, "scale slider saves immediately")
+    equal(addon:GetMobilityConfig().style.scale, 1.35, "scale slider saves immediately")
     changed(function() enter(controls.appearanceScale.editBox, "1.6") end, "scale Enter")
     changed(function() controls.appearanceFontSize:SetValue(36) end, "font slider")
     changed(function() enter(controls.appearanceFontSize.editBox, "32") end, "font Enter")
@@ -995,9 +1029,8 @@ test("daily per-entry Appearance controls use shared validation and survive relo
     savedFont(addon, 32, "THICKOUTLINE")
     changed(function() choose(controls.appearanceFont, controls.appearanceFont.choices[1].value) end, "font")
     changed(function() controls.appearanceShadow:Click() end, "shadow")
-    equal(addon.db.styles.mobility_shimmer.shadow.enabled, false, "shadow saved")
-    equal(addon.db.styles.mobility_blink.font.size, 24, "other Mobility style untouched")
-    equal(addon.db.styles.mage_fire_hot_streak_left.font.size, 24, "Proc style untouched")
+    equal(addon:GetMobilityConfig().style.shadow.enabled, false, "shadow saved")
+    equal(addon:GetProcConfig(63).style.font.size, 24, "Proc style untouched")
     controls.close:Click()
     local _, reloaded = login(copy(env.CarGOUIDB))
     same(reloaded.db, addon.db, "GUI settings persist across reload")
@@ -1035,7 +1068,7 @@ end)
 test("invalid numeric edits show errors without changing saved values", function()
     local _, addon = login(nil)
     local panel, controls = options(addon)
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     for _, field in ipairs({ controls.appearanceFontSize.editBox, controls.appearanceScale.editBox }) do
         for _, text in ipairs({ "", "invalid", "1e309", "-100" }) do
             local before = copy(addon.db)
@@ -1069,12 +1102,12 @@ end)
 test("dropdown lifecycle and hidden refresh remain idle", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     controls.appearanceOutline:Click()
     truthy(controls.appearanceOutline.menu:IsShown(), "dropdown open")
     addon:SelectOptionsCategory("general")
     equal(controls.appearanceOutline.menu:IsShown(), false, "category change dismisses dropdown")
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     controls.appearanceOutline:Click()
     panel:Hide()
     equal(controls.appearanceOutline.menu:IsShown(), false, "closing window dismisses menu")
@@ -1082,9 +1115,9 @@ test("dropdown lifecycle and hidden refresh remain idle", function()
     for _ = 1, 5 do addon:RefreshOptions() end
     equal(state.fontWrites, fontWrites, "hidden refresh does not redraw")
     equal(state.textWrites, textWrites, "hidden refresh does not update control text")
-    local savedScale = addon.db.styles.mobility_shimmer.scale
+    local savedScale = addon:GetMobilityConfig().style.scale
     controls.appearanceScale:SetValue(2.25)
-    equal(addon.db.styles.mobility_shimmer.scale, savedScale, "hidden slider cannot update settings")
+    equal(addon:GetMobilityConfig().style.scale, savedScale, "hidden slider cannot update settings")
     local calls = 0
     local update = addon.UpdateSettings
     addon.UpdateSettings = function(self, patch) calls = calls + 1; return update(self, patch) end
@@ -1099,7 +1132,7 @@ end)
 test("reset requires confirmation and close cancels an unconfirmed reset", function()
     local env, addon = login(nil)
     addon:UpdateSettings({ position = { x = 90, y = 45 } })
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 36 }, scale = 1.7 })
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 36 }, scale = 1.7 })
     local panel, controls = options(addon)
     local before = copy(addon.db)
     controls.reset:Click()
@@ -1112,7 +1145,7 @@ test("reset requires confirmation and close cancels an unconfirmed reset", funct
     controls.reset:Click()
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
-    equal(addon.db.styles.mobility_shimmer.scale, 1, "confirmed reset restores scale")
+    equal(addon:GetMobilityConfig().style.scale, 1, "confirmed reset restores scale")
     equal(tonumber(controls.x:GetText()), 0, "reset clears pending X")
     equal(tonumber(controls.y:GetText()), 0, "reset refreshes Y")
     truthy(panel:IsShown(), "reset keeps Options open")
@@ -1135,7 +1168,7 @@ end)
 test("sliders round safely while numeric inputs retain precision and require Enter", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     equal(controls.applyPosition, nil, "no XY Apply button")
     equal(controls.appearanceScale.applyButton, nil, "no scale Apply button")
     equal(controls.appearanceFontSize.applyButton, nil, "no font-size Apply button")
@@ -1146,22 +1179,22 @@ test("sliders round safely while numeric inputs retain precision and require Ent
     end
     for _, value in ipairs({ 0.5, 0.5000001, 1.049999999, 2.999999999, 3 }) do
         controls.appearanceScale:SetValue(value)
-        truthy(addon:IsNumberInRange(addon.db.styles.mobility_shimmer.scale, addon.limits.scale), "rounded scale stays valid")
-        truthy(math.abs(addon.db.styles.mobility_shimmer.scale * 20 - math.floor(addon.db.styles.mobility_shimmer.scale * 20 + 0.5)) < 0.00001,
+        truthy(addon:IsNumberInRange(addon:GetMobilityConfig().style.scale, addon.limits.scale), "rounded scale stays valid")
+        truthy(math.abs(addon:GetMobilityConfig().style.scale * 20 - math.floor(addon:GetMobilityConfig().style.scale * 20 + 0.5)) < 0.00001,
             "slider produces 0.05 increments")
     end
     enter(controls.appearanceScale.editBox, "1.2375")
-    equal(addon.db.styles.mobility_shimmer.scale, 1.2375, "typed scale keeps precision")
+    equal(addon:GetMobilityConfig().style.scale, 1.2375, "typed scale keeps precision")
     enter(controls.appearanceFontSize.editBox, "31.5")
-    equal(addon.db.styles.mobility_shimmer.font.size, 31.5, "typed font size keeps precision")
+    equal(addon:GetMobilityConfig().style.font.size, 31.5, "typed font size keeps precision")
     typeText(controls.appearanceScale.editBox, "2.8")
     typeText(controls.appearanceFontSize.editBox, "70")
     controls.appearanceScale.editBox:SetFocus()
     controls.appearanceScale.editBox:ClearFocus()
     controls.appearanceFontSize.editBox:SetFocus()
     controls.appearanceFontSize.editBox:ClearFocus()
-    equal(addon.db.styles.mobility_shimmer.scale, 1.2375, "unconfirmed scale stays pending")
-    equal(addon.db.styles.mobility_shimmer.font.size, 31.5, "unconfirmed font stays pending")
+    equal(addon:GetMobilityConfig().style.scale, 1.2375, "unconfirmed scale stays pending")
+    equal(addon:GetMobilityConfig().style.font.size, 31.5, "unconfirmed font stays pending")
     panel:Hide()
     addon:ToggleOptions()
     equal(tonumber(controls.appearanceScale.editBox:GetText()), 1.2375, "closing discards pending scale")
@@ -1197,8 +1230,8 @@ test("zhCN clients retain English Options and saved appearance on reload", funct
         local env, addon = login(saved, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
         equal(env.GetLocale(), "zhCN", "regression runs on Chinese client")
         if pass == 2 then
-            equal(addon.db.position.x, 37, "saved position survives reload")
-            equal(addon.db.styles.mobility_shimmer.font.size, 32, "saved appearance survives reload")
+            equal(addon:GetMobilityConfig().position.x, 37, "saved position survives reload")
+            equal(addon:GetMobilityConfig().style.font.size, 32, "saved appearance survives reload")
         end
         env.SlashCmdList.CARGOUI("")
         local panel, controls = addon.optionsFrame, addon.optionsFrame.controls
@@ -1213,7 +1246,7 @@ test("zhCN clients retain English Options and saved appearance on reload", funct
         truthy(panel.feedback:GetText():find("X", 1, true), "coordinate error is readable")
         enter(controls.x, "37")
         equal(panel.feedback:GetText(), "Settings applied.", "success feedback is English")
-        addon:OpenAppearance("mobility", "mobility_shimmer")
+        addon:OpenAppearance("mobility", "mobility:MAGE")
         equal(controls.appearanceOutline.choices[1]:GetText(), "None", "dropdown choice is English")
         enter(controls.appearanceFontSize.editBox, "32")
         controls.reset:Click()
@@ -1226,22 +1259,22 @@ end)
 test("font menu applies each supported face and localized client font persists", function()
     local _, addon = login(nil, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
     local panel, controls = options(addon)
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     local foundFriz, foundClient = false, false
     for _, entry in ipairs(controls.appearanceFont.choices) do
         choose(controls.appearanceFont, entry.value)
-        equal(addon.db.styles.mobility_shimmer.font.face, entry.value, "font dropdown writes chosen face")
+        equal(addon:GetMobilityConfig().style.font.face, entry.value, "font dropdown writes chosen face")
         if entry.value == "Fonts\\FRIZQT__.ttf" then foundFriz = true end
         if entry.value == "Fonts\\ARKai_T.ttf" then foundClient = true end
     end
     truthy(foundFriz, "Friz Quadrata remains selectable")
     truthy(foundClient, "localized client font selectable")
-    local chosen = addon.db.styles.mobility_shimmer.font.face
+    local chosen = addon:GetMobilityConfig().style.font.face
     local _, reloaded = login(copy(addon.db), false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
-    equal(reloaded.db.styles.mobility_shimmer.font.face, chosen, "supported saved font survives reload")
-    local ok = addon:UpdateReminderStyle("mobility_shimmer", { font = { face = "fonts\\frizqt__.TTF" } })
+    equal(reloaded:GetMobilityConfig().style.font.face, chosen, "supported saved font survives reload")
+    local ok = addon:UpdateReminderStyle("mobility:MAGE", { font = { face = "fonts\\frizqt__.TTF" } })
     truthy(ok, "supported font accepted case-insensitively")
-    equal(addon.db.styles.mobility_shimmer.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
+    equal(addon:GetMobilityConfig().style.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
     equal(panel:IsShown(), true, "Options created successfully with a localized client font")
 end)
 
@@ -1334,8 +1367,8 @@ test("new Options settings validate atomically and migrate malformed saved data"
     equal(addon.db.options.position.x, 0, "bad window X normalized")
     equal(addon.db.options.position.y, 0, "bad window Y normalized")
     equal(addon.db.options.animatedTitle, true, "bad title toggle normalized")
-    equal(addon.db.position.x, 15, "migration preserves reminder X")
-    equal(addon.db.position.y, -25, "migration preserves reminder Y")
+    equal(addon:GetMobilityConfig().position.x, 15, "migration preserves reminder X")
+    equal(addon:GetMobilityConfig().position.y, -25, "migration preserves reminder Y")
     truthy(addon.db.futureOption, "migration preserves unknown keys")
     local before = copy(addon.db)
     for _, patch in ipairs({
@@ -1370,9 +1403,9 @@ local function reminderAnchor(frame, entry, addon, env)
     equal(point, "CENTER", "reminder anchor")
     equal(relative, env.UIParent, "preview renders in actual game UI space")
     equal(relativePoint, "CENTER", "reminder relative anchor")
-    local perEntry = addon.db.reminders[entry.id].position
-    local expectedX = entry.anchor.x + addon.db.position.x + perEntry.x
-    local expectedY = entry.anchor.y + addon.db.position.y + perEntry.y
+    local position = addon:GetReminderPosition(entry)
+    local expectedX = entry.anchor.x + position.x
+    local expectedY = entry.anchor.y + position.y
     truthy(math.abs(x * frame:GetScale() - expectedX) < 0.001, "rendered reminder X matches visual region and offsets")
     truthy(math.abs(y * frame:GetScale() - expectedY) < 0.001, "rendered reminder Y matches visual region and offsets")
 end
@@ -1384,7 +1417,7 @@ test("preview catalog separates Mage specs and gives each Proc region its own an
         truthy(not seen[entry.id], "preview IDs unique")
         seen[entry.id] = true
         truthy(type(entry.label) == "string" and type(entry.region) == "string", "entry explains reminder region")
-        truthy(addon.db.reminders[entry.id], "known entry settings initialized")
+        truthy(addon:GetReminderPosition(entry), "active entry has scoped position")
         if entry.kind == "proc" then
             truthy(entry.anchor.x ~= 0 or entry.anchor.y ~= 0, "Proc timers do not use global screen center")
         end
@@ -1409,14 +1442,14 @@ test("preview catalog separates Mage specs and gives each Proc region its own an
 end)
 
 test("external single/all preview renders fixed samples and cleans up on stop and close", function()
-    -- Isolate preview-owned subscriptions; live ownership is covered below.
-    local env, addon, state = login({ mobility = { enabled = false } })
+    local env, addon, state = login()
     equal(countKeys(visiblePreviews(addon)), 0, "no samples at login")
     local panel, controls = options(addon)
     equal(panel.previewFrame, nil, "obsolete static in-panel preview removed")
     addon:SelectOptionsCategory("preview")
     local entries = addon:GetPreviewEntries()
     choose(controls.previewEntry, entries[1].id)
+    addon:GetProcConfig() -- materialize current-spec configuration before comparing preview-only writes
     local saved = copy(addon.db)
     controls.previewSingle:Click()
     equal(addon.previewState.mode, "single", "single preview mode")
@@ -1453,7 +1486,6 @@ test("external single/all preview renders fixed samples and cleans up on stop an
     equal(countKeys(visiblePreviews(addon)), 0, "closing window removes external preview")
     equal(addon.previewState.mode, "off", "closing resets transient preview mode")
     for _, frame in ipairs(state.frames) do
-        equal(frame:IsEventRegistered("PLAYER_SPECIALIZATION_CHANGED"), false, "closed preview unsubscribes spec changes")
         equal(frame:GetScript("OnUpdate"), nil, "preview never polls per frame")
     end
     addon:ToggleOptions()
@@ -1461,7 +1493,7 @@ test("external single/all preview renders fixed samples and cleans up on stop an
     equal(state.realReads, 0, "simulated content never reads live buffs or cooldowns")
 end)
 
-test("external preview updates only the selected region appearance and keeps stock Proc centers", function()
+test("external preview shares current Proc spec appearance but preserves each stock region center", function()
     local env, addon = login(nil)
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("preview")
@@ -1486,7 +1518,7 @@ test("external preview updates only the selected region appearance and keeps sto
     for _, entry in ipairs(entries) do
         local frame = addon.previewFrames[entry.id]
         reminderAnchor(frame, entry, addon, env)
-        if entry.id == selected.id then
+        if entry.kind == "proc" then
             same(frame.text.font, { "Fonts\\MORPHEUS.TTF", 40, "THICKOUTLINE" }, "selected appearance applied")
             equal(frame:GetScale(), 1.5, "selected scale applied")
             same(frame.text.shadowOffset, { 0, 0 }, "selected shadow off")
@@ -1508,20 +1540,22 @@ test("external preview updates only the selected region appearance and keeps sto
     local reloadEnv, reloaded = login(copy(addon.db))
     options(reloaded); reloaded:SetPreview("single", selected.id)
     reminderAnchor(reloaded.previewFrames[selected.id], selected, reloaded, reloadEnv)
-    same(reloaded.db.styles[selected.id], addon.db.styles[selected.id], "region style survives reload")
+    same(reloaded:GetProcConfig(63).style, addon:GetProcConfig(63).style, "spec style survives reload")
     addon:SelectOptionsCategory("preview"); controls.entryReset:Click()
-    same(addon.db.reminders[selected.id].position, { x = 0, y = 0 }, "position reset only resets current coordinates")
-    equal(addon.db.styles[selected.id].font.size, 40, "coordinate reset preserves independent appearance")
+    same(addon:GetReminderPosition(selected), { anchor = "CENTER", x = 0, y = 0 }, "position reset only resets current coordinates")
+    equal(addon:GetProcConfig(63).style.font.size, 40, "coordinate reset preserves spec appearance")
 end)
 
-test("active preview follows current specialization and unsupported classes disable preview controls", function()
+test("specialization changes clear obsolete previews and unsupported classes disable preview controls", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("preview")
     controls.previewAll:Click()
     state.specID = 64
     state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
-    equal(countKeys(visiblePreviews(addon)), 4, "active all mode switches to Frost entries")
+    equal(countKeys(visiblePreviews(addon)), 0, "spec switch stops obsolete simulated content")
+    controls.previewAll:Click()
+    equal(countKeys(visiblePreviews(addon)), 4, "new user Preview starts current Frost entries")
     for id in pairs(visiblePreviews(addon)) do truthy(id:find("mage_frost_", 1, true), "old spec samples hidden") end
     state.classToken = "WARRIOR"
     state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
@@ -1543,10 +1577,9 @@ test("preview validation, visibility and shared renderer keep sample state separ
     equal(addon:SetPreview("single", "missing-entry"), false, "unknown entry rejected")
     truthy(addon:SetPreview("all"), "all preview started")
     addon:UpdateSettings({ enabled = false })
-    equal(countKeys(visiblePreviews(addon)), 0, "display preference hides all samples")
-    for _, frame in pairs(addon.previewFrames) do
-        truthy(not frame.guidance or not frame.guidance:IsVisible(), "hidden samples have no visible guidance")
-    end
+    equal(countKeys(visiblePreviews(addon)), #entries - 1, "Mobility enable preference does not hide independent Proc previews")
+    local mobilityFrame = addon.previewFrames[entries[1].id]
+    truthy(not mobilityFrame:IsShown() and not mobilityFrame.guidance:IsVisible(), "disabled Mobility hides its own sample and guide")
     addon:UpdateSettings({ enabled = true })
     equal(countKeys(visiblePreviews(addon)), #entries, "re-enabling restores requested test mode")
     local preview = addon.previewFrames[entry.id]
@@ -1761,8 +1794,8 @@ test("branding callbacks stay isolated and ordinary settings do not resize or re
         point = { unpack(header.wordmark.point or {}) }, uv = copy(header.wordmark.texCoord),
         scale = header.wordmark:GetScale(), alpha = header.wordmark:GetAlpha() }
     local initialPlays, initialStops = group.plays, group.stops
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 72, outline = "THICKOUTLINE" }, scale = 3 })
-    addon:OpenAppearance("mobility", "mobility_shimmer")
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 72, outline = "THICKOUTLINE" }, scale = 3 })
+    addon:OpenAppearance("mobility", "mobility:MAGE")
     addon:SelectOptionsCategory("preview")
     addon:SelectOptionsCategory("general")
     panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
@@ -1854,9 +1887,16 @@ end)
 
 local function mobilityLogin(spellID, data, client, saved)
     client = client or {}
+    local enterCombat = client.inCombat
+    client.inCombat = false
     client.mobility = { known = { [1953] = true, [212653] = spellID == 212653 },
         override = spellID, spells = { [spellID] = data } }
-    return login(saved, false, client)
+    local env, addon, state = login(saved, false, client)
+    if enterCombat then
+        state:fire("PLAYER_REGEN_DISABLED")
+        state:flushTimers(); state:nativeTick()
+    end
+    return env, addon, state
 end
 
 local function currentLive(addon)
@@ -1954,7 +1994,7 @@ test("learn and unlearn Shimmer resolves one actual spell without resetting save
     equal(nativeText(addon), "No Shimmer\n18.0", "replacement uses its own real duration")
     equal(currentLive(addon), frame, "mutually exclusive skills reuse one configured region")
     equal(addon:GetMobilityEntry().id, id, "replacement preserves compatibility ID")
-    same(addon.db.reminders[id].position, { x = 87, y = -21 }, "replacement preserves configured position")
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 87, y = -21 }, "replacement preserves configured position")
     local before = #state.spellReads
     addon:RefreshMobility()
     for index = before + 1, #state.spellReads do
@@ -2002,7 +2042,7 @@ test("inconsistent replacement states fail closed and active Preview follows con
     equal(sample.text:GetText(), "No Blink\n8.0", "active sample updates after effective skill changes")
     truthy(sample.guidance.label:GetText():find("Blink", 1, true), "TEST guidance uses new skill name")
     equal(nativeText(addon), "", "replacement live remains suppressed by matching preview")
-    same(addon.db.reminders[entry.id].position, { x = 54, y = -23 }, "active replacement preserves region settings")
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 54, y = -23 }, "active replacement preserves region settings")
     state.mobility.known[212653], state.mobility.override = true, 1953
     syncEvent(state, "SPELLS_CHANGED")
     mobilityStatus(addon, "Unknown")
@@ -2123,10 +2163,10 @@ test("live and preview share saved layout and style without resetting schema-2 c
     local env, addon, state = mobilityLogin(212653,
         { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 }, nil, saved)
     equal(addon.db, saved, "migration retains SavedVariables identity")
-    equal(addon.db.schemaVersion, 4, "additive schema upgrade")
-    for id, record in pairs(old.reminders) do same(addon.db.reminders[id], record, "existing region remains " .. id) end
+    equal(addon.db.schemaVersion, 5, "additive schema upgrade")
+    for id, record in pairs(old.reminders) do same(addon.db.migrations.scope5.source.reminders[id], record, "legacy region backed up " .. id) end
     same(addon.db.options.position, old.options.position, "window position remains saved")
-    same(addon.db.position, old.position, "global position remains saved")
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 51, y = 7 }, "global and current Fire offsets combined once")
     local live, entry = currentLive(addon), addon:GetMobilityEntry()
     reminderAnchor(live, entry, addon, env)
     same(live.text.font, { "Fonts\\FRIZQT__.ttf", 31, "THICKOUTLINE" }, "live typography uses shared setting")
@@ -2138,7 +2178,7 @@ test("live and preview share saved layout and style without resetting schema-2 c
     equal(preview:GetScale(), scale, "preview and live use same scale")
     same(preview.text.font, live.text.font, "preview and live share typography")
     addon:StopPreview()
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 38 }, scale = 1.5 })
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 38 }, scale = 1.5 })
     same(live.text.font, { "Fonts\\FRIZQT__.ttf", 38, "THICKOUTLINE" }, "live font changes apply immediately")
     reminderAnchor(live, entry, addon, env)
     equal(state.liveMeasurements, 0, "live text geometry is never measured")
@@ -2154,9 +2194,9 @@ test("Mobility Options edits apply on Enter and expose working preview and copya
     local id = addon:GetMobilityEntry().id
     typeText(controls.mobilityX, "45.5")
     typeText(controls.mobilityY, "-72")
-    equal(addon.db.reminders[id].position.x, 0, "position waits for Enter")
+    equal(addon:GetMobilityConfig().position.x, 0, "position waits for Enter")
     controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
-    same(addon.db.reminders[id].position, { x = 45.5, y = -72 }, "Enter commits both coordinates atomically")
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 45.5, y = -72 }, "Enter commits both coordinates atomically")
     controls.mobilityTypography:Click()
     truthy(panel.pages.appearance:IsShown(), "Typography shortcut works")
     addon:SelectOptionsCategory("mobility")
@@ -2196,11 +2236,11 @@ test("Mobility pending edits survive live refresh and diagnostic copying but inv
     equal(dialog.editBox:GetText(), snapshot, "diagnostic snapshot permits selection but refuses user editing")
     dialog.close:Click()
     controls.mobilityY:GetScript("OnEnterPressed")(controls.mobilityY)
-    same(addon.db.reminders[id].position, { x = 47, y = -65 }, "Enter after copying commits original pending pair")
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 47, y = -65 }, "Enter after copying commits original pending pair")
     typeText(controls.mobilityX, "invalid")
     typeText(controls.mobilityY, "19")
     controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
-    same(addon.db.reminders[id].position, { x = 47, y = -65 }, "invalid X does not partially commit Y")
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 47, y = -65 }, "invalid X does not partially commit Y")
     truthy(panel.feedback:GetText() ~= "", "invalid pair has visible feedback")
     panel:Hide()
     addon:ToggleOptions()
@@ -2224,7 +2264,7 @@ test("secret charges use native visibility while public zero still uses native s
     truthy(isSecret(frame.text.textValue), "native rendering output is treated as opaque")
     state:advance(0.5)
     equal(nativeText(addon), "No Shimmer\n15.5", "secret duration advances only in native binding")
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 30 }, scale = 1.2 })
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 30 }, scale = 1.2 })
     equal(nativeText(addon), "No Shimmer\n15.5", "styling does not read secret text")
     equal(state.liveMeasurements, 0, "restricted text is never measured")
     data.charges = 1
@@ -2507,7 +2547,7 @@ test("closing Options stopping Preview and styling preserve secret live visibili
     data.charges, data.cooldownDuration = 1, 1.5
     syncEvent(state, "SPELL_UPDATE_CHARGES")
     equal(nativeText(addon), "", "closed Options still receives recovery and native hide")
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 33 }, scale = 1.4 })
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 33 }, scale = 1.4 })
     addon:RefreshReminderClassColor()
     equal(nativeText(addon), "", "font/color refresh cannot overwrite secret zero opacity")
     truthy(isSecret(live.alpha), "style alpha is confined to FontString text color")
@@ -2575,7 +2615,7 @@ test("class color survives font changes reuse spec changes and reload without sa
     local env, addon, state = mobilityLogin(212653, data)
     local frame = currentLive(addon)
     local savedColor = copy(frame.text.textColor)
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 36 }, scale = 1.25 })
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 36 }, scale = 1.25 })
     same(frame.text.textColor, savedColor, "changing font reapplies class color")
     data.charges = 1; syncEvent(state, "SPELL_UPDATE_CHARGES")
     data.charges = 0; syncEvent(state, "SPELL_UPDATE_CHARGES")
@@ -2640,140 +2680,141 @@ test("Options exposes no custom reminder colors and class style adds no polling 
 end)
 
 
-test("schema-4 migration copies valid legacy appearance once and breaks every mutable alias", function()
+test("schema-5 migration keeps actual Mage appearance, sums offsets once, and backs up conflicting legacy values", function()
     local shared = { font = { size = 41 }, shadow = { enabled = false }, scale = 1.7 }
-    local saved = { schemaVersion = 3, font = { face = "Fonts\\MORPHEUS.TTF", size = 30, outline = "THICKOUTLINE" },
+    local saved = { schemaVersion = 4, font = { face = "Fonts\\MORPHEUS.TTF", size = 30, outline = "THICKOUTLINE" },
         shadow = { enabled = false }, scale = 1.25, position = { x = 79, y = -51 },
         options = { animatedTitle = false, position = { x = 43, y = -18 } }, mobility = { enabled = false },
-        reminders = { mage_fire_shimmer = { position = { x = 15, y = 27 } } },
-        styles = { mobility_blink = { font = { size = 35 } },
-            mage_fire_hot_streak_left = shared, mage_fire_hot_streak_right = shared } }
-    local _, addon = login(saved)
+        reminders = { mage_fire_shimmer = { position = { x = 15, y = 27 } },
+            mage_fire_hot_streak_left = { position = { x = 11, y = 12 } },
+            mage_fire_hot_streak_right = { position = { x = -17, y = 18 } } },
+        styles = { mobility_blink = { font = { size = 35 } }, mobility_shimmer = { font = { size = 46 }, scale = 1.8 },
+            mage_fire_hot_streak_left = shared, mage_fire_hot_streak_right = shared,
+            unknown_region = { font = { size = 60 } } } }
+    local _, addon = mobilityLogin(212653, { charges = 1, maxCharges = 2 }, nil, saved)
     equal(addon.db, saved, "root SavedVariables identity retained")
-    equal(addon.db.schemaVersion, 4, "migration version recorded")
-    same(addon.db.position, { x = 79, y = -51 }, "global coordinates retained")
-    same(addon.db.reminders.mage_fire_shimmer.position, { x = 15, y = 27 }, "existing position ID retained")
-    same(addon.db.options.position, { x = 43, y = -18 }, "window coordinates retained")
-    equal(addon.db.options.animatedTitle, false, "animation preference retained")
-    equal(addon.db.mobility.enabled, false, "module preference retained")
-    for _, entry in ipairs(addon.appearanceEntries) do
-        local style = addon.db.styles[entry.key]
-        equal(style.font.face, "Fonts\\MORPHEUS.TTF", "legacy face fills missing field")
-        equal(style.font.outline, "THICKOUTLINE", "legacy outline fills missing field")
-        for _, other in ipairs(addon.appearanceEntries) do
-            if other.key ~= entry.key then
-                local rhs = addon.db.styles[other.key]
-                truthy(style ~= rhs and style.font ~= rhs.font and style.shadow ~= rhs.shadow,
-                    "each style and mutable child table is independently owned")
-            end
-        end
-        truthy(style.font ~= addon.db.font and style.shadow ~= addon.db.shadow, "legacy fields are detached")
-    end
-    equal(addon.db.styles.mobility_blink.font.size, 35, "valid preexisting independent value wins")
-    equal(addon.db.styles.mobility_blink.scale, 1.25, "missing independent scale inherits once")
-    equal(addon.db.styles.mage_fire_hot_streak_left.font.size, 41, "existing region size wins")
-    equal(addon.db.styles.mobility_shimmer.font.size, 30, "legacy size copied to missing skill")
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 48 } })
-    local after = copy(addon.db)
-    after.font.size, after.scale = 66, 2.5
-    after.styles.mage_arcane_clearcasting_left = nil
-    local _, reloaded = login(after)
-    equal(reloaded.db.styles.mobility_shimmer.font.size, 48, "reload never reapplies obsolete global appearance")
-    same(reloaded.db.styles.mage_arcane_clearcasting_left, reloaded.factoryReminderStyle, "missing schema-4 entry gets factory values")
-    equal(reloaded.db.styles.mobility_blink.font.size, 35, "new entry never modifies another style")
+    equal(addon.db.schemaVersion, 5, "one-time migration recorded")
+    local mobility, proc = addon:GetMobilityConfig(), addon:GetProcConfig(63)
+    equal(mobility.style.font.size, 46, "actually selected Shimmer wins conflicting skill styles")
+    equal(mobility.style.scale, 1.8, "selected scale copied exactly once")
+    same(mobility.position, { anchor = "CENTER", x = 94, y = -24 }, "legacy global and active region offsets summed once")
+    equal(mobility.enabled, false, "module switch retained")
+    same(addon.db.options.position, { x = 43, y = -18 }, "shell position retained")
+    equal(addon.db.options.animatedTitle, false, "animation retained")
+    equal(proc.style.font.size, 41, "known Fire Proc style stays Fire scoped")
+    truthy(proc.style ~= mobility.style and proc.style.font ~= mobility.style.font and proc.style.shadow ~= mobility.style.shadow,
+        "Mobility and Proc own separate mutable styles")
+    equal(proc.regions.mage_fire_hot_streak_left.position.x, 90, "left region offset preserved independently")
+    equal(proc.regions.mage_fire_hot_streak_right.position.x, 62, "right region offset preserved independently")
+    local backup = addon.db.migrations.scope5.source
+    equal(backup.styles.mobility_blink.font.size, 35, "conflicting Blink value backed up")
+    equal(backup.styles.unknown_region.font.size, 60, "unknown source retained without propagation")
+    truthy(backup.styles.mage_fire_hot_streak_left ~= proc.style, "active style detached from immutable migration evidence")
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 48 } })
+    backup.styles.mobility_shimmer.font.size = 66
+    local _, reloaded = login(copy(addon.db))
+    equal(reloaded:GetMobilityConfig().style.font.size, 48, "reload never reapplies legacy backup")
+    equal(reloaded.db.classes.WARRIOR, nil, "migration never materializes another class")
 end)
 
-test("entry style validation is atomic canonicalizes fonts and resets only selected appearance", function()
-    local _, addon = login({ reminders = { mage_fire_shimmer = { position = { x = 23, y = -34 } } } })
+test("non-Mage login does not inherit or instantiate legacy Mage settings and returning Mage restores them", function()
+    local saved = { schemaVersion = 4, position = { x = 55, y = -33 },
+        mobility = { enabled = false }, styles = { mobility_blink = { font = { size = 52 }, scale = 2 } } }
+    local _, warrior, ws = login(saved, false, { classToken = "WARRIOR", specID = 71 })
+    same(warrior:GetMobilityConfig().style, warrior.factoryReminderStyle, "new class uses factory style")
+    same(warrior:GetMobilityConfig().position, { anchor = "CENTER", x = 0, y = 0 }, "new class has factory position")
+    equal(warrior:GetMobilityConfig().enabled, true, "Mage disable never leaks to Warrior")
+    equal(warrior.db.classes.MAGE, nil, "pending migration does not allocate Mage config on Warrior")
+    equal(ws.moduleLoads, 0, "Warrior never loads Mage business files")
+    warrior:UpdateReminderStyle("mobility:WARRIOR", { font = { size = 29 } })
+    local _, mage = mobilityLogin(1953, { charges = 1, maxCharges = 1 }, nil, copy(warrior.db))
+    equal(mage:GetMobilityConfig().style.font.size, 52, "Mage consumes its backed-up legacy appearance later")
+    equal(mage:GetMobilityConfig().position.x, 55, "Mage consumes its own legacy coordinates")
+    equal(mage.db.classes.WARRIOR.mobility.style.font.size, 29, "return preserves Warrior settings")
+    truthy(mage.db.classes.MAGE.mobility.style.font ~= mage.db.classes.WARRIOR.mobility.style.font, "class font tables never alias")
+    mage:UpdateReminderStyle("mobility:MAGE", { font = { size = 43 } })
+    local _, back = login(copy(mage.db), false, { classToken = "WARRIOR", specID = 71 })
+    equal(back:GetMobilityConfig().style.font.size, 29, "return to Warrior restores Warrior saved value")
+    equal(back.db.classes.MAGE.mobility.style.font.size, 43, "other class persisted but is not the active context")
+end)
+
+test("context style validation is atomic and reset preserves other scopes and all positions", function()
+    local _, addon = login()
     local before = copy(addon.db)
     for _, patch in ipairs({ { font = { size = 7 } }, { font = { size = 99 } },
         { font = { face = "bad.ttf" } }, { font = { outline = "bad" } },
         { scale = 0/0 }, { scale = 3.01 }, { shadow = { enabled = 1 } },
         { font = { size = 30 }, color = { 1, 0, 0 } }, { position = { x = 9 } } }) do
-        equal(addon:UpdateReminderStyle("mobility_blink", patch), false, "invalid style rejected")
-        same(addon.db, before, "invalid style leaves every setting unchanged")
+        equal(addon:UpdateReminderStyle("mobility:MAGE", patch), false, "invalid style rejected")
+        same(addon.db, before, "invalid style is atomic")
     end
-    equal(addon:UpdateReminderStyle("invented_entry", { scale = 2 }), false, "unknown entry rejected")
-    truthy(addon:UpdateReminderStyle("mobility_blink", { font = { face = "fonts\\morpheus.ttf", size = 42 }, scale = 2 }), "valid style accepted")
-    equal(addon.db.styles.mobility_blink.font.face, "Fonts\\MORPHEUS.TTF", "face canonicalized per entry")
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 37 } })
-    local others = copy(addon.db.styles)
-    addon:ResetReminderStyle("mobility_blink")
-    same(addon.db.styles.mobility_blink, addon.factoryReminderStyle, "selected style reset to factory")
-    for key, style in pairs(others) do
-        if key ~= "mobility_blink" then same(addon.db.styles[key], style, "current reset leaves other entries intact") end
-    end
-    same(addon.db.reminders, before.reminders, "current style reset preserves all coordinates")
+    equal(addon:UpdateReminderStyle("mobility:WARRIOR", { scale = 2 }), false, "foreign context rejected")
+    truthy(addon:UpdateReminderStyle("mobility:MAGE", { font = { face = "fonts\\morpheus.ttf", size = 42 }, scale = 2 }), "current context accepted")
+    equal(addon:GetMobilityConfig().style.font.face, "Fonts\\MORPHEUS.TTF", "font canonicalized")
+    addon:UpdateReminderStyle("proc:MAGE:63", { font = { size = 37 } })
+    local proc = copy(addon:GetProcConfig(63))
+    addon:ResetReminderStyle("mobility:MAGE")
+    same(addon:GetMobilityConfig().style, addon.factoryReminderStyle, "current style reset")
+    same(addon:GetProcConfig(63), proc, "Mobility reset leaves Proc untouched")
+    same(addon:GetMobilityConfig().position, before.classes.MAGE.mobility.position, "style reset leaves position")
 end)
 
-test("Appearance selection discards drafts and each Proc region supports explicitly labeled Preview only", function()
+test("automatic Appearance context discards drafts while Proc regions share a spec style and independent positions", function()
     local _, addon, state = login()
     local panel, controls = options(addon)
-    addon:OpenAppearance("mobility", "mobility_blink")
+    addon:OpenAppearance("mobility")
+    truthy(not controls.appearanceEntry:IsEnabled(), "Appearance context is read-only, no skill/class/spec selector")
     enter(controls.appearanceFontSize.editBox, "29")
     typeText(controls.appearanceFontSize.editBox, "67")
     typeText(controls.appearanceScale.editBox, "2.7")
-    choose(controls.appearanceEntry, "mobility_shimmer")
-    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "new entry loads its own saved size")
-    equal(tonumber(controls.appearanceScale.editBox:GetText()), 1, "new entry has no previous draft scale")
-    enter(controls.appearanceFontSize.editBox, "33")
-    choose(controls.appearanceEntry, "mobility_blink")
-    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 29, "returning entry discards former unsubmitted text")
-    controls.appearanceReset:Click()
-    equal(addon.db.styles.mobility_blink.font.size, 24, "UI resets only selected skill")
-    equal(addon.db.styles.mobility_shimmer.font.size, 33, "other skill survives reset")
     addon:SelectOptionsCategory("proc")
     choose(controls.procEntry, "mage_fire_hot_streak_left")
     controls.procAppearance:Click()
-    equal(panel.selectedAppearanceKey, "mage_fire_hot_streak_left", "Proc shortcut selects specific region")
+    equal(panel.selectedAppearanceKey, "proc:MAGE:63", "Proc style context is current class and spec")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "switching context discards unsubmitted draft")
     controls.appearanceFontSize:SetValue(45)
-    equal(addon.db.styles.mage_fire_hot_streak_left.font.size, 45, "Proc size changes immediately")
-    equal(addon.db.styles.mage_fire_hot_streak_right.font.size, 24, "same Proc other region remains independent")
+    equal(addon:GetProcConfig(63).style.font.size, 45, "Proc size saves to spec")
     controls.appearancePreview:Click()
-    equal(addon.previewState.entryId, "mage_fire_hot_streak_left", "Appearance opens only selected region sample")
-    equal(addon.previewFrames.mage_fire_hot_streak_left.text.font[2], 45, "sample uses saved region style")
+    equal(addon.previewFrames.mage_fire_hot_streak_left.text.font[2], 45, "selected region uses spec style")
+    addon:SetPreview("all")
+    equal(addon.previewFrames.mage_fire_hot_streak_right.text.font[2], 45, "opposite region uses same spec style")
     typeText(controls.appearanceFontSize.editBox, "66")
-    state.specID = 64
-    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
-    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "spec switch discards draft when changing eligible entry")
-    truthy(panel.selectedAppearanceKey:find("mage_frost_", 1, true), "spec switch selects only defined current-spec Proc entries")
-    for _, category in ipairs(panel.categories) do
-        equal(category.themeSelection:IsShown(), category.key == "proc", "appearance retains parent-category highlight after palette change")
+    state.specID = 64; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(panel.selectedAppearanceKey, "proc:MAGE:64", "spec context follows identity")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "new spec discards draft and starts factory")
+    state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 45, "returning spec restores committed value")
+    addon:OpenAppearance("mobility")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 29, "Mobility retains its own committed value")
+    for key in pairs(controls) do
+        truthy(key ~= "classSelector" and key ~= "specSelector" and key ~= "profileSelector" and key ~= "loadModule", "no added context-management buttons")
     end
-    state.specID = 63
-    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
-    addon:OpenAppearance("proc", "mage_fire_hot_streak_left")
-    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 45, "returning to original specialization restores committed size")
-    local sourceFile = assert(io.open(root .. "/UI/Options.lua", "r"))
-    local source = sourceFile:read("*a"); sourceFile:close()
-    truthy(source:find("Preview only", 1, true), "Proc limitation is explicitly labeled")
-    for _, key in ipairs({ "font", "fontSize", "outline", "shadow", "scale" }) do
-        equal(controls[key], nil, "old global appearance control removed")
-    end
+    local file = assert(io.open(root .. "/UI/Options.lua", "r")); local source = file:read("*a"); file:close()
+    truthy(source:find("Preview only", 1, true), "Proc is explicitly preview only")
 end)
 
-test("actual Blink and Shimmer use distinct appearance without changing established position identities", function()
+test("Blink Shimmer and all Mage specs share every Mobility preference without merging Proc", function()
     local data = { charges = 0, maxCharges = 2, chargeStart = 97, chargeDuration = 20 }
     local env, addon, state = mobilityLogin(1953, data)
-    addon:UpdateReminderStyle("mobility_blink", { font = { size = 27 }, scale = 1.2 })
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 43 }, scale = 1.8 })
-    local id, blink = addon:GetMobilityEntry().id, currentLive(addon)
-    addon:UpdateSettings({ reminders = { [id] = { position = { x = 52, y = -29 } } } })
-    equal(blink.text.font[2], 27, "actual Blink gets Blink style")
-    local savedPositionID = addon:GetMobilityEntry().id
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 43 }, scale = 1.8 })
+    addon:UpdateSettings({ position = { x = 52, y = -29 } })
+    local scope = addon:GetMobilityConfig()
+    local saved = copy(scope)
+    local id = addon:GetMobilityEntry().id
     state.mobility.known[212653], state.mobility.override = true, 212653
-    state.mobility.spells[212653] = data
-    syncEvent(state, "SPELLS_CHANGED")
-    equal(addon:GetMobilityEntry().id, savedPositionID, "learning replacement never renames position setting")
-    equal(currentLive(addon).text.font[2], 43, "actual Shimmer gets distinct Shimmer style")
-    equal(currentLive(addon):GetScale(), 1.8, "actual spell controls scale exactly once")
-    reminderAnchor(currentLive(addon), addon:GetMobilityEntry(), addon, env)
-    state.specID = 62
-    syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
-    equal(currentLive(addon).text.font[2], 43, "specialization switch retains actual skill style")
-    equal(addon.db.reminders[savedPositionID].position.x, 52, "old specialization coordinates survive")
+    state.mobility.spells[212653] = data; syncEvent(state, "SPELLS_CHANGED")
+    equal(addon:GetMobilityEntry().id, id, "replacement keeps compatibility position ID")
+    equal(currentLive(addon).text.font[2], 43, "Shimmer uses same Mage appearance as Blink")
+    equal(currentLive(addon):GetScale(), 1.8, "class scale applied once")
+    for _, spec in ipairs({ 62, 64, 63 }) do
+        state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        equal(addon:GetMobilityConfig(), scope, "all Mage specs use identical configuration object")
+        same(addon:GetMobilityConfig(), saved, "spec change never rewrites Mobility settings")
+        reminderAnchor(currentLive(addon), addon:GetMobilityEntry(), addon, env)
+    end
+    equal(addon:GetProcConfig(63).style.font.size, 24, "Mobility changes never affect Proc")
     local _, reloaded = mobilityLogin(212653, data, { specID = 62 }, copy(addon.db))
-    equal(currentLive(reloaded).text.font[2], 43, "skill style survives reload and spec change")
+    same(reloaded:GetMobilityConfig(), saved, "reload on another spec restores shared class configuration")
 end)
 
 test("style edits preserve opaque live alpha and native countdown binding without any spell query", function()
@@ -2784,7 +2825,7 @@ test("style edits preserve opaque live alpha and native countdown binding withou
     local binding, originalAlpha, originalDuration = frame.durationBinding, frame.alpha, frame.durationBinding.duration
     local durationWrites, alphaWrites, reads = binding.durationWrites, frame.alphaWrites, copy(state.spellReads)
     local timer = nativeText(addon)
-    truthy(addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 44, outline = "THICKOUTLINE" }, scale = 1.75, shadow = { enabled = false } }), "live style accepted")
+    truthy(addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 44, outline = "THICKOUTLINE" }, scale = 1.75, shadow = { enabled = false } }), "live style accepted")
     equal(binding.duration, originalDuration, "style keeps exact native duration handle")
     equal(binding.durationWrites, durationWrites, "style never calls SetDuration")
     equal(frame.alpha, originalAlpha, "style keeps exact opaque native opacity")
@@ -2803,43 +2844,38 @@ test("style edits preserve opaque live alpha and native countdown binding withou
     equal(nativeText(addon), "", "first restored charge still hides immediately")
 end)
 
-test("explicit skill appearance Preview shares that skill style without altering learned live identity", function()
+test("Mobility appearance Preview uses current actual skill and same class style as live", function()
     local _, addon = mobilityLogin(1953, { charges = 0, maxCharges = 1, chargeStart = 100, chargeDuration = 20 })
     options(addon)
-    addon:UpdateReminderStyle("mobility_blink", { font = { size = 32 }, scale = 1.25 })
-    addon:UpdateReminderStyle("mobility_shimmer", { font = { size = 47 }, scale = 1.7 })
-    truthy(addon:StartAppearancePreview("mobility_blink"), "actual skill sample starts")
-    local id = addon:GetMobilityEntry().id
-    local preview = addon.previewFrames[id]
-    same(preview.text.font, currentLive(addon).text.font, "same entry preview/live typography matches")
-    equal(preview:GetScale(), currentLive(addon):GetScale(), "same entry preview/live scale matches")
-    truthy(addon:StartAppearancePreview("mobility_shimmer"), "alternative skill style is previewable without learning it")
-    equal(preview.text.font[2], 47, "alternate sample selects alternate style")
-    equal(addon:GetMobilityStatus().spellID, 1953, "preview does not manufacture learned Shimmer")
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 32 }, scale = 1.25 })
+    truthy(addon:StartAppearancePreview("mobility:MAGE"), "current Mobility sample starts")
+    local preview = addon.previewFrames[addon:GetMobilityEntry().id]
+    same(preview.text.font, currentLive(addon).text.font, "preview/live share typography")
+    equal(preview:GetScale(), currentLive(addon):GetScale(), "preview/live share scale")
+    equal(addon:GetMobilityStatus().spellID, 1953, "preview preserves actual learned Blink identity")
     addon:StopPreview()
-    equal(currentLive(addon).text.font[2], 32, "stopping alternate sample restores actual Blink appearance")
-    equal(nativeText(addon), "No Blink\n20.0", "real Blink timer retained")
+    equal(nativeText(addon), "No Blink\n20.0", "real Blink timer restored")
 end)
 
-test("updating one displayed entry does not touch any other cached reminder font", function()
+test("updating Proc spec style updates all its regions while leaving Mobility font untouched", function()
     local _, addon = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 100, chargeDuration = 20 })
-    options(addon)
-    addon:SetPreview("all")
+    options(addon); addon:SetPreview("all")
     local snapshots = {}
     for _, pool in pairs(addon.reminderFrames) do
         for _, frame in pairs(pool) do snapshots[frame] = frame.text.fontWrites end
     end
-    addon:UpdateReminderStyle("mage_fire_hot_streak_left", { font = { size = 39 } })
+    addon:UpdateReminderStyle("proc:MAGE:63", { font = { size = 39 } })
     for frame, writes in pairs(snapshots) do
-        if frame.styleKey == "mage_fire_hot_streak_left" then
-            truthy(frame.text.fontWrites > writes, "selected preview updates")
+        if frame.styleKey == "proc:MAGE:63" then
+            truthy(frame.text.fontWrites > writes, "each current-spec Proc region updates")
+            equal(frame.text.font[2], 39, "all Proc regions read one style")
         else
-            equal(frame.text.fontWrites, writes, "other live/preview entries receive no font writes")
+            equal(frame.text.fontWrites, writes, "Mobility receives no font writes")
         end
     end
 end)
 
-test("Alliance Arcane automatically uses the specified red-to-purple Options gradient only", function()
+test("Alliance Arcane automatically uses corrected blue-to-purple Options gradient only", function()
     local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
     equal(state.factionReads, 0, "hidden Options performs no decorative identity reads")
     local before = copy(addon.db)
@@ -2849,7 +2885,7 @@ test("Alliance Arcane automatically uses the specified red-to-purple Options gra
     equal(info.faction, "Alliance", "faction detected")
     equal(info.specialization, "Arcane", "specialization detected")
     equal(info.themeKey, "alliance_arcane", "specified combination selected")
-    same(panel.theme.header.gradient.first, { 0.48, 0.07, 0.13, 0.45 }, "header starts at requested red")
+    same(panel.theme.header.gradient.first, { 0.08, 0.22, 0.48, 0.45 }, "header starts at Alliance blue")
     same(panel.theme.header.gradient.last, { 0.36, 0.13, 0.58, 0.45 }, "header ends in Arcane purple")
     same(panel.brandingHeader.sweep.vertexColor, { 0.72, 0.46, 0.98 }, "brand highlight uses central accent")
     equal(panel.brandingHeader.wordmark.vertexColor, nil, "blue/gold wordmark receives no tint")
@@ -2947,9 +2983,208 @@ test("theme refresh cannot reset opaque timers opacity class colors or entry app
     equal(nativeText(addon), "No Shimmer\n12.0", "native countdown advances after theme changes")
 end)
 
+test("saved schema-5 class settings win and new scopes use detached factory defaults", function()
+    local _, first = login()
+    first:UpdateReminderStyle("mobility:MAGE", { font = { size = 47 }, scale = 1.8 })
+    first:UpdateSettings({ mobility = { preferences = { skillDisplay = { label = false } } }, position = { x = 71, y = -28 } })
+    first:GetProcConfig(63)
+    local saved = copy(first.db)
+    saved.classes.MAGE.mobility.style.shadow = nil
+    local _, mage = login(saved)
+    equal(mage:GetMobilityConfig().style.font.size, 47, "valid v5 style wins missing-field normalization")
+    equal(mage:GetMobilityConfig().style.scale, 1.8, "scale retained exactly")
+    equal(mage:GetMobilityConfig().style.shadow.enabled, true, "missing field gets factory default")
+    equal(mage:GetMobilityConfig().preferences.skillDisplay.label, false, "future module preference is retained inside class")
+    equal(mage.db.classes.MAGE.proc[62], nil, "new Arcane config is not eagerly created")
+    local _, warrior = login(copy(mage.db), false, { classToken = "WARRIOR", specID = 71 })
+    same(warrior:GetMobilityConfig().style, warrior.factoryReminderStyle, "new class does not inherit latest edited style")
+    same(warrior:GetMobilityConfig().preferences, {}, "new class does not inherit Mage module preferences")
+    truthy(warrior:GetMobilityConfig().style.font ~= warrior.db.classes.MAGE.mobility.style.font, "class font tables are independent")
+    equal(warrior.db.classes.MAGE.mobility.position.x, 71, "new class creation never overwrites old coordinates")
+end)
+
+test("Arcane and Fire Proc styles stay independent while same-spec region positions remain separate", function()
+    local _, addon, state = login(nil, false, { specID = 62 })
+    options(addon)
+    addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 36 }, scale = 1.3 })
+    local entries = addon:GetPreviewEntries()
+    local left, right = entries[2], entries[3]
+    addon:UpdateSettings({ reminders = { [left.id] = { position = { x = 31, y = 5 } },
+        [right.id] = { position = { x = -19, y = 8 } } } })
+    addon:SetPreview("all")
+    equal(addon.previewFrames[left.id].text.font[2], 36, "left uses Arcane style")
+    equal(addon.previewFrames[right.id].text.font[2], 36, "right uses same Arcane style")
+    truthy(addon:GetProcConfig().regions[left.id].position ~= addon:GetProcConfig().regions[right.id].position,
+        "independent region coordinates never alias")
+    local mobility = copy(addon:GetMobilityConfig())
+    state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    addon:UpdateReminderStyle("proc:MAGE:63", { font = { size = 49 } })
+    equal(addon:GetProcConfig().style.font.size, 49, "Fire has separate style")
+    truthy(addon.db.classes.MAGE.proc[62].style.font ~= addon:GetProcConfig().style.font, "Proc spec sub-tables do not alias")
+    state.specID = 62; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(addon:GetProcConfig().style.font.size, 36, "returning Arcane restores saved style")
+    equal(addon:GetReminderPosition(left).x, 31, "Arcane left position retained")
+    equal(addon:GetReminderPosition(right).x, -19, "Arcane right position retained")
+    same(addon:GetMobilityConfig(), mobility, "Proc style changes never change Mobility")
+end)
+
+test("native class loading distinguishes files active data saved configuration and runtime ownership", function()
+    local _, mage, ms = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 96, chargeDuration = 20 })
+    local report = mage:GetRuntimeLoadDiagnostics()
+    equal(ms.moduleLoads, 1, "native class module loads exactly once")
+    equal(report.modules.fileStatus, "loaded and active", "Mage file status is explicit")
+    equal(report.modules.previewEntries, 3, "only Fire catalog entries instantiated")
+    equal(countKeys(mage.mobilityEntries), 1, "no unrelated spec Mobility entry instantiated")
+    equal(mage.db.classes.MAGE.proc[62], nil, "unused Arcane config not initialized")
+    equal(report.activeSkills, 1, "one effective current skill")
+    equal(report.activeBindings, 1, "one live native timer")
+    local saved = copy(mage.db)
+    local _, warrior, ws = login(saved, false, { classToken = "WARRIOR", specID = 71 })
+    local wr = warrior:GetRuntimeLoadDiagnostics()
+    equal(ws.moduleLoads, 0, "unrelated Mage module never loaded on Warrior")
+    equal(wr.modules.fileStatus, "not loaded", "files not loaded distinct from inactive")
+    equal(wr.modules.previewEntries, 0, "no unrelated preview catalog instantiated")
+    equal(wr.liveFrames + wr.previewFrames + wr.allocatedBindings + wr.activeSkills, 0, "no unrelated runtime allocation")
+    truthy(warrior.db.classes.MAGE, "shared SavedVariables really does deserialize earlier Mage settings")
+    truthy(wr.modules.configuration:find("all previously saved class tables", 1, true), "diagnostic discloses shared storage limitation")
+    equal(warrior:GetProcConfig(62), nil, "foreign spec cannot be read as current Proc context")
+    for _, file in ipairs(ws.loadedFiles) do
+        truthy(not file:find("CarGOUI_Mage/", 1, true), "core cannot eagerly execute Mage business file")
+    end
+    equal(ws.realReads, 0, "Warrior never queries unrelated spell state")
+end)
+
+test("already loaded class module is reported inactive without pretending code or cached frames unload", function()
+    local _, addon, state = mobilityLogin(1953, { charges = 0, maxCharges = 1, chargeStart = 100, chargeDuration = 20 })
+    local old = currentLive(addon)
+    state.classToken, state.specID = "WARRIOR", 71
+    syncEvent(state, "PLAYER_ENTERING_WORLD")
+    local report = addon:GetRuntimeLoadDiagnostics()
+    equal(report.modules.fileStatus, "loaded but inactive", "loaded code is never claimed unloaded")
+    equal(report.activeSkills + report.activeBindings + report.modules.previewEntries, 0, "obsolete activity removed")
+    equal(old.durationBinding.enabled, false, "old class timer detached")
+    equal(old:IsShown(), false, "old class frame hidden")
+    equal(state.moduleLoads, 1, "class change does not reload cached module")
+    equal(report.liveFrames, 1, "cached reusable frame remains and is disclosed")
+end)
+
+test("combat-time initial Load-on-Demand defers safely then synchronizes actual learned spell", function()
+    local client = { inCombat = true, mobility = { known = { [1953] = true, [212653] = true }, override = 212653,
+        spells = { [212653] = { charges = 0, maxCharges = 2, chargeStart = 94, chargeDuration = 20,
+            secretCharges = true, secretDuration = true, cooldownStart = 100, cooldownDuration = 20 } } } }
+    local _, addon, state = login(nil, true, client)
+    equal(state.moduleLoads, 0, "combat load is deferred")
+    equal(addon:GetRuntimeLoadDiagnostics().allocatedBindings, 0, "deferred module creates no timer")
+    equal(#state.spellReads, 0, "no missing-module spell queries")
+    local callbacks = addon:GetEventDiagnostics().callbacks
+    addon:EnsureCurrentClassModule(); addon:EnsureCurrentClassModule()
+    equal(addon:GetEventDiagnostics().callbacks, callbacks, "deferred callback registered only once")
+    syncEvent(state, "PLAYER_REGEN_ENABLED")
+    equal(state.moduleLoads, 1, "combat end loads current module once")
+    equal(nativeText(addon), "No Shimmer\n14.0", "load re-queries existing recharge instead of starting fake CD")
+    equal(addon.classModuleDeferred, false, "deferred listener completed")
+end)
+
+test("deferred Mage loading never replaces legacy Proc settings with provisional defaults", function()
+    local saved = { schemaVersion = 4, position = { x = 30, y = -10 }, styles = {
+        mage_fire_hot_streak_left = { font = { size = 42 }, scale = 1.6 },
+        mage_fire_hot_streak_right = { font = { size = 19 } },
+    }, reminders = {
+        mage_fire_hot_streak_left = { position = { x = 11, y = 7 } },
+        mage_fire_hot_streak_right = { position = { x = -22, y = 4 } },
+    } }
+    local _, addon, state = login(saved, true, { inCombat = true, specID = 63 })
+    equal(addon:GetProcConfig(), nil, "no persistent factory Proc before migration catalog")
+    local panel = options(addon)
+    addon:OpenAppearance("proc")
+    equal(panel.controls.appearanceFontSize:IsEnabled(), false, "missing catalog disables style controls")
+    equal(panel.controls.appearancePreview:IsEnabled(), false, "missing catalog has no enabled fake preview")
+    local shell = copy(addon.db.options)
+    equal(addon:UpdateSettings({ options = { animatedTitle = false },
+        styles = { ["proc:MAGE:63"] = { font = { size = 50 } } } }), false,
+        "deferred context rejects compound edits atomically")
+    same(addon.db.options, shell, "rejected Proc edit cannot change shell settings")
+    equal(addon:UpdateSettings({ proc = { style = { scale = 2 } } }), false,
+        "direct Proc patch cannot write into absent config")
+    equal(addon.db.classes.MAGE.proc[63], nil, "no saved provisional record")
+    syncEvent(state, "PLAYER_REGEN_ENABLED")
+    local proc = addon:GetProcConfig()
+    equal(proc.style.font.size, 42, "legacy first region style migrates after real module load")
+    equal(proc.style.scale, 1.6, "legacy scale preserved once")
+    equal(proc.regions.mage_fire_hot_streak_left.position.x, 41, "left global and region offset combine once")
+    equal(proc.regions.mage_fire_hot_streak_right.position.x, 8, "right position stays independent")
+    equal(addon.db.migrations.scope5.source.styles.mage_fire_hot_streak_right.font.size, 19,
+        "conflicting region style is backed up")
+    truthy(panel.controls.appearanceFontSize:IsEnabled(), "ready module re-enables existing controls")
+    local _, reloaded = login(copy(addon.db), false, { specID = 63 })
+    equal(reloaded:GetProcConfig().style.font.size, 42, "reload does not lose deferred migration result")
+    equal(#state.errors, 0, "no lifecycle or nil-target errors")
+end)
+
+test("login Options Preview combat stop and repeated spec switches keep listeners and bindings bounded", function()
+    local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 94, chargeDuration = 20 })
+    local function snapshot(stage)
+        local report = addon:GetRuntimeLoadDiagnostics()
+        equal(report.activeSkills, 1, stage .. " tracks only effective skill")
+        truthy(report.activeBindings <= 1, stage .. " has at most one active timer")
+        equal(report.pendingTasks, 0, stage .. " has no resident scanning task")
+        print("OFFLINE-LIFECYCLE " .. stage .. ": events=" .. report.events.events .. ", callbacks=" .. report.events.callbacks
+            .. ", activeSkills=" .. report.activeSkills .. ", bindings=" .. report.activeBindings .. "/" .. report.allocatedBindings
+            .. ", cachedFrames=" .. report.liveFrames .. "/" .. report.previewFrames)
+        return report
+    end
+    snapshot("login")
+    local panel = options(addon); snapshot("Options")
+    addon:SetPreview("all"); equal(snapshot("Preview").activeBindings, 0, "matching preview suspends timer display only")
+    syncEvent(state, "PLAYER_REGEN_DISABLED"); equal(snapshot("combat").activeBindings, 1, "combat ends preview and retains live")
+    syncEvent(state, "PLAYER_REGEN_ENABLED"); addon:StopPreview(); snapshot("Stop Preview")
+    local function cycle()
+        for _, spec in ipairs({ 62, 64, 63 }) do
+            state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+            equal(addon.previewState.mode, "off", "switch removes old samples")
+            addon:SetPreview("all"); addon:StopPreview()
+        end
+    end
+    cycle()
+    local warmed, resources = snapshot("all scopes warmed"), resourceCounts(state)
+    for _ = 1, 12 do cycle() end
+    local final = snapshot("36 further spec switches")
+    equal(final.events.callbacks, warmed.events.callbacks, "callbacks never accumulate")
+    equal(final.events.events, warmed.events.events, "native subscriptions never accumulate")
+    equal(final.allocatedBindings, warmed.allocatedBindings, "native bindings remain bounded after every visited spec")
+    same(resourceCounts(state), resources, "repeated switching reuses frames fonts textures and animations")
+    equal(state.moduleLoads, 1, "native code loads once across all switches")
+    panel:Hide(); equal(snapshot("Options closed").activeBindings, 1, "closing Options preserves live timer")
+end)
+
+test("runtime CPU and memory diagnostics sample only on demand and disclose unavailable profiling", function()
+    local env, addon, state = login(nil, false, { classToken = "WARRIOR", specID = 71 })
+    local memoryReads, cpuReads, updates = {}, {}, 0
+    env.UpdateAddOnMemoryUsage = function() updates = updates + 1 end
+    env.GetAddOnMemoryUsage = function(name) memoryReads[#memoryReads + 1] = name; return 123.5 end
+    env.C_CVar = { GetCVarBool = function() return false end }
+    env.GetAddOnCPUUsage = function(name) cpuReads[#cpuReads + 1] = name; return 8.25 end
+    options(addon)
+    equal(updates, 0, "opening Options does not poll performance")
+    addon:GetRuntimeLoadDiagnostics(); equal(updates, 0, "structural status does not sample CPU or memory")
+    local text = addon:GetLoadDiagnosticsText()
+    equal(updates, 1, "explicit diagnostic snapshot samples memory once")
+    same(memoryReads, { "CarGOUI" }, "unloaded Mage does not get performance query")
+    equal(#cpuReads, 0, "disabled profiling never fabricates CPU reading")
+    truthy(text:find("unavailable (scriptProfile disabled)", 1, true), "unavailable CPU is explicit")
+    env.C_CVar.GetCVarBool = function() return true end
+    local cpuUpdates = 0
+    env.UpdateAddOnCPUUsage = function() cpuUpdates = cpuUpdates + 1 end
+    text = addon:GetLoadDiagnosticsText()
+    equal(cpuUpdates, 1, "enabled profiling sampled only on request")
+    equal(#cpuReads, 1, "one loaded core measured")
+    truthy(text:find("123.5", 1, true) and text:find("8.25", 1, true), "mock measurements exercise client API plumbing only")
+    for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil, "no performance polling frame") end
+end)
+
 test("live runtime sources contain no polling cast-count inference or timer text readback", function()
-    for _, path in ipairs({ "Modules/Mobility/Runtime.lua", "Modules/Mobility/SpellState.lua" }) do
-        local file = assert(io.open(root .. "/" .. path, "r"))
+    for _, path in ipairs({ root .. "/Modules/Mobility/Runtime.lua", moduleRoot .. "/SpellState.lua" }) do
+        local file = assert(io.open(path, "r"))
         local source = file:read("*a"); file:close()
         for _, forbidden in ipairs({ "NewTicker", '"OnUpdate"', "COMBAT_LOG_EVENT_UNFILTERED",
             "UNIT_SPELLCAST_SUCCEEDED", ":GetText(", ":GetStringWidth(", ":GetStringHeight(",
@@ -2965,4 +3200,5 @@ test("live runtime sources contain no polling cast-count inference or timer text
     end
 end)
 
+assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")

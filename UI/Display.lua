@@ -50,16 +50,14 @@ end
 -- The caller owns content; this function never queries or stores live state.
 -- Proc output is only a timer. Labels/textures/crosshairs belong to Test Mode.
 function addon:LayoutReminder(frame, entry)
-    local db = self.db
     local style = self:GetReminderStyle(frame.styleKey or entry)
     frame.reminderEntry = entry
-    local setting = db.reminders and db.reminders[entry.id]
-    local position = setting and setting.position or { x = 0, y = 0 }
-    local x = entry.anchor.x + db.position.x + position.x
-    local y = entry.anchor.y + db.position.y + position.y
+    local position = self:GetReminderPosition(entry)
+    local x = entry.anchor.x + position.x
+    local y = entry.anchor.y + position.y
     frame:SetScale(style.scale)
     frame:ClearAllPoints()
-    frame:SetPoint("CENTER", UIParent, "CENTER", x / style.scale, y / style.scale)
+    frame:SetPoint(position.anchor or "CENTER", UIParent, position.anchor or "CENTER", x / style.scale, y / style.scale)
 
     self:ApplyFontSettings(frame.text, style)
 end
@@ -67,7 +65,7 @@ end
 function addon:RenderReminder(frame, entry, content, testMode)
     frame.styleKey = self:GetReminderStyleKey(entry)
     self:LayoutReminder(frame, entry)
-    local db = self.db
+    local enabled = self:GetReminderEnabled(entry)
     local text = content.timer or ""
     if entry.kind == "mobility" and content.message then
         text = content.message .. "\n" .. text
@@ -76,13 +74,13 @@ function addon:RenderReminder(frame, entry, content, testMode)
     frame:SetSize(math.max(1, frame.text:GetStringWidth()) + 8,
         math.max(1, frame.text:GetStringHeight()) + 8)
     if self.UpdatePreviewGuidance then
-        self:UpdatePreviewGuidance(frame, entry, testMode and db.enabled)
+        self:UpdatePreviewGuidance(frame, entry, testMode and enabled)
     end
-    frame:SetShown(db.enabled and text ~= "")
+    frame:SetShown(enabled and text ~= "")
 end
 
 -- Styling never re-queries combat state or rebinds its DurationObject/alpha.
--- Only frames belonging to this exact appearance entry are touched.
+-- Only frames belonging to this class/module or class/spec style are touched.
 function addon:RefreshReminderStyle(key)
     for _, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
@@ -138,6 +136,7 @@ function addon:RenderLiveMobility(entry, spellName, duration, visibility, spellI
     binding:SetZeroDurationText("")
     binding:SetDuration(duration)
     binding:Enable()
+    frame.mobilityBindingActive = true
     binding:UpdateFontString()
     -- A duration object may hold restricted timing. Its native evaluation goes
     -- straight to the approved display sink, never to a Lua test or readback.
@@ -161,6 +160,7 @@ function addon:HideLiveMobility(except)
                 frame.durationBinding:Disable()
                 frame.durationBinding:SetToDefaults()
             end
+            frame.mobilityBindingActive = false
             -- Overwrite rather than inspect any text supplied by the engine.
             frame.text:SetText("")
         end

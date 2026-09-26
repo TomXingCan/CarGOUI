@@ -1,7 +1,8 @@
 local _, addon = ...
 
 -- Options-only art direction, not reminder colors or SavedVariables defaults.
--- Alliance/Arcane is user-specified. The other five Mage combinations are
+-- Faction accents (Alliance blue / Horde red) and Arcane purple are specified.
+-- Fire/Frost secondary colors are
 -- this release's design proposals; all share a restrained, dark visual style.
 addon.optionThemes = {
     neutral = {
@@ -19,13 +20,13 @@ addon.optionThemes = {
     alliance_arcane = {
         label = "Alliance / Arcane", motif = "arcane",
         background = { 0.035, 0.032, 0.050 },
-        left = { 0.48, 0.07, 0.13 }, right = { 0.36, 0.13, 0.58 },
+        left = { 0.08, 0.22, 0.48 }, right = { 0.36, 0.13, 0.58 },
         accent = { 0.72, 0.46, 0.98 },
     },
     alliance_fire = {
         label = "Alliance / Fire", motif = "fire",
         background = { 0.050, 0.035, 0.033 },
-        left = { 0.37, 0.09, 0.12 }, right = { 0.55, 0.27, 0.08 },
+        left = { 0.08, 0.20, 0.40 }, right = { 0.55, 0.27, 0.08 },
         accent = { 1.00, 0.64, 0.28 },
     },
     alliance_frost = {
@@ -37,7 +38,7 @@ addon.optionThemes = {
     horde_arcane = {
         label = "Horde / Arcane", motif = "arcane",
         background = { 0.046, 0.031, 0.045 },
-        left = { 0.35, 0.08, 0.16 }, right = { 0.39, 0.16, 0.44 },
+        left = { 0.35, 0.08, 0.16 }, right = { 0.36, 0.13, 0.58 },
         accent = { 0.90, 0.44, 0.79 },
     },
     horde_fire = {
@@ -49,7 +50,7 @@ addon.optionThemes = {
     horde_frost = {
         label = "Horde / Frost", motif = "frost",
         background = { 0.033, 0.036, 0.054 },
-        left = { 0.30, 0.10, 0.20 }, right = { 0.10, 0.30, 0.43 },
+        left = { 0.38, 0.07, 0.10 }, right = { 0.10, 0.30, 0.43 },
         accent = { 0.55, 0.73, 0.94 },
     },
 }

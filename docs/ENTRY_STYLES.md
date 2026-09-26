@@ -1,3 +1,5 @@
+> Historical alpha.7 document. Its per-spell/per-region styles are superseded by [Schema 5 scopes](CONFIG_SCOPES.md) in alpha.8. Do not use this as current setup guidance.
+
 # Alpha.7：逐条目 Appearance 与自动主题
 
 基于用户已实测确认 Blink / Shimmer 正常的 alpha.6（`3f903f6ac91a33232b9f36d57d9c47f03049cebb`）增量修改。此次不改 `SpellState.lua` 的战斗识别/原生显隐路径，不增加真实 Proc 或其他职业监控。开发环境没有 WoW 客户端；本次新增样式与主题的真实视觉验收仍待执行。

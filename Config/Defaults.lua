@@ -17,30 +17,22 @@ function addon:NewReminderStyle()
 end
 
 addon.defaults = {
-    schemaVersion = 4,
-    enabled = true,
-    mobility = { enabled = true },
-    position = { x = 0, y = 0 },
-    -- Retained for one-time migration/history; no global reminder-style editor.
-    font = {
-        face = "Fonts\\FRIZQT__.ttf",
-        size = 24,
-        outline = "OUTLINE",
-    },
-    scale = 1,
-    shadow = { enabled = true },
+    schemaVersion = 5,
     options = { position = { x = 0, y = 0 }, animatedTitle = true },
-    reminders = {},
-    styles = {},
+    classes = {},
 }
 
-for _, entry in ipairs(addon.appearanceEntries) do
-    addon.defaults.styles[entry.key] = addon:NewReminderStyle()
+function addon:NewReminderPosition()
+    return { anchor = "CENTER", x = 0, y = 0 }
 end
 
--- Per-region offsets share the same database and validation pipeline as other settings.
-for _, entry in ipairs(addon.previewEntries) do
-    addon.defaults.reminders[entry.id] = { position = { x = 0, y = 0 } }
+function addon:NewMobilityConfig()
+    return { enabled = true, style = self:NewReminderStyle(),
+        position = self:NewReminderPosition(), preferences = {} }
+end
+
+function addon:NewProcConfig()
+    return { enabled = true, style = self:NewReminderStyle(), regions = {} }
 end
 
 addon.limits = {

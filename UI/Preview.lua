@@ -82,7 +82,7 @@ function addon:GetPreviewState()
     return self.previewState
 end
 
-function addon:StopPreview()
+function addon:StopPreview(skipLiveRefresh)
     self.previewState.mode = "off"
     self.previewState.styleKey = nil
     for _, frame in pairs(self.previewFrames) do
@@ -92,7 +92,7 @@ function addon:StopPreview()
     self:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnSpecializationChanged)
     self:UnregisterEvent("PLAYER_REGEN_DISABLED", OnPreviewCombat)
     -- Re-query the live APIs, not a pre-preview snapshot. Options may be closed.
-    if self.RefreshMobility then self:RefreshMobility() end
+    if not skipLiveRefresh and self.RefreshMobility then self:RefreshMobility() end
 end
 
 function addon:RefreshPreview()
@@ -116,17 +116,6 @@ function addon:RefreshPreview()
     -- Samples are fixed values; no ticking timer, polling, or OnUpdate is needed.
     for _, entry in ipairs(entries) do
         if state.mode == "all" or state.entryId == entry.id then
-            if state.mode == "single" and state.styleKey and entry.kind == "mobility" then
-                -- An explicitly selected appearance sample is not skill learning
-                -- or live state. Only this TEST copy gets the alternate identity.
-                local appearance = self.appearanceByKey[state.styleKey]
-                local sample = {}
-                for key, value in pairs(entry) do sample[key] = value end
-                sample.styleKey = state.styleKey
-                sample.label = appearance.label .. " - appearance sample"
-                sample.sample = { message = "No " .. self.mobilitySpells[appearance.spellID], timer = "8.0" }
-                entry = sample
-            end
             local frame = self:AcquireReminderFrame(entry, "preview")
             self.previewFrames[entry.id] = frame
             self:RenderReminder(frame, entry, entry.sample, true)
@@ -153,8 +142,7 @@ function addon:SetPreview(mode, entryId, styleKey)
     end
     if styleKey then
         local styleEntry = self.appearanceByKey[styleKey]
-        if mode ~= "single" or not styleEntry or styleEntry.kind ~= entry.kind
-            or (entry.kind == "proc" and styleEntry.entryId ~= entry.id) then
+        if mode ~= "single" or not styleEntry or styleEntry.kind ~= entry.kind then
             return false, "Choose an appearance for this sample entry."
         end
     end
@@ -168,7 +156,14 @@ end
 
 function addon:StartAppearancePreview(key)
     local appearance = self.appearanceByKey[key]
-    if not appearance then return false, "Choose an appearance entry." end
+    if not appearance then return false, "No style context is available." end
     local entry = appearance.kind == "mobility" and self:GetMobilityEntry()
-    return self:SetPreview("single", entry and entry.id or appearance.entryId, key)
+    if appearance.kind == "proc" then
+        local selected = self.optionsFrame and self.optionsFrame.selectedProcEntry
+        for _, candidate in ipairs(self:GetPreviewEntries()) do
+            if candidate.kind == "proc" and (not entry or candidate.id == selected) then entry = candidate end
+        end
+    end
+    if not entry then return false, "No defined sample for this context." end
+    return self:SetPreview("single", entry.id, key)
 end
