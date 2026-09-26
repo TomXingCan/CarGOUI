@@ -1,9 +1,11 @@
-# Mage native Proc coverage — alpha.12
+# Mage native Proc coverage — alpha.13
 
 Target source audit: **Retail 12.1.0 build 69933**. The user's actual client
 build has not been supplied. Source verification, offline tests and a real
-client combat/visual test are separate results. No new Proc row below has
-been accepted in a real client yet.
+client combat/visual test are separate results. The user reports that
+Arcane Soul and Overpowered Missiles work in their alpha.12 scenario.
+That does not establish every talent, combat, refresh or layout scenario.
+Clearcasting's alpha.13 correction remains pending user retest.
 
 This scope adds countdown **numbers** to an existing Blizzard graphical
 activation overlay. It does not create a general buff list, a cast
@@ -31,9 +33,9 @@ separate and are never used as a substitute timer source.
 
 | Spec | Proc / cast or driver | Aura ID | Overlay ID / row | Native texture and regions | Mapping / implementation status | Client acceptance |
 |---|---|---:|---|---|---|---|
-| Arcane 62 | Clearcasting; Arcane Missiles cast 5143, passive 79684 | 276743 | 276743 / 3847 | 449486; left + right, scale 1 | Exact graphical aura mapped; see Clearcasting caveat below | Pending, including PvE/PvP aura exposure |
-| Arcane 62 | Arcane Soul; Memory of Al'ar 449619 | 451038 | 451038 / 4598 | 449486; outside left + outside right, scale 1 | Current Sunfury hero effect mapped | Pending |
-| Arcane 62 | Overpowered Missiles; talent 1244329, consumed by Arcane Missiles | 1277009 | 1277009 / 5007 | 6160020; top, scale 1 | Current Arcane talent effect mapped | Pending |
+| Arcane 62 | Clearcasting; Arcane Missiles cast 5143, passive 79684 | **263725** | **1277420 / 5010; 1277421 / 5011; 1277422 / 5012** | 1027131 / 1027132 / 1027133; left + right, scale 1 | One native aura timer per stable region; three graphical owners; source-backed association, see audit below | Alpha.12 failure reported; alpha.13 fix pending user retest |
+| Arcane 62 | Arcane Soul; Memory of Al'ar 449619 | 451038 | 451038 / 4598 | 449486; outside left + outside right, scale 1 | Current Sunfury hero effect mapped | **User reports working in their alpha.12 scenario**; full matrix not claimed |
+| Arcane 62 | Overpowered Missiles; talent 1244329, consumed by Arcane Missiles | 1277009 | 1277009 / 5007 | 6160020; top, scale 1 | Current Arcane talent effect mapped | **User reports working in their alpha.12 scenario**; full matrix not claimed |
 | Fire 63 | Hot Streak; passive 195283, benefits Pyroblast 11366 / Flamestrike 2120 and their actual overrides | 48108 | 48108 / 117 | 449490; left + right, scale 1 | Current effect mapped | Pending |
 | Fire 63 | Heating Up; preceding Hot Streak state | 48107 | 48107 / 1162 | 449490; small left + small right, scale 0.5 | Current effect mapped separately from Hot Streak | Pending |
 | Fire 63 | **Pyroclasm**; current talent 269650, benefits a **non-instant** Pyroblast or Flamestrike | 269651 | 269651 / 3739 | 457658; top, scale 0.7 | Current hard-cast bonus mapped, not collapsed into Hot Streak | Pending, including partial stack consumption |
@@ -49,24 +51,28 @@ evidence that its old talent can currently be learned. Its exact aura and
 actual native graph event must both participate; it is not added to the
 user's Preview menu.
 
-### Clearcasting: three IDs are not interchangeable
+### Clearcasting: timer and graphical identities are different
 
-The principal Clearcasting aura **263725** has its own activation-overlay
-record (3685), but `OverlayFileDataID = 0` and `ScreenLocationID = 0`.
-That record is an action-button highlight, not evidence for left/right
-screen artwork. The actual left/right graphic belongs to **276743**, which
-also has its own aura effects and is labelled `PvP Talent` in the extracted
-spell data. Hidden **277726** is another aura and includes movement-casting
-effects. None is silently substituted for another.
+The principal finite aura **263725** is the only timer source. Its own
+activation row 3685 has no artwork; that does **not** disqualify it from
+providing time to the separate graphical Clearcasting owners. The
+12.1.0.69933 overlay records **1277420/1277421/1277422**, Blizzard's published
+charge-display change, their hidden/infinite dummy effects, and the current
+Arcane Clearcasting implementation together support the explicit association.
+The public data does not expose all server-side linkage; this is a
+**source-backed association requiring user-client confirmation**.
 
-The exact 276743 graphical-aura route is implemented. If a real client
-emits this graphic while exposing only 263725 or 277726 to native aura
-filtering, the timer correspondence is not established by the audited
-records. That case must be reported as a mapping/exposure limitation;
-CarGOUI must not display a guessed 20-second timer or invent a separate
-263725 bracket. Captured Thoughts 1270872 modifies the durations of
-263725/277726, which further demonstrates why fixed durations or an
-unverified alias can be wrong.
+Alpha.12 mistakenly limited the path to the separate PvP variant **276743**,
+omitting the three modern owners. Alpha.13 admits their native SHOW/HIDE
+events and keeps one persistent 263725 timer per existing saved region.
+A HIDE for one old variant cannot close another variant that is still
+shown. Hidden **277726** contains additional movement-casting effects and
+is not used as an alternative timer. Neither 276743 nor 277726 enters the
+timer candidate filter, even when it coexists with 263725.
+
+See [Clearcasting correction and primary evidence](CLEARCASTING_ALPHA13.md)
+for the exact records, diagnostics, bootstrap boundary and retest steps.
+The implementation never uses a fixed duration or guesses stack counts.
 
 ### Fingers of Frost: independent native regions
 
@@ -87,7 +93,9 @@ The target Mage data includes activation rows with texture zero for such
 effects as normal Clearcasting 263725, Glacial Spike, Intuition, Arcane
 Salvo, Comet Storm, Frostfire Empowerment, Burden of Power, Glorious
 Incandescence, Freezing Rain, Reflection and Prismatic Bolt. These are not
-silently turned into center timers or new brackets. Arcane Soul 1223522
+silently turned into center timers or new brackets. Clearcasting 263725
+is used only as the timer for the separately mapped modern Clearcasting
+graphics described above; it does not create an extra graphic. Arcane Soul 1223522
 and Hyperthermia 1242220 are separate damage-stack buffs and do not replace
 the timed graphical auras 451038 and 383874. This is a native-graph scope,
 not an inventory of every Mage buff.
@@ -111,9 +119,12 @@ These values describe **layout only**, never aura duration.
 Real timers follow the corresponding native layout and current client
 scale, plus the saved per-region offsets. The existing user offsets are
 not reset. Proc typography remains shared by class + specialization;
-region positions remain independent. The text and native countdown use
-the current player's fixed Blizzard class color. Mobility configuration
-is a separate class-level scope.
+region positions remain independent. Alpha.13 adds optional RGB per stable
+Proc region; an unset RGB dynamically uses the current player's Blizzard
+class color. Each region's live and Preview displays resolve the same RGB.
+Font, size, outline, shadow and scale remain shared by class + spec.
+Mobility and Free move keep their fixed class color and separate
+class-level configuration.
 
 ## Runtime and validation boundary
 
@@ -144,10 +155,10 @@ actual SHOW establishes that region. HIDE is processed independently of
 the display setting.
 
 There is no public active-graphic replay API in that audited Lua source.
-At login/reload, CarGOUI can resynchronize the exact aura through the native
+At login/reload, CarGOUI can resynchronize the exact timer aura through the native
 AuraContainer and position it using the audited graphical record. Whether
 the engine simultaneously recreates every corresponding stock graphic is
-a client acceptance question, especially for the hidden Clearcasting and
+a client acceptance question, especially for the Clearcasting variants and
 Fingers of Frost records. This bootstrap is not represented as a verified
 query of native graphic visibility, and no overlay child visibility or
 alpha is read back to manufacture such a query.

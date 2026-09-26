@@ -52,11 +52,15 @@ print("PASS Native curve result goes directly to SetAlpha without a Lua fallback
 style = code((root / "UI/ReminderStyle.lua").read_text(encoding="utf-8"))
 absent(style, [r"SetAlpha\s*\(", r"SetText\s*\(", r"OnUpdate", r"NewTicker",
                r"self\.db", r"CarGOUIDB", r"RAID_CLASS_COLORS", r"CUSTOM_CLASS_COLORS"],
-       "Reminder class styling has no alpha/text ownership, saved RGB, global-color edits or polling")
+       "Reminder styling changes owned Font color without alpha/text ownership, direct SavedVariables access, global-color edits or polling")
 options = code((root / "UI/Options.lua").read_text(encoding="utf-8"))
-absent(options, [r"ColorPicker", r"ColorSelect", r"SetupColorPickerAndShow",
-                 r"GetColorRGB", r"SetColorRGB"],
-       "Options contains no custom reminder color picker or RGB controls")
+absent(options, [r"controls\.(?:mobility|freeMove|global)[A-Za-z_]*(?:Color|RGB)",
+                 r"controls\.(?:color|rgb|opacity|alpha)\s*=", r"\bColorSelect\b",
+                 r"SetColorRGB"],
+       "Options has no Mobility, Free move, global color or opacity controls; Proc color is checked separately")
+assert 'entry.kind == "proc"' in style and "GetProcRegionColor(entry)" in style
+assert "ResolveClassColor(self, false)" in style
+print("PASS Only Proc entries consult region RGB; Mobility and Free move retain dynamic class color")
 absent(runtime, [r"CarGOUIDB\s*[.\[]", r"self\.db[^\n]*=\s*(?:duration|charges|cooldown)"],
        "Runtime has no raw state writes into SavedVariables")
 print("Static checks passed. These checks do not emulate WoW secret values, native APIs or taint.")

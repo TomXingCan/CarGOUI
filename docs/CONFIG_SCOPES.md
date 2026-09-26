@@ -93,3 +93,10 @@ Back up the previous SavedVariables file, keep it in place for upgrade, then:
 Offline tests exercise these contracts with separate combat/secret-data fixtures.
 They cannot validate actual taint, native rendering or real CPU/memory. The final
 delivery report contains extracted-package test output, not client sign-off.
+
+
+## alpha.13: optional Proc region RGB
+
+Font, font size, outline, shadow and scale remain in `classes[classToken].proc[specID].style`. Only RGB is added to `regions[stableRegionID].color = {r=...,g=...,b=...}`. Existing `.position` is unchanged. Omitted color resolves dynamically to the current class color; the default is not persisted. Resetting region color removes the optional key. Valid custom RGB values are finite in [0,1], without alpha. Invalid optional color data falls back safely; valid colors are copied independently even when old tables were aliased. Only the current requested specialization is normalized.
+
+Changing a timer Aura/graphic owner does not rename region IDs. Existing Clearcasting left/right coordinates, shared fonts, options and all other classes survive. Temporary picker drafts live outside SavedVariables; only a confirmed still-current class/spec/region writes through the shared configuration validator. Future classes reuse the same definition-driven interface. Mobility and Time Spiral Free move retain fixed class color.

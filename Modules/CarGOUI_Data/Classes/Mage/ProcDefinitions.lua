@@ -2,10 +2,11 @@ local _, data = ...
 local adapter = data.adapters.MAGE
 
 -- Retail 12.1.0.69933 SpellActivationOverlay / ScreenLocation DB2 records.
--- Spell IDs, aura IDs and graphical overlay IDs are explicit fields. In
--- particular, the texture-less Clearcasting 263725 row is NOT substituted
--- for graphical 276743, and the hidden right-hand FoF aura is NOT guessed
--- from a Lua stack count. See docs/MAGE_PROC_COVERAGE.md for the evidence.
+-- Spell IDs, aura IDs and graphical overlay IDs are explicit fields.
+-- Clearcasting's real timer (263725) is separate from its three native
+-- graphical owners (1277420/1/2). The infinite dummy graphical auras must
+-- not become timer sources. No Lua stack count selects a graphic tier.
+-- See docs/CLEARCASTING_ALPHA13.md for the evidence and client boundary.
 -- Only the requested specialization's tables are instantiated.
 local longSide, shortSide = 256 * 0.8, 128 * 0.8
 
@@ -30,7 +31,7 @@ local function Region(id, label, location, textureID, scale)
     }
 end
 
-local function Proc(specID, id, name, auraID, overlayID, textureID, locationTypeName, scale, regions, nativeEventOnly)
+local function Proc(specID, id, name, auraID, overlayID, textureID, locationTypeName, scale, regions, nativeEventOnly, overlaySources)
     local result = {
         id = id, name = name, class = "MAGE", specID = specID,
         auraID = auraID, overlayID = overlayID, textureID = textureID,
@@ -38,6 +39,7 @@ local function Proc(specID, id, name, auraID, overlayID, textureID, locationType
         nativeEventOnly = nativeEventOnly or false,
         preview = not nativeEventOnly,
         auditBootstrap = nativeEventOnly and "native-event-required" or "exact-aura-only",
+        overlaySources = overlaySources,
     }
     for _, region in ipairs(regions) do
         result.regions[#result.regions + 1] = Region(region[1], region[2], region[3], textureID, scale)
@@ -48,9 +50,15 @@ end
 local factories = {
     [62] = function()
         return {
-            Proc(62, "mage_arcane_clearcasting", "Clearcasting", 276743, 276743, 449486, "LeftRight", 1, {
+            Proc(62, "mage_arcane_clearcasting", "Clearcasting", 263725, 1277420, 1027131, "LeftRight", 1, {
                 { "mage_arcane_clearcasting_left", "Clearcasting - left region", "Left" },
                 { "mage_arcane_clearcasting_right", "Clearcasting - right region", "Right" },
+            }, false, {
+                -- These are alternative graphical owners, not aura candidates.
+                -- Keep one persistent timer and one saved region per side.
+                { overlayID = 1277420, textureID = 1027131, scale = 1 },
+                { overlayID = 1277421, textureID = 1027132, scale = 1 },
+                { overlayID = 1277422, textureID = 1027133, scale = 1 },
             }),
             Proc(62, "mage_arcane_soul", "Arcane Soul", 451038, 451038, 449486, "LeftRightOutside", 1, {
                 { "mage_arcane_soul_left", "Arcane Soul - outside left region", "LeftOutside" },

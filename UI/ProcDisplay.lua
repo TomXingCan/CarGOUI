@@ -18,8 +18,7 @@ function addon:AnchorProcReminder(frame, entry, style, guideOnly)
     if not Number(nativeScale) or not Number(uiScale) or nativeScale <= 0 or uiScale <= 0 then
         return false, "The stock Proc layout scale is not available as public geometry."
     end
-    local observed = self.procOverlayStates and self.procOverlayStates[entry.overlayID]
-    local regionState = observed and observed[location]
+    local regionState = self.GetProcRegionOverlayState and self:GetProcRegionOverlayState(entry)
     local scale = regionState and regionState.scale or entry.nativeScale or 1
     if not Number(scale) or scale <= 0 or scale > 10 then
         return false, "The native Proc region scale is unavailable or unsupported."
@@ -56,7 +55,7 @@ function addon:AcquireAuraReminder(entry, auraID, textOnly)
         frame:SetAlpha(0)
         frame:Show()
         frame.entryId, frame.channel, frame.nativeAuraOwned = entry.id, "nativeAura", true
-        local handle, reason = self:CreateNativeAuraSlot(frame, entry.id, auraID, textOnly)
+        local handle, reason = self:CreateNativeAuraSlot(frame, entry.id, auraID, textOnly, entry)
         if not handle then frame:Hide(); return nil, reason end
         frame.auraHandle, frame.text = handle, handle.font
         pool[entry.id] = frame
@@ -72,7 +71,7 @@ function addon:StyleAuraReminder(frame)
     frame:SetScale(style.scale)
     frame:SetSize(style.font.size * 12, style.font.size * 2)
     -- Our Font object changes style without accessing the denied native child.
-    self:ApplyFontSettings(frame.auraHandle.font, style)
+    self:ApplyFontSettings(frame.auraHandle.font, style, entry)
     if entry.kind == "proc" then
         frame.procGeometryReady, frame.procGeometryReason = self:AnchorProcReminder(frame, entry, style)
     else

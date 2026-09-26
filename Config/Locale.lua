@@ -9,7 +9,7 @@ local english = {
     enabled = "Show Mobility (current class)", x = "Mobility X offset", y = "Mobility Y offset",
     apply = "Apply", center = "Center position", scale = "Scale",
     positionHint = "Press Enter in either box to save both axes (-10000 to 10000). Offsets move this class's preset Mobility slots together.",
-    appearanceHint = "Only this configuration context changes. Reminder colors always use your Blizzard class color.",
+    appearanceHint = "Only this font context changes. Proc timer colors are set per region on the Proc page; Mobility keeps class color.",
     font = "Font", fontSize = "Font size", outline = "Outline", shadow = "Text shadow",
     none = "None", normal = "Outline", thick = "Thick outline", openPreview = "Test Mode",
     previewHint = "Simulated reminders appear in game space and are marked TEST. Combat stops Test Mode; live reminders continue independently.",

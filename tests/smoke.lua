@@ -464,13 +464,17 @@ local function setup(saved, loggedIn, client)
     function object:IsEventRegistered(event) return self.events[event] or false end
     function object:UnregisterAllEvents() self.events = {} end
     function object:SetFont(face, size, flags)
+        assert(not self.nativeAuraRestricted, "Addon must style its owned Font, not restricted native aura text")
         assert(type(face) == "string" and type(size) == "number", "Invalid SetFont arguments")
         self.font = { face, size, flags or "" }
         self.fontWrites = (self.fontWrites or 0) + 1
         state.fontWrites = state.fontWrites + 1
         return true
     end
-    function object:SetFontObject(value) self.fontObject = value end
+    function object:SetFontObject(value)
+        assert(not self.nativeAuraRestricted, "Addon must not reassign a restricted native aura FontString")
+        self.fontObject = value
+    end
     function object:SetNormalFontObject(value) self.fontObject = value end
     function object:SetHighlightFontObject(value) self.highlightFontObject = value end
     function object:SetDisabledFontObject(value) self.disabledFontObject = value end
@@ -508,7 +512,10 @@ local function setup(saved, loggedIn, client)
         requireFont(self)
         return self.font and self.font[2] or 24
     end
-    function object:SetTextColor(...) self.textColor = { ... } end
+    function object:SetTextColor(...)
+        assert(not self.nativeAuraRestricted, "Addon must color its owned Font, not restricted native aura text")
+        self.textColor = { ... }
+    end
     function object:SetJustifyH(value) self.justifyH = value end
     function object:SetJustifyV(value) self.justifyV = value end
     function object:SetWordWrap(value) self.wordWrap = value end
@@ -603,8 +610,10 @@ local function setup(saved, loggedIn, client)
     function object:RegisterForClicks(...) self.clickTypes = { ... } end
     function object:Click()
         if not self:IsEnabled() then return end
+        if self.scripts.PreClick then self.scripts.PreClick(self, "LeftButton", false) end
         if self.kind == "CheckButton" then self:SetChecked(not self:GetChecked()) end
         if self.scripts.OnClick then self.scripts.OnClick(self, "LeftButton", false) end
+        if self.scripts.PostClick then self.scripts.PostClick(self, "LeftButton", false) end
     end
     function object:CreateTexture(name, layer)
         local texture = setmetatable({ parent = self, name = name, layer = layer,
@@ -698,6 +707,46 @@ local function setup(saved, loggedIn, client)
             frame.text = frame.Text
         end
         return frame
+    end
+    -- Native ColorPickerFrame contract from the pinned Retail FrameXML: swatchFunc
+    -- runs on every change AND on Okay before Hide. There is no acceptFunc.
+    -- The fixture uses the actual button script order so an OnHide-only commit
+    -- cannot incorrectly treat Escape, cancellation, or replacement as Okay.
+    env.hooksecurefunc = function(owner, method, callback)
+        if type(owner) == "string" then callback, method, owner = method, owner, env end
+        local previous = assert(owner[method], "hooksecurefunc target exists")
+        owner[method] = function(...)
+            local result = { previous(...) }
+            callback(...)
+            return unpack(result)
+        end
+    end
+    if not client.pickerUnavailable then
+        local picker = env.CreateFrame("Frame", "ColorPickerFrame", env.UIParent)
+        picker.shown = false
+        picker.Footer = { OkayButton = env.CreateFrame("Button", nil, picker),
+            CancelButton = env.CreateFrame("Button", nil, picker) }
+        function picker:GetColorRGB() return unpack(self.rgb) end
+        function picker:SetupColorPickerAndShow(info)
+            self.swatchFunc, self.cancelFunc, self.extraInfo = info.swatchFunc, info.cancelFunc, info.extraInfo
+            self.opacityFunc, self.hasOpacity = info.opacityFunc, info.hasOpacity
+            self.previousValues = { r = info.r, g = info.g, b = info.b, a = info.opacity }
+            self.rgb = { info.r, info.g, info.b }
+            self:Show()
+        end
+        picker.Footer.OkayButton:SetScript("OnClick", function()
+            if picker.swatchFunc then picker.swatchFunc() end
+            picker:Hide()
+        end)
+        picker.Footer.CancelButton:SetScript("OnClick", function()
+            if picker.cancelFunc then picker.cancelFunc(picker.previousValues) end
+            picker:Hide()
+        end)
+        function state:pickerChange(r, g, b)
+            truthy(picker:IsShown(), "native picker is open before user changes RGB")
+            picker.rgb = { r, g, b }
+            if picker.swatchFunc then picker.swatchFunc() end
+        end
     end
     if client.proc then
         state.proc = client.proc
@@ -2873,16 +2922,16 @@ test("class color fallback retries and world entry refreshes hidden and live poo
     equal(#state.errors, 0, "color recovery produces no errors")
 end)
 
-test("Options exposes no custom reminder colors and class style adds no polling or global mutations", function()
+test("custom color controls are confined to Proc and class style adds no polling or global mutations", function()
     local _, addon = login()
     local _, controls = options(addon)
     for key in pairs(controls) do
-        truthy(not key:lower():find("color", 1, true), "no custom color controls: " .. key)
+        truthy(not key:lower():find("color", 1, true) or key:match("^proc"), "only Proc may expose color controls: " .. key)
     end
     for _, path in ipairs({ "UI/Options.lua", "Config/Defaults.lua", "UI/ReminderStyle.lua" }) do
         local file = assert(io.open(root .. "/" .. path, "r"))
         local source = file:read("*a"); file:close()
-        for _, forbidden in ipairs({ "ColorPickerFrame", "CUSTOM_CLASS_COLORS", "ElvUI", "Ellesmere", '"OnUpdate"', "NewTicker" }) do
+        for _, forbidden in ipairs({ "CUSTOM_CLASS_COLORS", "ElvUI", "Ellesmere", '"OnUpdate"', "NewTicker" }) do
             truthy(not source:find(forbidden, 1, true), path .. " does not introduce " .. forbidden)
         end
     end
@@ -3105,7 +3154,7 @@ test("Alliance Arcane resolves an Alliance-only blue Header and separate violet 
     equal(panel.brandingHeader.wordmark.vertexColor, nil, "blue/gold wordmark receives no tint")
     same(addon.db, before, "automatic theme never writes saved reminder settings")
     for key in pairs(controls) do
-        truthy(not key:lower():find("color", 1, true), "no custom color controls")
+        truthy(not key:lower():find("color", 1, true) or key:match("^proc"), "theme exposes no color controls")
         truthy(key ~= "themeSelect" and key ~= "faction" and key ~= "specialization" and key ~= "applyTheme", "no manual theme selector")
     end
     for _, category in ipairs(panel.categories) do
@@ -4657,7 +4706,7 @@ end
 test("Mage mappings preserve separate aura overlay region identities and include cast-time Pyroclasm", function()
     local _, addon, state = auraFixture(63)
     local all, regions, IDs = 0, 0, {}
-    local expected = { [62] = { [276743] = true, [451038] = true, [1277009] = true },
+    local expected = { [62] = { [1277420] = true, [451038] = true, [1277009] = true },
         [63] = { [48108] = true, [48107] = true, [269651] = true, [383874] = true, [383883] = true },
         [64] = { [44544] = true, [126084] = true, [190446] = true } }
     for _, spec in ipairs({ 62, 63, 64 }) do
@@ -4665,7 +4714,12 @@ test("Mage mappings preserve separate aura overlay region identities and include
         local found = {}
         for _, definition in ipairs(addon:GetProcDefinitions()) do
             truthy(expected[spec][definition.overlayID], "only audited current-spec native graph rows")
-            equal(definition.auraID, definition.overlayID, "exact audited aura matches graph; no guessed Buff alias")
+            if definition.overlayID == 1277420 then
+                equal(definition.auraID, 263725, "Clearcasting timer is distinct from native stack-graphic owner")
+                equal(#definition.overlaySources, 3, "three audited native graphic owners share the verified timer source")
+            else
+                equal(definition.auraID, definition.overlayID, "other currently audited records retain their exact native Aura")
+            end
             truthy(not found[definition.overlayID], "native graph identity is unique within spec")
             found[definition.overlayID] = true; all = all + 1
             for _, entry in ipairs(definition.regions) do
@@ -4815,7 +4869,7 @@ test("Proc specialization cycles and reload keep scoped styles coordinates slots
     local env, addon, state = auraFixture(62)
     addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 37 }, scale = 1.3 })
     addon:UpdateSettings({ reminders = { mage_arcane_clearcasting_left = { position = { x = 19, y = -8 } } } })
-    putAura(state, 276743, 22, 2, true)
+    putAura(state, 263725, 22, 2, true)
     local mobility = copy(addon:GetMobilityConfig())
     for _, spec in ipairs({ 63, 64, 62 }) do state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player") end
     local slots, bindings, fonts = #state.auraSlots, #state.bindings, #state.auraFonts
@@ -4840,7 +4894,7 @@ test("Proc specialization cycles and reload keep scoped styles coordinates slots
     same(addon:GetMobilityConfig(), mobility, "Proc spec changes leave Mage Mobility config untouched")
     local saved = copy(addon.db)
     local _, reloaded, fresh = login(saved, false, { specID = 62, proc = {} })
-    putAura(fresh, 276743, 31, 1, true)
+    putAura(fresh, 263725, 31, 1, true)
     syncEvent(fresh, "PLAYER_ENTERING_WORLD")
     equal(procText(reloaded, fresh, "mage_arcane_clearcasting_left"), "31.0", "reload synchronizes actual aura without waiting for another cast")
     equal(reloaded:GetProcConfig().style.font.size, 37, "reload preserves scoped Proc appearance")
@@ -5027,6 +5081,437 @@ test("missing or secret stock geometry disables Proc with precise diagnostics an
     equal(state.realReads, reads, "geometry updates do not query ordinary cooldowns or aura APIs")
     same(addon.db, saved, "temporary geometry limitations do not reset user appearance or coordinates")
     equal(#state.errors, 0, "secret geometry never reaches arithmetic or string conversion")
+end)
+
+test("Clearcasting uses the verified duration Aura with independently identified native stack graphics", function()
+    for _, combat in ipairs({ false, true }) do
+        for _, restricted in ipairs({ false, true }) do
+            local env, addon, state = auraFixture(62)
+            state.inCombat = combat
+            putAura(state, 276743, 53, 5, restricted)
+            putAura(state, 277726, 41, 3, restricted)
+            putAura(state, 1277420, 67, 1, restricted)
+            showProc(env, state, 1277420, 1027131, "LeftRight", 1)
+            equal(procText(addon, state, "mage_arcane_clearcasting_left"), "", "unverified simultaneous candidate cannot supply the timer")
+            putAura(state, 263725, 17, 3, restricted)
+            equal(procText(addon, state, "mage_arcane_clearcasting_left"), "17.0", "left timer comes from actual duration Aura only")
+            equal(procText(addon, state, "mage_arcane_clearcasting_right"), "17.0", "right timer uses same verified Aura, independent region")
+            for _, slot in ipairs(state.auraSlots) do
+                if slot.key == "mage_arcane_clearcasting_left" or slot.key == "mage_arcane_clearcasting_right" then
+                    same(slot.filters.includeSpellIDs, { [263725] = true }, "native filter never chooses among unverified candidate IDs")
+                end
+            end
+            putAura(state, 451038, 29, 1, restricted); putAura(state, 1277009, 11, 1, restricted)
+            for _, definition in ipairs(addon:GetProcDefinitions()) do
+                if definition.auraID ~= 263725 then
+                    showProc(env, state, definition.overlayID, definition.textureID, definition.locationTypeName, definition.scale)
+                    for _, entry in ipairs(definition.regions) do
+                        equal(procText(addon, state, entry.id), definition.auraID == 451038 and "29.0" or "11.0",
+                            "other user-confirmed Arcane effects keep their own duration source")
+                    end
+                end
+            end
+            state:advance(3)
+            state.proc.auras[263725].applications = restricted and secret(2) or 2
+            state:fire("UNIT_AURA", "player")
+            equal(procText(addon, state, "mage_arcane_clearcasting_left"), "14.0", "partial consumption preserves remaining native timer")
+            putAura(state, 263725, 23, 2, restricted)
+            equal(procText(addon, state, "mage_arcane_clearcasting_right"), "23.0", "refresh binds real refreshed duration")
+            state.proc.auras[263725] = nil; state:fire("UNIT_AURA", "player")
+            equal(procText(addon, state, "mage_arcane_clearcasting_left"), "", "last consumption clears despite competing candidate auras remaining")
+            putAura(state, 263725, 4, 1, restricted); state:advance(4)
+            equal(procText(addon, state, "mage_arcane_clearcasting_right"), "", "natural expiry clears with no fixed lifetime")
+            equal(state.realReads, 0, "neither combat nor secrecy combination queries restricted Aura data")
+            equal(#state.errors, 0, "opaque IDs stacks and times remain native-owned")
+        end
+    end
+end)
+
+test("Clearcasting native graphic transitions do not let an old-owner HIDE clear a new active owner", function()
+    local env, addon, state = auraFixture(62)
+    putAura(state, 263725, 26, 3, true)
+    showProc(env, state, 1277422, 1027133, "LeftRight", 1)
+    equal(procText(addon, state, "mage_arcane_clearcasting_left"), "26.0", "three-stack graphic uses verified timer")
+    state:advance(2)
+    showProc(env, state, 1277421, 1027132, "LeftRight", 1)
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 1277422)
+    equal(procText(addon, state, "mage_arcane_clearcasting_left"), "24.0", "old graphic owner cannot hide newer active region")
+    equal(procText(addon, state, "mage_arcane_clearcasting_right"), "24.0", "both shared visual regions survive transition")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 1277421)
+    equal(procText(addon, state, "mage_arcane_clearcasting_left"), "", "all observed owners hidden closes region gate")
+    showProc(env, state, 1277420, 1027131, "LeftRight", 1)
+    equal(procText(addon, state, "mage_arcane_clearcasting_left"), "24.0", "valid new SHOW clears earlier HIDE for this owner")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 276743)
+    equal(procText(addon, state, "mage_arcane_clearcasting_right"), "24.0", "excluded old PvP graphic HIDE cannot affect normal mapping")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", nil)
+    equal(procText(addon, state, "mage_arcane_clearcasting_right"), "", "native global HIDE clears every current owner")
+    state:fire("PLAYER_ENTERING_WORLD")
+    equal(procText(addon, state, "mage_arcane_clearcasting_right"), "24.0", "world reentry synchronizes real present Aura and documented bootstrap geometry")
+    equal(#state.errors, 0, "multi-owner lifecycle makes no secret comparisons")
+end)
+
+local function regionEntry(addon, id)
+    for _, entry in ipairs(addon:GetPreviewEntries()) do if entry.id == id then return entry end end
+    error("Missing current configurable region " .. id)
+end
+
+local function regionRGB(addon, id)
+    return addon:GetProcRegionColor(regionEntry(addon, id))
+end
+
+test("Proc regions independently persist validated RGB while an unset color remains a dynamic class fallback", function()
+    local _, addon, state = auraFixture(62)
+    local entries = {}
+    for _, definition in ipairs(addon:GetProcDefinitions()) do
+        for _, entry in ipairs(definition.regions) do entries[#entries + 1] = entry end
+    end
+    truthy(#entries >= 5, "Arcane provides separately identified inner outside and upper regions")
+    local mobility = copy(addon:GetMobilityConfig())
+    local style = copy(addon:GetProcConfig().style)
+    for index, entry in ipairs(entries) do
+        equal(addon:GetProcRegionColor(entry), nil, "default does not persist computed class RGB")
+        local input = { r = index / (#entries + 1), g = 0.2, b = 0.8 }
+        truthy(addon:SetProcRegionColor(entry, input), "each stable current-spec region accepts RGB")
+        input.r = 1
+        equal(addon:GetProcRegionColor(entry).r, index / (#entries + 1), "saved RGB is detached from caller table")
+        local returned = addon:GetProcRegionColor(entry); returned.g = 1
+        equal(addon:GetProcRegionColor(entry).g, 0.2, "color getter cannot mutate persisted settings")
+    end
+    for index, entry in ipairs(entries) do
+        same(addon:GetProcRegionColor(entry), { r = index / (#entries + 1), g = 0.2, b = 0.8 }, "regions do not share colors")
+        same(procFrame(addon, entry.id).auraHandle.font.textColor,
+            { index / (#entries + 1), 0.2, 0.8, 1 }, "live native owned Font uses that region's RGB")
+    end
+    truthy(addon:SetProcRegionColor(entries[1], nil), "reset clears only selected optional RGB")
+    equal(addon:GetProcConfig().regions[entries[1].id].color, nil, "reset stores no class RGB")
+    same(procFrame(addon, entries[1].id).text.textColor, { 0.25, 0.78, 0.92, 1 }, "reset dynamically uses class color")
+    same(addon:GetMobilityConfig(), mobility, "Proc color leaves all Mobility settings unchanged")
+    same(addon:GetProcConfig().style, style, "per-region colors do not create per-region font settings")
+    equal(state.realReads, 0, "color editing never queries real aura or cooldown state")
+end)
+
+test("RGB validation rejects malformed partial secret out-of-range and opacity values atomically", function()
+    local _, addon = auraFixture(63)
+    local entry = regionEntry(addon, "mage_fire_hot_streak_left")
+    truthy(addon:SetProcRegionColor(entry, { r = 0, g = 1, b = 0.25 }), "closed RGB endpoints are valid")
+    local baseline = copy(addon.db)
+    for _, invalid in ipairs({ false, "red", 1, {}, { r = 0.2, g = 0.3 },
+        { r = -0.1, g = 0.2, b = 0.3 }, { r = 1.1, g = 0.2, b = 0.3 },
+        { r = 0/0, g = 0.2, b = 0.3 }, { r = math.huge, g = 0.2, b = 0.3 },
+        { r = "0.2", g = 0.2, b = 0.3 }, { r = secret(0.2), g = 0.2, b = 0.3 },
+        { r = 0.2, g = 0.3, b = 0.4, a = 0.5 }, { 0.2, 0.3, 0.4 } }) do
+        equal(addon:SetProcRegionColor(entry, invalid), false, "malformed optional RGB rejected")
+        same(addon.db, baseline, "invalid color patch leaves all saved configuration unchanged")
+    end
+    equal(addon:UpdateSettings({ proc = { regions = { [entry.id] = { color = { r = 0.1 } } } } }), false,
+        "generic UpdateSettings also validates a complete RGB value")
+    local forged = copy(entry); forged.id = "not_a_real_proc_region"
+    equal(addon:SetProcRegionColor(forged, { r = 1, g = 0, b = 0 }), false, "unknown ID cannot create arbitrary config")
+    forged = copy(entry); forged.specID = 62
+    equal(addon:SetProcRegionColor(forged, { r = 1, g = 0, b = 0 }), false, "stale spec identity cannot write active config")
+    forged = copy(entry); forged.class = "WARRIOR"
+    equal(addon:SetProcRegionColor(forged, { r = 1, g = 0, b = 0 }), false, "foreign class cannot acquire current region identity")
+    local free = addon:GetFreeMoveEntry()
+    equal(addon:SetProcRegionColor(free, { r = 1, g = 0, b = 0 }), false, "Free move cannot use Proc-only color settings")
+end)
+
+test("shared Proc font updates preserve every region color and coordinate across world theme spec and reload", function()
+    local env, addon, state = auraFixture(62)
+    local left = regionEntry(addon, "mage_arcane_clearcasting_left")
+    local right = regionEntry(addon, "mage_arcane_clearcasting_right")
+    addon:SetProcRegionColor(left, { r = 1, g = 0.2, b = 0.1 })
+    addon:SetProcRegionColor(right, { r = 0.1, g = 0.3, b = 1 })
+    addon:UpdateSettings({ proc = { regions = { [left.id] = { position = { x = 17, y = -23 } },
+        [right.id] = { position = { x = -29, y = 31 } } } } })
+    local before = copy(addon:GetProcConfig().regions)
+    options(addon); addon:SetPreview("all")
+    addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 41 }, shadow = { enabled = false }, scale = 1.4 })
+    for _, entry in ipairs({ left, right }) do
+        equal(procFrame(addon, entry.id).text.font[2], 41, "one specialization font updates every live region")
+        equal(addon.previewFrames[entry.id].text.font[2], 41, "Preview uses the same specialization font")
+        same(addon.previewFrames[entry.id].text.textColor, procFrame(addon, entry.id).text.textColor, "live and Preview agree per region")
+    end
+    addon:StopPreview()
+    state:fire("PLAYER_ENTERING_WORLD")
+    addon:RefreshReminderClassColor()
+    state.faction = "Horde"; state:fire("NEUTRAL_FACTION_SELECT_RESULT")
+    addon:RefreshOptions()
+    same(addon:GetProcConfig().regions, before, "world and automatic theme preserve regional colors and positions")
+    state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    local fire = regionEntry(addon, "mage_fire_hot_streak_left")
+    equal(addon:GetProcRegionColor(fire), nil, "new spec inherits no recently edited region RGB")
+    addon:SetProcRegionColor(fire, { r = 0.8, g = 0.6, b = 0.2 })
+    state.specID = 62; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    same(addon:GetProcConfig().regions, before, "switching back restores exact Arcane settings")
+    local _, reloaded = login(copy(env.CarGOUIDB), false, { specID = 62, proc = {} })
+    same(reloaded:GetProcConfig().regions, before, "reload preserves all regional optional colors and coordinates")
+    equal(reloaded:GetProcConfig().style.font.size, 41, "reload preserves shared spec font")
+    same(procFrame(reloaded, left.id).text.textColor, { 1, 0.2, 0.1, 1 }, "native Font initialization resolves saved region RGB")
+    same(procFrame(reloaded, right.id).text.textColor, { 0.1, 0.3, 1, 1 }, "native Font reuse preserves independent right RGB")
+end)
+
+test("all currently defined Fire Frost and Arcane regions accept colors without triggering a Buff", function()
+    local _, addon, state = auraFixture(62)
+    local ids = {}
+    for _, spec in ipairs({ 62, 63, 64 }) do
+        state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        for _, definition in ipairs(addon:GetProcDefinitions()) do
+            for _, entry in ipairs(definition.regions) do
+                local allowed = false
+                for _, choice in ipairs(addon:GetPreviewEntries()) do if choice.id == entry.id then allowed = true end end
+                if allowed then
+                    truthy(not ids[entry.id], "region keys are stable and globally descriptive")
+                    ids[entry.id] = true
+                    truthy(addon:SetProcRegionColor(entry, { r = 0.2, g = 0.4, b = 0.6 }), "current supported region accepts saved RGB while absent")
+                    same(addon:GetProcRegionColor(entry), { r = 0.2, g = 0.4, b = 0.6 }, "region is configurable independently of actual aura presence")
+                end
+            end
+        end
+    end
+    truthy(ids.mage_fire_heating_up_left and ids.mage_fire_pyroclasm_top and ids.mage_frost_fingers_right
+        and ids.mage_frost_brain_freeze_top and ids.mage_arcane_clearcasting_right,
+        "the shared mechanism covers small brackets top graphics both Frost regions and Clearcasting")
+    equal(state.realReads, 0, "defining or editing all current region colors never reads Buff data")
+end)
+
+test("color-only writes and temporary drafts never change native binding event subscription or gate alpha", function()
+    local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+        chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {} })
+    putAura(state, 48108, 19, 1, true); putAura(state, 375240, 13, 1, true)
+    local left = regionEntry(addon, "mage_fire_hot_streak_left")
+    local right = procFrame(addon, "mage_fire_hot_streak_right")
+    local target = procFrame(addon, left.id)
+    local live, free = currentLive(addon), procFrame(addon, "free_move_mage")
+    local samples, colors = {}, {}
+    for _, pool in pairs(addon.reminderFrames) do for _, frame in pairs(pool) do
+        samples[frame] = { alpha = frame.alpha, writes = frame.alphaWrites, handle = frame.auraHandle,
+            duration = frame.durationBinding and frame.durationBinding.duration }
+        colors[frame] = frame.text.textColor
+    end end
+    local bindings, slots, reads = #state.bindings, #state.auraSlots, state.realReads
+    local listeners = addon:GetEventDiagnostics().callbacks
+    local nativeBindings = {}
+    for _, slot in ipairs(state.auraSlots) do
+        nativeBindings[slot] = { binding = slot.nativeBinding, duration = slot.nativeBinding and slot.nativeBinding.duration }
+    end
+    truthy(addon:SetProcRegionColorPreview(left, { r = 1, g = 0.1, b = 0.2 }), "picker draft updates live style")
+    equal(addon:GetProcRegionColor(left), nil, "temporary picker draft is not saved")
+    same(target.text.textColor, { 1, 0.1, 0.2, 1 }, "draft reaches owned native Font")
+    addon:SetProcRegionColorPreview(left, nil)
+    same(target.text.textColor, { 0.25, 0.78, 0.92, 1 }, "draft cancel restores dynamic class fallback")
+    truthy(addon:UpdateSettings({ proc = { regions = { [left.id] = { color = { r = 0.1, g = 0.8, b = 0.4 } } } } }),
+        "generic color-only patch uses the targeted style path")
+    same(target.text.textColor, { 0.1, 0.8, 0.4, 1 }, "direct patch reaches same color resolver")
+    equal(right.text.textColor, colors[right], "editing left does not write the right Font")
+    same(live.text.textColor, { 0.25, 0.78, 0.92, 1 }, "Mobility remains fixed class color")
+    same(free.text.textColor, { 0.25, 0.78, 0.92, 1 }, "Free move remains fixed class color")
+    for frame, sample in pairs(samples) do
+        equal(frame.alpha, sample.alpha, "color-only mutation preserves existing opaque/public gate")
+        equal(frame.alphaWrites, sample.writes, "color-only mutation does not reapply alpha")
+        equal(frame.auraHandle, sample.handle, "native container is not replaced")
+        if frame.durationBinding then equal(frame.durationBinding.duration, sample.duration, "Mobility native timer is not rebound") end
+    end
+    for slot, sample in pairs(nativeBindings) do
+        equal(slot.nativeBinding, sample.binding, "color-only mutation preserves copied native binding identity")
+        if slot.nativeBinding then equal(slot.nativeBinding.duration, sample.duration, "color-only mutation preserves original Aura duration object") end
+    end
+    equal(#state.bindings, bindings, "editing RGB adds no native bindings")
+    equal(#state.auraSlots, slots, "editing RGB adds no native containers")
+    equal(state.realReads, reads, "editing RGB performs no ordinary state reads")
+    equal(addon:GetEventDiagnostics().callbacks, listeners, "editing RGB adds no business listeners")
+end)
+
+test("saved malformed optional RGB is removed while valid aliases detach and old coordinates remain intact", function()
+    local _, seed = auraFixture(62)
+    local saved = copy(seed.db)
+    local shared = { r = 0.2, g = 0.5, b = 0.7 }
+    local regions = saved.classes.MAGE.proc[62].regions
+    regions.mage_arcane_clearcasting_left = { position = { x = 37, y = -41 }, color = shared }
+    regions.mage_arcane_clearcasting_right = { position = { x = -19, y = 23 }, color = shared }
+    local badID
+    for _, definition in ipairs(seed:GetProcDefinitions()) do
+        for _, entry in ipairs(definition.regions) do
+            if entry.id ~= "mage_arcane_clearcasting_left" and entry.id ~= "mage_arcane_clearcasting_right" then badID = entry.id end
+        end
+    end
+    regions[badID] = { position = { x = 3, y = 4 }, color = { r = 0/0, g = 0.2, b = 0.3 } }
+    local _, addon = login(saved, false, { specID = 62, proc = {} })
+    local current = addon:GetProcConfig().regions
+    truthy(current.mage_arcane_clearcasting_left.color ~= current.mage_arcane_clearcasting_right.color,
+        "historically aliased colors become independent mutable tables")
+    same(current.mage_arcane_clearcasting_left.position, { anchor = "CENTER", x = 37, y = -41 }, "normalization keeps left offset")
+    equal(current[badID].color, nil, "invalid saved optional color falls back without persisting a class RGB")
+    equal(current[badID].position.x, 3, "invalid optional color never removes regional position")
+    addon:SetProcRegionColor(regionEntry(addon, "mage_arcane_clearcasting_left"), { r = 1, g = 0, b = 0 })
+    same(current.mage_arcane_clearcasting_right.color, shared, "editing left does not mutate right saved alias")
+end)
+
+test("native picker previews immediately saves only native Okay and restores prior color on cancel or hide", function()
+    local env, addon = auraFixture(63)
+    options(addon); addon:SelectOptionsCategory("proc")
+    local entry = regionEntry(addon, "mage_fire_hot_streak_left")
+    addon:SetPreview("single", entry.id)
+    truthy(addon:OpenProcColorPicker(entry), "native supported picker opens for a current region")
+    local picker = env.ColorPickerFrame
+    equal(picker.hasOpacity, false, "Proc picker exposes no alpha setting")
+    addon:SetProcRegionColorPreview(entry, { r = 0.6, g = 0.2, b = 0.8 })
+    -- User-facing native callback, not a direct configuration write.
+    picker.rgb = { 0.6, 0.2, 0.8 }; picker.swatchFunc()
+    equal(addon:GetProcRegionColor(entry), nil, "intermediate swatch changes never save")
+    same(addon.previewFrames[entry.id].text.textColor, { 0.6, 0.2, 0.8, 1 }, "picker draft updates external Preview")
+    picker.Footer.OkayButton:Click()
+    same(addon:GetProcRegionColor(entry), { r = 0.6, g = 0.2, b = 0.8 }, "native Okay commits the current region")
+    truthy(not picker:IsShown(), "native Okay closes picker normally")
+    truthy(addon:OpenProcColorPicker(entry), "picker reopens using saved RGB")
+    picker.rgb = { 1, 1, 0 }; picker.swatchFunc(); picker.Footer.CancelButton:Click()
+    same(addon:GetProcRegionColor(entry), { r = 0.6, g = 0.2, b = 0.8 }, "Cancel preserves original persisted RGB")
+    same(addon.previewFrames[entry.id].text.textColor, { 0.6, 0.2, 0.8, 1 }, "Cancel restores original Preview RGB")
+    addon:OpenProcColorPicker(entry); picker.rgb = { 0, 1, 0 }; picker.swatchFunc(); picker:Hide()
+    same(addon:GetProcRegionColor(entry), { r = 0.6, g = 0.2, b = 0.8 }, "Escape or unaccepted Hide never commits")
+    same(addon.previewFrames[entry.id].text.textColor, { 0.6, 0.2, 0.8, 1 }, "Escape clears temporary draft")
+end)
+
+test("picker sessions pin region and spec and cannot write after selection context or Options closes", function()
+    local env, addon, state = auraFixture(62)
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("proc")
+    local left, right = regionEntry(addon, "mage_arcane_clearcasting_left"), regionEntry(addon, "mage_arcane_clearcasting_right")
+    addon:OpenProcColorPicker(left)
+    local stale = env.ColorPickerFrame.swatchFunc
+    state:pickerChange(1, 0, 0)
+    choose(controls.procEntry, right.id)
+    addon:OpenProcColorPicker(right)
+    stale()
+    equal(addon:GetProcRegionColor(left), nil, "replaced session cannot commit old region")
+    equal(addon:GetProcRegionColor(right), nil, "old callback cannot write new region")
+    state:pickerChange(0, 0, 1); env.ColorPickerFrame.Footer.OkayButton:Click()
+    same(addon:GetProcRegionColor(right), { r = 0, g = 0, b = 1 }, "current pinned session saves correct region")
+    choose(controls.procEntry, left.id)
+    addon:OpenProcColorPicker(left); state:pickerChange(1, 1, 0)
+    stale = env.ColorPickerFrame.swatchFunc
+    state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    stale()
+    equal(regionRGB(addon, "mage_fire_hot_streak_left"), nil, "old Arcane callback cannot touch new Fire scope")
+    truthy(not env.ColorPickerFrame:IsShown(), "spec switch ends this addon's picker session")
+    local fire = regionEntry(addon, "mage_fire_hot_streak_left")
+    addon:OpenProcColorPicker(fire); state:pickerChange(0, 1, 1); stale = env.ColorPickerFrame.swatchFunc
+    panel:Hide(); stale()
+    equal(addon:GetProcRegionColor(fire), nil, "closing Options cancels pending draft")
+    truthy(not env.ColorPickerFrame:IsShown(), "closing Options ends owned picker")
+    state.specID = 62; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(regionRGB(addon, left.id), nil, "unconfirmed old Arcane draft was never persisted")
+    same(regionRGB(addon, right.id), { r = 0, g = 0, b = 1 }, "confirmed independent region persists through context changes")
+end)
+
+test("another addon's native picker ownership supersedes only our draft without callback or UI interference", function()
+    local env, addon, state = auraFixture(63)
+    local panel = options(addon); addon:SelectOptionsCategory("proc")
+    local entry = regionEntry(addon, "mage_fire_hot_streak_left")
+    addon:OpenProcColorPicker(entry); state:pickerChange(1, 0, 0)
+    local picker, calls = env.ColorPickerFrame, 0
+    local previous = picker.swatchFunc
+    local external = { token = "other addon" }
+    local externalSwatch = function() calls = calls + 1 end
+    local externalCancel = function() calls = calls + 10 end
+    picker:SetupColorPickerAndShow({ r = 0.7, g = 0.8, b = 0.9, hasOpacity = true,
+        opacity = 0.4, extraInfo = external, swatchFunc = externalSwatch, cancelFunc = externalCancel })
+    previous(); addon:CancelProcColorPicker(); panel:Hide()
+    equal(picker.extraInfo, external, "later addon keeps native session token")
+    equal(picker.swatchFunc, externalSwatch, "later addon keeps swatch callback")
+    equal(picker.cancelFunc, externalCancel, "later addon keeps cancellation callback")
+    truthy(picker:IsShown(), "our context cleanup cannot hide another addon's picker")
+    equal(picker.hasOpacity, true, "our cleanup does not change another addon's options")
+    equal(addon:GetProcRegionColor(entry), nil, "replaced session never writes user configuration")
+    same(procFrame(addon, entry.id).text.textColor, { 0.25, 0.78, 0.92, 1 }, "replaced session clears only our temporary draft")
+    picker.Footer.OkayButton:Click()
+    equal(calls, 1, "other addon's native Okay callback still runs once")
+    equal(addon:GetProcRegionColor(entry), nil, "global Okay hook cannot commit a foreign session")
+end)
+
+test("Proc color controls name exact regions reset only that region and unchanged Okay never saves class defaults", function()
+    local env, addon, state = auraFixture(62)
+    local panel, controls = options(addon); addon:SelectOptionsCategory("proc")
+    local left = regionEntry(addon, "mage_arcane_clearcasting_left")
+    local right = regionEntry(addon, "mage_arcane_clearcasting_right")
+    equal(panel.procColorSelection:GetText(), left.label, "color row names current ability and region")
+    controls.procColor:Click()
+    truthy(env.ColorPickerFrame:IsShown(), "existing page swatch opens native picker")
+    env.ColorPickerFrame.Footer.OkayButton:Click()
+    equal(addon:GetProcRegionColor(left), nil, "accepting unchanged default does not persist current character class RGB")
+    addon:SetProcRegionColor(left, { r = 1, g = 0, b = 0 })
+    addon:SetProcRegionColor(right, { r = 0, g = 0, b = 1 })
+    addon:UpdateSettings({ reminders = { [left.id] = { position = { x = 81, y = -23 } } } })
+    local style = copy(addon:GetProcConfig().style)
+    controls.procColorReset:Click()
+    equal(addon:GetProcRegionColor(left), nil, "Use class color removes selected optional RGB")
+    same(addon:GetProcRegionColor(right), { r = 0, g = 0, b = 1 }, "reset never clears another region")
+    equal(addon:GetReminderPosition(left).x, 81, "reset leaves saved coordinates")
+    same(addon:GetProcConfig().style, style, "reset leaves shared font configuration")
+    choose(controls.procEntry, right.id)
+    equal(panel.procColorSelection:GetText(), right.label, "switching dropdown shows exact next region name")
+    same(controls.procColor.swatch.color, { 0, 0, 1, 1 }, "next region swatch restores its saved color")
+    local hooks = addon.procColorPickerHooked
+    local frames, fonts, bindings = #state.frames, #state.auraFonts, #state.bindings
+    for index = 1, 25 do
+        controls.procColor:Click(); state:pickerChange(index / 25, 0.5, 0.2)
+        env.ColorPickerFrame.Footer.CancelButton:Click()
+    end
+    equal(addon.procColorPickerHooked, hooks, "native picker hooks remain installed once")
+    equal(#state.frames, frames, "repeated edits create no persistent per-session frames")
+    equal(#state.auraFonts, fonts, "repeated edits reuse owned region fonts")
+    equal(#state.bindings, bindings, "repeated edits create no duration bindings")
+end)
+
+test("reentrant foreign cancellation keeps its newer native picker and unavailable picker never changes settings", function()
+    local env, addon = auraFixture(63)
+    options(addon); addon:SelectOptionsCategory("proc")
+    local entry = regionEntry(addon, "mage_fire_hot_streak_left")
+    local picker, newer, cancelled = env.ColorPickerFrame, {}, 0
+    local newSwatch = function() end
+    local newCancel = function() end
+    picker:SetupColorPickerAndShow({ r = 0.1, g = 0.2, b = 0.3, extraInfo = {}, swatchFunc = function() end,
+        cancelFunc = function()
+            cancelled = cancelled + 1
+            picker:SetupColorPickerAndShow({ r = 0.9, g = 0.8, b = 0.7, extraInfo = newer,
+                swatchFunc = newSwatch, cancelFunc = newCancel })
+        end })
+    equal(addon:OpenProcColorPicker(entry), false, "cancel-triggered newer edit is not silently replaced")
+    equal(cancelled, 1, "old foreign edit is cancelled once")
+    equal(picker.extraInfo, newer, "newer owner retains native session token")
+    equal(picker.swatchFunc, newSwatch, "newer owner retains callbacks")
+    truthy(picker:IsShown(), "newer edit remains visible")
+    equal(addon.procColorPickerSession, nil, "our attempted edit allocates no orphan session")
+    local _, unavailable = login(nil, false, { specID = 63, proc = {}, pickerUnavailable = true })
+    local _, controls = options(unavailable); unavailable:SelectOptionsCategory("proc")
+    truthy(not controls.procColor:IsEnabled(), "missing native picker disables only the swatch operation")
+    local saved = copy(unavailable.db)
+    equal(unavailable:OpenProcColorPicker(regionEntry(unavailable, entry.id)), false, "unsupported native picker is reported")
+    same(unavailable.db, saved, "missing native picker never modifies user settings")
+    truthy(unavailable.procTracking, "native picker absence does not stop real Proc monitoring")
+end)
+
+test("Clearcasting diagnostics retain bounded public graph evidence build mapping gates and no secret payloads", function()
+    local env, addon, state = auraFixture(62)
+    local slots, bindings = #state.auraSlots, #state.bindings
+    local callbacks = addon:GetEventDiagnostics().callbacks
+    for index = 1, 42 do
+        showProc(env, state, 1277420, 1027131, "LeftRight", 1)
+        state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 1277420)
+    end
+    state:fire("SPELL_ACTIVATION_OVERLAY_SHOW", secret(1277420), secret(1027131), secret(1), secret(1))
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", secret(1277421))
+    equal(#addon.procEventTrace, 16, "diagnostic graphic-event retention stays bounded")
+    local diagnostics = addon:GetProcDiagnostics()
+    for _, expected in ipairs({ "build=99999", "timer aura=263725", "1277420", "1277421", "1277422",
+        "mage_arcane_clearcasting_left", "mage_arcane_clearcasting_right", "restricted", "no aura payloads" }) do
+        truthy(diagnostics:find(expected, 1, true), "targeted diagnostic records public evidence: " .. expected)
+    end
+    equal(#state.auraSlots, slots, "repeated graphic events do not allocate native slots")
+    equal(#state.bindings, bindings, "repeated graphic events do not allocate bindings")
+    equal(addon:GetEventDiagnostics().callbacks, callbacks, "diagnostic capture adds no listeners")
+    equal(state.realReads, 0, "diagnostic never queries auras")
+    equal(#state.errors, 0, "restricted event payloads are rejected before formatting")
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

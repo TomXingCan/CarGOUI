@@ -56,4 +56,26 @@ absent(mapping, [r"CreateFrame", r"CreateFont", r"C_UnitAuras", r"RegisterEvent"
 assert "function adapter:GetProcDefinitions(specID)" in mapping
 assert "auraID = auraID, overlayID = overlayID" in mapping
 print("PASS Proc mappings distinguish aura ID, native overlay ID and per-region saved-position keys")
+picker = code((root / "UI/ProcColorPicker.lua").read_text(encoding="utf-8"))
+style = code((root / "UI/ReminderStyle.lua").read_text(encoding="utf-8"))
+assert "UI/ProcColorPicker.lua" in declared, "Shared native picker implementation must ship"
+absent(picker + style, [r"OnUpdate", r"NewTicker", r"C_Timer", r"C_UnitAuras", r"C_Spell",
+                       r"SetAlpha\s*\(", r"GetAlpha\s*\(", r"SetDuration\s*\(",
+                       r"GetAuraSlotFrame", r"GetFormattedText", r"RAID_CLASS_COLORS", r"CUSTOM_CLASS_COLORS"],
+       "RGB editing uses configuration and owned Fonts without queries, binding changes, alpha ownership or global color edits")
+assert 'first.kind == "proc"' in picker and 'second.kind == "proc"' in picker
+assert "first.class == second.class" in picker and "first.specID == second.specID" in picker
+assert "first.id == second.id" in picker
+assert "picker.extraInfo == session" in picker and "picker.swatchFunc == session.swatchFunc" in picker
+assert "picker.cancelFunc == session.cancelFunc" in picker
+assert "hasOpacity = false" in picker and 'HookScript("PreClick"' in picker
+assert 'hooksecurefunc(picker, "SetupColorPickerAndShow"' in picker
+assert "SetProcRegionColorPreview" in picker and "SetProcRegionColor(session.entry, session.draft)" in picker
+assert "local frame = pool[entry.id]" in style and "SameRegion(frame.reminderEntry, entry)" in style
+print("PASS Native picker pins class/spec/stable region, separates draft/Okay, and guards foreign picker ownership")
+database = code((root / "Core/Database.lua").read_text(encoding="utf-8"))
+assert "schema.proc.regions[entry.id]" in database and "color = RegionColorSetting" in database
+assert "ColorCopy(region.color)" in database and "config.regions[id].color = ColorCopy(record.color)" in database
+assert "changedColors" in database and "RefreshProcRegionColor(entry)" in database
+print("PASS RGB schema is optional per stable Proc region and color-only writes use targeted styling")
 print("Proc static checks passed; native security, actual matching and combat visuals require Retail acceptance.")

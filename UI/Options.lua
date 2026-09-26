@@ -504,6 +504,7 @@ function addon:RefreshOptions()
     end
     controls.procEntry:FilterChoices(procAllowed)
     controls.procEntry:SelectValue(panel.selectedProcEntry)
+    self:RefreshProcColorControls()
     controls.procAppearance:SetEnabled(panel.selectedProcEntry ~= nil)
     controls.procPreview:SetEnabled(panel.selectedProcEntry ~= nil and not InCombatLockdown())
     controls.procStop:SetEnabled(self.previewState.mode ~= "off")
@@ -563,6 +564,7 @@ end
 function addon:SelectOptionsCategory(key)
     local panel = self.optionsFrame
     if not panel or not panel.pages[key] then return end
+    self:CancelProcColorPicker()
     CloseMenus(panel)
     if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
     ClearEdits(panel)
@@ -585,6 +587,7 @@ end
 local function OnOptionsSpecializationChanged(self, _, unit)
     if issecretvalue and issecretvalue(unit) then return end
     if unit and unit ~= "player" then return end
+    self:CancelProcColorPicker()
     CloseMenus(self.optionsFrame)
     ClearEdits(self.optionsFrame)
     self:RefreshOptions()
@@ -823,28 +826,46 @@ function addon:CreateOptions()
         if entry.kind == "proc" then procChoices[#procChoices + 1] = { value = entry.id, label = entry.label } end
     end
     panel.controls.procEntry = Dropdown(panel, proc, "Proc region", 0, -110, procChoices, nil, function(key)
+        addon:CancelProcColorPicker()
         ClearEdits(panel)
         panel.selectedProcEntry = key
         addon:RefreshOptions()
     end)
     panel.controls.procEntry:SetWidth(474)
-    panel.controls.procAppearance = Button(proc, "Appearance", 0, -194, 226, function()
+    panel.procColorSelection = Label(proc, "", 0, -174, 474, 20, "GameFontHighlight")
+    Label(proc, "Timer color:", 0, -202, 90, 20, "GameFontNormal")
+    panel.controls.procColor = Button(proc, "", 94, -196, 38, function()
+        local ok, message = addon:OpenProcColorPicker(addon:GetSelectedProcColorEntry())
+        if not ok then Feedback(panel, message, true) end
+    end)
+    local swatch = panel.controls.procColor:CreateTexture(nil, "OVERLAY")
+    swatch:SetPoint("TOPLEFT", panel.controls.procColor, "TOPLEFT", 5, -5)
+    swatch:SetPoint("BOTTOMRIGHT", panel.controls.procColor, "BOTTOMRIGHT", -5, 5)
+    panel.controls.procColor.swatch = swatch
+    panel.procColorMode = Label(proc, "", 142, -202, 102, 20)
+    panel.controls.procColorReset = Button(proc, "Use class color", 248, -196, 226, function()
+        addon:CancelProcColorPicker()
+        local entry = addon:GetSelectedProcColorEntry()
+        if entry and addon:SetProcRegionColor(entry, nil) then Feedback(panel, L.saved) end
+        addon:RefreshProcColorControls()
+    end)
+    panel.controls.procAppearance = Button(proc, "Appearance", 0, -242, 226, function()
         addon:OpenAppearance("proc", panel.selectedProcEntry)
     end)
-    panel.controls.procPreview = Button(proc, "Preview this region", 248, -194, 226, function()
+    panel.controls.procPreview = Button(proc, "Preview this region", 248, -242, 226, function()
         local ok, message = addon:SetPreview("single", panel.selectedProcEntry)
         addon:RefreshOptions()
         if not ok then Feedback(panel, message, true) end
     end)
-    panel.controls.procStop = Button(proc, L.previewStop, 0, -238, 226, function()
+    panel.controls.procStop = Button(proc, L.previewStop, 0, -282, 226, function()
         addon:StopPreview()
         addon:RefreshOptions()
     end)
-    Button(proc, "Region position / Test Mode", 248, -238, 226, function()
+    Button(proc, "Region position / Test Mode", 248, -282, 226, function()
         panel.selectedPreviewEntry = panel.selectedProcEntry
         addon:SelectOptionsCategory("preview")
     end)
-    Label(proc, "All Proc regions in this specialization share font, size, outline, shadow and scale. Each region retains its own position; Mobility uses a separate class style.", 0, -298, 470, 60)
+    Label(proc, "Proc font, size, outline, shadow and scale are shared within this specialization. Each region has its own position and optional timer color.", 0, -326, 470, 44)
 
     local themes = panel.pages.themes
     Label(themes, "Automatic faction Header and class / specialization Body. No manual selection or custom colors.", 0, -36, 470, 42)
@@ -909,6 +930,7 @@ function addon:CreateOptions()
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
     panel:HookScript("OnHide", function()
+        addon:CancelProcColorPicker()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
         addon:UnregisterEvent("PLAYER_REGEN_ENABLED", OnOptionsCombatChanged)

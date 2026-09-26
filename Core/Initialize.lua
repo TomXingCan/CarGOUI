@@ -49,6 +49,7 @@ addon:RegisterEvent("ADDON_LOADED", OnAddonLoaded)
 
 function addon:OnClassModuleAvailable()
     if not self.initialized then return end
+    if self.CancelProcColorPicker then self:CancelProcColorPicker() end
     self:StopPreview(true)
     if self.StopProc then self:StopProc() end
     if self.StopFreeMove then self:StopFreeMove() end
@@ -69,6 +70,7 @@ local function OnConfigurationContextChanged(self, event, unit)
     end
     local class, spec = self:GetPlayerContext()
     if class == self.configurationClass and spec == self.configurationSpec then return end
+    if self.CancelProcColorPicker then self:CancelProcColorPicker() end
     -- Tear down temporary state before switching catalogs. The saved class
     -- Mobility record survives all spec changes; cached frames remain reusable.
     self:StopPreview(true)

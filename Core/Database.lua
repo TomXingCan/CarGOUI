@@ -4,6 +4,31 @@ local function BooleanSetting(value)
     return type(value) == "boolean", "Use a checkbox value (true or false)."
 end
 
+-- A region color is optional. Omission means dynamic class color; no default
+-- RGB is written to SavedVariables. This validator also rejects alpha/extra keys.
+function addon:IsValidProcRegionColor(value)
+    if issecretvalue and issecretvalue(value) then return false end
+    if type(value) ~= "table" then return false end
+    for _, key in ipairs({ "r", "g", "b" }) do
+        local component = value[key]
+        if issecretvalue and issecretvalue(component) then return false end
+        if type(component) ~= "number" or component ~= component or component < 0 or component > 1 then return false end
+    end
+    for key in pairs(value) do
+        if key ~= "r" and key ~= "g" and key ~= "b" then return false end
+    end
+    return true
+end
+
+local function ColorCopy(value)
+    if addon:IsValidProcRegionColor(value) then return { r = value.r, g = value.g, b = value.b } end
+end
+
+local function RegionColorSetting(value)
+    if issecretvalue and issecretvalue(value) then return false, "Color must be a public RGB value." end
+    return value == false or addon:IsValidProcRegionColor(value), "Choose finite RGB values from 0 to 1; opacity is not configurable."
+end
+
 local function NumberSetting(range, message)
     return function(value) return addon:IsNumberInRange(value, range), message end
 end
@@ -280,6 +305,15 @@ function addon:GetProcConfig(specID)
     config.style = Style(config.style)
     if type(config.enabled) ~= "boolean" then config.enabled = true end
     config.regions = type(config.regions) == "table" and config.regions or {}
+    -- Normalize only the requested current specialization. Detach each region
+    -- and color separately, even if an older external edit aliased the tables.
+    for id, region in pairs(config.regions) do
+        if type(region) == "table" then
+            region = ShallowCopy(region)
+            region.color = ColorCopy(region.color)
+            config.regions[id] = region
+        end
+    end
     classConfig.proc[specID] = config
     self.procConfigurationCache = self.procConfigurationCache or {}
     self.procConfigurationCache[specID] = config
@@ -350,6 +384,32 @@ function addon:GetReminderEnabled(entry)
     return proc and proc.enabled == true or false
 end
 
+-- Use the current definition catalog, not aura presence or a list index. This
+-- works for future class adapters without a class-specific color UI/database.
+function addon:GetCurrentProcRegion(entry)
+    if type(entry) ~= "table" or entry.kind ~= "proc" or type(entry.id) ~= "string"
+        or not self:GetReminderStyleKey(entry) then return end
+    local class, spec = self:GetPlayerContext()
+    if entry.class ~= class or entry.specID ~= spec then return end
+    for _, candidate in ipairs(self:GetDefinedPreviewEntries() or {}) do
+        if candidate.kind == "proc" and candidate.id == entry.id
+            and candidate.class == class and candidate.specID == spec then return candidate end
+    end
+end
+
+function addon:GetProcRegionColor(entry)
+    if not self:GetCurrentProcRegion(entry) then return end
+    local config = self:GetProcConfig()
+    local region = config and config.regions[entry.id]
+    return type(region) == "table" and ColorCopy(region.color) or nil
+end
+
+function addon:SetProcRegionColor(entry, color)
+    if not self:GetCurrentProcRegion(entry) then return false, "Choose a defined Proc region for your current specialization." end
+    if color ~= nil and not self:IsValidProcRegionColor(color) then return false, "Choose finite RGB values from 0 to 1." end
+    return self:UpdateSettings({ proc = { regions = { [entry.id] = { color = color or false } } } })
+end
+
 function addon:UpdateReminderStyle(key, patch)
     if not self:GetReminderStyleKey(key) then return false, "Edit the current class / specialization Appearance." end
     return self:UpdateSettings({ styles = { [key] = patch } })
@@ -370,7 +430,7 @@ function addon:UpdateSettings(patch)
     for _, entry in ipairs(self:GetPreviewEntries()) do
         entries[entry.id] = entry
         schema.reminders[entry.id] = { position = positionSchema }
-        if entry.kind == "proc" then schema.proc.regions[entry.id] = { position = positionSchema } end
+        if entry.kind == "proc" then schema.proc.regions[entry.id] = { position = positionSchema, color = RegionColorSetting } end
     end
     for _, kind in ipairs({ "mobility", "proc" }) do
         local context = self:GetAppearanceContext(kind)
@@ -386,7 +446,7 @@ function addon:UpdateSettings(patch)
     if writesProc and (not procContext or not self:GetProcConfig()) then
         return false, "Proc settings are unavailable until the current specialization module is ready."
     end
-    local changedStyles, stylesOnly = {}, true
+    local changedStyles, changedColors, stylesOnly = {}, {}, true
     local function RecordStyle(kind)
         local context = self:GetAppearanceContext(kind)
         if context then changedStyles[context.key] = true end
@@ -400,8 +460,20 @@ function addon:UpdateSettings(patch)
         if patch.mobility.style then RecordStyle("mobility") end
     end
     if patch.proc then
-        MergePatch(self:GetProcConfig(), patch.proc)
-        for key in pairs(patch.proc) do if key ~= "style" then stylesOnly = false end end
+        local config = self:GetProcConfig()
+        MergePatch(config, patch.proc)
+        for key in pairs(patch.proc) do if key ~= "style" and key ~= "regions" then stylesOnly = false end end
+        for id, record in pairs(patch.proc.regions or {}) do
+            if record.position then stylesOnly = false end
+            if record.color ~= nil then
+                config.regions[id].color = ColorCopy(record.color)
+                changedColors[id] = entries[id]
+                local draft = self.procRegionColorPreview
+                if draft and draft.id == id and draft.class == class and draft.specID == entries[id].specID then
+                    self.procRegionColorPreview = nil
+                end
+            end
+        end
         if patch.proc.style then RecordStyle("proc") end
     end
     if patch.reminders then
@@ -418,12 +490,16 @@ function addon:UpdateSettings(patch)
     end
     if stylesOnly then
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
+        if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end
     else self:ApplySettings() end
-    if self.RefreshOptions then self:RefreshOptions() end
+    if stylesOnly and next(changedColors) and not next(changedStyles) then
+        if self.RefreshProcColorControls then self:RefreshProcColorControls() end
+    elseif self.RefreshOptions then self:RefreshOptions() end
     return true
 end
 
 function addon:ResetDatabase()
+    if self.CancelProcColorPicker then self:CancelProcColorPicker() end
     local class = self:GetPlayerContext()
     if class then self.db.classes[class] = nil end
     if class == "MAGE" then self.db.migrations.scope5.procReset = true end

@@ -55,7 +55,7 @@ end
 -- textOnly is nil for a numeric timer, or a static public string ("Free move").
 -- Update handle.font with the existing reminder style function. The Font object
 -- is ours; the access-restricted native button/FontString are never touched again.
-function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly)
+function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly, entry)
     local supported, reason = self:CanUseNativeAuraSlots()
     if not supported then return nil, reason end
     self.nativeAuraSlots = self.nativeAuraSlots or {}
@@ -74,7 +74,7 @@ function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly)
     self.nativeAuraFontCount = (self.nativeAuraFontCount or 0) + 1
     local font = CreateFont("CarGOUINativeAuraFont" .. self.nativeAuraFontCount)
     font:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
-    self:ApplyReminderColor(font)
+    self:ApplyReminderColor(font, entry)
 
     local container = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
     container:SetAllPoints(parent)

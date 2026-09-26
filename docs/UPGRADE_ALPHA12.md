@@ -1,5 +1,7 @@
 # alpha.12 安装、范围与游戏内验收
 
+历史版本记录：Clearcasting 映射和 Proc 颜色要求已由 [alpha.13](UPGRADE_ALPHA13.md) 修订，请按新说明安装验收。
+
 目标：Retail 12.1.0 build 69933，Interface 120100。此包基于 alpha.11，只新增法师原生 Proc 数字和用户确认的 Time Spiral Free move。已有普通 Mobility 与全职业 Body 主题保留。此文不是实机通过记录。
 
 ## 安装和存档

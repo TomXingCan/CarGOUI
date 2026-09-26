@@ -2,7 +2,7 @@
 ## Title: CarGOUI - Data (internal)
 ## Notes: Automatically loaded class adapter definitions. Only the current class is activated.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.12
+## Version: 0.1.0-alpha.13
 ## Dependencies: CarGOUI
 ## LoadOnDemand: 1
 

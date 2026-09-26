@@ -6,7 +6,7 @@ function addon:CreateDisplay()
     self.reminderFrames = self.reminderFrames or {}
 end
 
-function addon:ApplyFontSettings(text, style)
+function addon:ApplyFontSettings(text, style, entry)
     if not text:SetFont(style.font.face, style.font.size, style.font.outline) then
         -- Localized clients may need their standard font as a fallback.
         text:SetFont(STANDARD_TEXT_FONT or self.factoryReminderStyle.font.face,
@@ -19,7 +19,7 @@ function addon:ApplyFontSettings(text, style)
         text:SetShadowColor(0, 0, 0, 0)
         text:SetShadowOffset(0, 0)
     end
-    self:ApplyReminderColor(text)
+    self:ApplyReminderColor(text, entry)
 end
 
 function addon:AcquireReminderFrame(entry, channel)
@@ -41,7 +41,7 @@ function addon:AcquireReminderFrame(entry, channel)
     frame.text = frame:CreateFontString(nil, "OVERLAY")
     frame.text:SetPoint("CENTER", frame, "CENTER", 0, 0)
     frame.text:SetJustifyH("CENTER")
-    self:ApplyReminderColor(frame.text)
+    self:ApplyReminderColor(frame.text, entry)
     pool[entry.id] = frame
     return frame
 end
@@ -62,7 +62,7 @@ function addon:LayoutReminder(frame, entry)
     if entry.kind == "proc" and self.AnchorProcReminder then
         self:AnchorProcReminder(frame, entry, style)
     end
-    self:ApplyFontSettings(frame.text, style)
+    self:ApplyFontSettings(frame.text, style, entry)
 end
 
 function addon:RenderReminder(frame, entry, content, testMode)

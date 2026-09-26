@@ -1,8 +1,8 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.12**，目标 WoW Retail 12.1.0（Interface 120100），数据/API 核查固定 build 69933。在 alpha.11 上新增法师三系的原生 Proc 数字计时，以及已由用户确认的 **Time Spiral → Free move**。保留现有普通 Mobility、主题、Options 与全部配置，不扩展其他特殊返回、传送门或免费重施机制。
+当前版本 **0.1.0-alpha.13**，在 alpha.12 提交 `74d4525` 上修正 Clearcasting 图形/计时映射，并新增当前法师三系 Proc 的逐区域 RGB。目标 WoW Retail 12.1.0（Interface 120100），数据/API 核查固定 build 69933。Mobility、Free move、Options 格局、主题、字体范围及用户坐标保留；不扩展其他职业真实 Proc 或已排除的特殊 Mobility。
 
-法师 Proc 已接入真实原生 Aura 槽位，不是 Test Mode 样例。**源码及离线测试完成不代表真实客户端战斗验收完成。** Clearcasting 图形所属 Aura 276743、冰指右侧隐藏 Aura 126084 的实际匹配/持续时间需要目标客户端确认；缺失时保持无数字，不猜测替代 Aura 或层数。详见 [法师 Proc 覆盖表](docs/MAGE_PROC_COVERAGE.md)、[API 核查](docs/PROC_API_AUDIT.md) 和 [本轮安装/验收](docs/UPGRADE_ALPHA12.md)。
+用户已反馈 **Arcane Soul、Overpowered Missiles 在其 alpha.12 使用场景中正常**，Clearcasting 无数字。本包将 Clearcasting 的计时 Aura **263725** 与三个新图形 owner **1277420/1277421/1277422** 分开；只过滤一个计时 Aura，图形换层不重建计时。**源码和离线验证不等于实际修复已通过客户端验收。** 映射为多个目标数据/官方说明支持的关联，用户实际 build、事件及 native Aura 匹配仍需复测。见 [根因与证据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md)、[升级验收](docs/UPGRADE_ALPHA13.md)。
 
 ## 安装与升级
 
@@ -19,18 +19,20 @@
 | --- | --- |
 | Mobility 开关、字体、字号、描边、阴影、缩放、锚点、XY、偏好 | 当前 classToken，共用一套；Mage 三系及 Blink/Shimmer 共用 |
 | Proc 字体、字号、描边、阴影、文字缩放 | 当前 classToken + specID，同专精所有区域共用 |
-| Proc 区域锚点及 XY | 对应职业/专精下各区域分别保存 |
+| Proc 区域锚点、XY、可选 RGB | 对应职业/专精下稳定区域 ID 分别保存；无自定义 RGB 时动态使用职业色 |
 | Options 窗口位置、品牌动画开关 | 插件外壳独立保存 |
 
-没有职业、专精、Profile 或手动 Theme 选择器。Appearance 的原选择字段现在只读显示自动配置上下文。Proc 区域菜单只选择预览/位置对象，不创建区域独立字体。
+没有职业、专精、Profile 或手动 Theme 选择器。Appearance 的原选择字段现在只读显示自动配置上下文。Proc 区域菜单选择位置、预览和颜色对象，不创建区域独立字体。
 
-所有提醒名字和数字固定使用玩家的暴雪职业色，没有颜色编辑。Options 的阵营/专精主题与提醒颜色、字体、计时无关。
+Mobility 和 Free move 固定使用玩家的暴雪职业色。Proc 数字默认使用职业色，允许各稳定区域分别设置 RGB，没有透明度设置。Options 的阵营/专精主题与提醒颜色、字体、计时无关。
 
 ## 操作
 
 Options 仍是左分类、右选项。Header、Body 背景、侧栏空白、边框与静态说明区域均可左键拖动整个窗口。按钮、滑块、输入框、下拉菜单及滚动条保留正常操作，不要求修饰键。松开、关闭或 Esc 结束拖动，位置保存与屏幕约束保留。General 与 Mobility 的开关/XY 都编辑当前职业的同一份 Mobility 配置。关闭 Mobility 也停止 Free move 并隐藏 Mobility 样例，不影响真实 Proc；Proc 页面可独立启停本专精的数字。
 
 Mobility / Proc → Appearance 提供 Font、Font Size、Outline、Shadow、Scale。菜单、勾选框和滑块立即生效；输入数字后按 Enter，没有 Apply。切换上下文、分类或关闭窗口会丢弃未提交输入。`Reset this context's style` 仅重置当前样式，不改坐标或其他范围。
+
+Proc 页面在所选条目旁显示明确的技能/位置名称与 **Timer color** 色块。点击打开原生拾色器，调色实时预览，Okay 才保存；Cancel、关闭、切区域或专精会取消未确认颜色。**Use class color** 只移除当前区域 RGB。字体仍按专精共用；颜色只更新该区域已有 live / Preview 字体对象，不查询 Buff、不重建计时或改动门控透明度。[颜色说明](docs/PROC_COLORS.md)。
 
 `Reset Mobility offsets` 仅重置当前职业位移坐标；`Reset region offsets` 重置当前区域。`Reset class + Options` 需再次确认，只重置当前职业和外壳，保留其他职业和迁移备份。快捷 `reset` 命令仍会立即执行这个同样的范围。
 
@@ -48,7 +50,7 @@ Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标
 
 未选专精使用本职业基础主题，身份暂不可用使用中性回退并在信息恢复事件后更新。打开窗口始终重新解析；隐藏时停止主题监听。关闭 Mobility、尚未学会位移、未加载业务适配器或关闭 Preview 均不影响主题。所有主题定义属于核心轻量 UI 数据，不为显示主题加载全职业业务或创建提醒框体。
 
-图案位于 Body 右下内容背景，使用原创静态几何与原生 Line 的纯色线段绘制；不加载宣传图、不新增图片、粒子或旋转动画。共用线段池只绘制当前图案，身份变化或打开时更新；不承诺游戏纹理缓存立即卸载。Header 与 Body 配色映射独立，提醒职业色、字体、坐标、DurationTextBinding 和显隐不受影响。[分层主题与素材/API 来源](docs/THEMES.md)。
+图案位于 Body 右下内容背景，使用原创静态几何与原生 Line 的纯色线段绘制；不加载宣传图、不新增图片、粒子或旋转动画。共用线段池只绘制当前图案，身份变化或打开时更新；不承诺游戏纹理缓存立即卸载。Header 与 Body 配色映射独立，提醒颜色、字体、坐标、DurationTextBinding 和显隐不受影响。[分层主题与素材/API 来源](docs/THEMES.md)。
 
 ## 真实 Mobility
 
@@ -64,11 +66,11 @@ Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标
 
 ## 真实法师 Proc 与 Free move
 
-Proc 正式显示仅包含职业色数字，放在对应暴雪图形区域的视觉中点。以原生图形根框体的实际缩放/布局、核验的区域几何和 SHOW 事件缩放定位，叠加原有区域 XY；不读取图形子框体的显隐、Buff 或数字，不修改暴雪图形。旧存档的偏移不清空；默认中点由真实原生布局决定，不再以旧样例绝对坐标代替。
+Proc 正式显示仅包含数字，使用该区域自定义 RGB 或默认职业色，放在对应暴雪图形区域的视觉中点。以原生图形根框体的实际缩放/布局、核验的区域几何和 SHOW 事件缩放定位，叠加原有区域 XY；不读取图形子框体的显隐、Buff 或数字，不修改暴雪图形。旧存档的偏移不清空；默认中点由真实原生布局决定，不再以旧样例绝对坐标代替。
 
 奥法覆盖 Clearcasting、Arcane Soul、Overpowered Missiles；火法覆盖 Hot Streak、Heating Up、**Pyroclasm（需读条的炎爆/烈焰风暴增益）**、Hyperthermia；冰法覆盖 Fingers of Frost 左右和 Brain Freeze。保留的 Fury of the Sun King 图形行仅在实际原生 SHOW 事件后接入，不作为当前可用天赋展示样例。图形 ID、Buff ID、纹理、大小和区域分别记录，详见覆盖表。
 
-客户端原生 `CustomAuraContainerTemplate` 以 `HELPFUL + includeSpellIDs` 筛选自身 Aura，在原生侧管理触发、消耗、刷新和到期。数字使用原生复制的 DurationTextBinding；Lua 不查询/比较秘密 Buff、剩余时间或层数。正式显示没有技能名、图标和背景。没有原生 Aura 或原生接口缺失时不制造替代时间。原生图形缺乏通用历史重放接口，重载时使用已核查图形所属 Aura 的原生匹配启动；相关图形实际出现条件仍列入实机验收。
+客户端原生 `CustomAuraContainerTemplate` 以 `HELPFUL + includeSpellIDs` 筛选自身 Aura，在原生侧管理触发、消耗、刷新和到期。数字使用原生复制的 DurationTextBinding；Lua 不查询/比较秘密 Buff、剩余时间或层数。正式显示没有技能名、图标和背景。没有原生 Aura 或原生接口缺失时不制造替代时间。原生图形缺乏通用历史重放接口，重载时使用明确映射的计时 Aura 原生匹配启动（它不一定与图形 owner 同 ID）；相关图形实际出现条件仍列入实机验收。
 
 Free move 的含义已确认是 Time Spiral 374968 赋予的职业接收增益，而非 Hover 的移动施法。原生槽位只匹配当前职业的接收 Aura，真实存在时显示 `Free move`，消耗或到期时消失；不加倒计时，不计施法次数。使用本职业 Mobility 字体和坐标组，固定预设在第一条普通 Mobility 上方 84 UI 单位，不清除其他技能提醒。
 
@@ -89,7 +91,7 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 离线测试保留战斗秘密值与战斗标志分别模拟的回归，并验证范围隔离、延迟初始化、加载/订阅/绑定有界、主题和草稿行为。交付报告记录**最终 ZIP 解包后的测试**及 SHA256。
 
-**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及法师 Header/Body 正常；新增 Proc/Free move、alpha.11 非 Mage 技能路径、alpha.10 新主题视觉、本包战斗回归及 CPU/内存仍待客户端验收。离线测试只能验证提供的 API 响应下的行为，不能证明客户端所有天赋/热修/秘密值语义。Body 主题覆盖与真实 Mobility 覆盖始终分别记录。
+**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及法师 Header/Body 正常；Arcane Soul 和 Overpowered Missiles 也已有用户对应场景正常的反馈。Clearcasting 本轮修复、颜色交互、其他未反馈 Proc/Free move 场景、alpha.11 非 Mage 技能路径、alpha.10 新主题视觉、本包战斗回归及 CPU/内存仍待客户端验收。离线测试只能验证提供的 API 响应下的行为，不能证明客户端所有天赋/热修/秘密值语义。Body 主题覆盖与真实 Mobility 覆盖始终分别记录。
 
 ## 源码结构
 
@@ -97,4 +99,4 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`、`python tests/check_proc_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
 
-本轮安装与验收见 [UPGRADE_ALPHA12.md](docs/UPGRADE_ALPHA12.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables，本轮无新增配置迁移。
+本轮安装与验收见 [UPGRADE_ALPHA13.md](docs/UPGRADE_ALPHA13.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，只在当前区域保存可选 color，不写入职业色默认值或重置现有样式/坐标。
