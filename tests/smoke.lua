@@ -846,6 +846,46 @@ test("interactive controls stay inside their pages and panel fits small screens"
     truthy(panel:GetHeight() * panel:GetScale() <= 480, "panel fits short viewport")
 end)
 
+test("zhCN clients use English Options on first load and saved-data reload", function()
+    local saved
+    for pass = 1, 2 do
+        local env, addon = login(saved, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
+        equal(env.GetLocale(), "zhCN", "regression runs on a Chinese client")
+        if pass == 2 then
+            equal(addon.db.position.x, 37, "saved position survives reload")
+            equal(addon.db.font.size, 32, "saved appearance survives reload")
+        end
+        env.SlashCmdList.CARGOUI("")
+        local panel, controls = addon.optionsFrame, addon.optionsFrame.controls
+        local categories = {}
+        for _, category in ipairs(panel.categories) do categories[category.key] = category end
+        equal(categories.general:GetText(), "> General", "active category is English")
+        equal(categories.typography:GetText(), "Font & appearance", "appearance category is English")
+        equal(controls.applyPosition:GetText(), "Apply", "apply button is English")
+        equal(controls.close:GetText(), "Close", "close button is English")
+        equal(panel.feedback:GetText(), "Changes apply immediately. For typed numbers, press Enter or Apply.",
+            "opening guidance is English")
+
+        enter(controls.x, "invalid")
+        equal(panel.feedback:GetText(), "Enter X and Y from -10000 to 10000.",
+            "validation feedback is English")
+        enter(controls.x, "37")
+        equal(panel.feedback:GetText(), "Settings applied.", "success feedback is English")
+        addon:SelectOptionsCategory("typography")
+        equal(controls.outline.choices[1]:GetText(), "None", "dropdown choice is English")
+        enter(controls.fontSize.editBox, "32")
+        addon:SelectOptionsCategory("preview")
+        equal(panel.previewStatus:GetText(), "X: 37    Y: 0    Font size: 32    Scale: 1",
+            "dynamic preview labels are English")
+        controls.reset:Click()
+        equal(controls.reset:GetText(), "Confirm reset", "reset confirmation button is English")
+        equal(panel.feedback:GetText(), "Click Confirm reset to restore all CarGOUI defaults.",
+            "reset confirmation guidance is English")
+        controls.close:Click()
+        saved = copy(addon.db)
+    end
+end)
+
 test("font menu applies each supported face and localized client font persists", function()
     local _, addon = login(nil, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
     local panel, controls = options(addon)
@@ -867,7 +907,7 @@ test("font menu applies each supported face and localized client font persists",
     local ok = addon:UpdateSettings({ font = { face = "fonts\\frizqt__.TTF" } })
     truthy(ok, "supported font accepted case-insensitively")
     equal(addon.db.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
-    equal(panel:IsShown(), true, "localized Options created successfully")
+    equal(panel:IsShown(), true, "Options created successfully with a localized client font")
 end)
 
 print("All " .. total .. " offline smoke tests passed.")

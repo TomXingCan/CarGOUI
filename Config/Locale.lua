@@ -24,6 +24,7 @@ local english = {
     close = "Close",
 }
 
+-- Retained for a future explicit language choice; inactive in this release.
 local chinese = {
     options = "设置", general = "常规", typography = "字体与外观",
     preview = "预览", mobility = "位移提醒", proc = "触发提醒", themes = "主题",
@@ -48,5 +49,5 @@ local chinese = {
     close = "关闭",
 }
 
--- Native UI font objects render localized labels; the preview uses the chosen font.
-addon.L = GetLocale() == "zhCN" and setmetatable(chinese, { __index = english }) or english
+-- This release uses English on every client; never infer UI language from GetLocale().
+addon.L = english
