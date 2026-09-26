@@ -1,4 +1,4 @@
-# Loading and measurement boundary — alpha.11
+# Loading and measurement boundary — alpha.15
 
 This release keeps **CarGOUI + CarGOUI_Data** as the only installed addon directories. Native Load-on-Demand applies to the entire Data addon. Every Lua file listed in its TOC loads together, including the factories for all shipped classes. A class subdirectory is not an independent load boundary. This is the accepted two-directory tradeoff, not strict per-class code unloading.
 
@@ -11,7 +11,7 @@ This release keeps **CarGOUI + CarGOUI_Data** as the only installed addon direct
 | Configuration | Core-owned account-wide `CarGOUIDB` can restore all previously saved class records. Normal reads/default initialization use only the current class Mobility and current class/spec Proc scope. Unaccessed is not unloaded. Data declares no separate SavedVariables. |
 | Runtime | Cooldown/charge queries and live bindings use only the current selected skill set. Unsupported special-mechanism definitions stop before cooldown queries. Hidden/pooled frames and loaded function definitions are distinguished from active bindings and subscriptions. |
 
-There is no real Proc monitor. Existing Mage Proc regions are still Preview only. UI themes are core identity-based data independent of the selected gameplay adapter; alpha.10 Header/Body definitions and artwork are unchanged.
+Real Proc monitoring uses the current class/spec's admitted catalogue, independently of Mobility learning or enabled state. All 13 class Proc factory files load with the unified Data TOC; only the current spec factory instantiates definitions. UI themes remain core identity-based data independent of the selected gameplay adapter; alpha.10 Header/Body definitions and artwork are unchanged.
 
 ## Registration and active sets
 
@@ -82,7 +82,7 @@ No real WoW client exists in this development environment. Offline Lua/Python me
 For CPU, compare cumulative deltas over equal-duration activity intervals and state whether profiling was enabled (including its overhead). Record CarGOUI and CarGOUI_Data separately. Natural GC and client activity can affect memory; no forced GC is used. All actual client CPU/memory, new ability combat behavior and repeated-spec measurements remain pending, not inferred from mocks.
 
 
-## alpha.12 native Proc / Free move addendum
+## Historical alpha.12 native Proc / Free move addendum
 
 The shared Data TOC now includes current-specialization Mage Proc factories and a small class-to-Time-Spiral receiver index. Those static files load together with all other listed Data files. Only the current Mage specialization's Proc region definitions and the current class's one Free move entry are instantiated. This does not change the shared SavedVariables boundary.
 
@@ -90,4 +90,12 @@ Proc uses one native AuraContainer slot per current mapped region, with a stable
 
 Disabling a slot removes its active UNIT_AURA subscription immediately and queues one native clear pass. The public container and parent wrapper stay shown at alpha zero so that pass can clear the old assignment and copied duration binding. Cached native containers retain their static aura-data-provider-switch subscription; no claim is made that every native subscription or allocated frame is unloaded. No addon ticker, per-frame scan, buff enumeration or forced collection was added.
 
-Actual client CPU and memory remain unmeasured; the alpha.12 package report supplies only offline object/lifecycle tests. Validate current client behavior with UPGRADE_ALPHA12.md. The historical sections above describe their recorded releases, not a proof of native-aura internals.
+Actual client CPU and memory remain unmeasured; the alpha.12 package report supplied only offline object/lifecycle tests. That historical addendum describes its recorded release, not current class coverage or proof of native-aura internals.
+
+## alpha.15 current Proc catalogue and event scope
+
+All 13 registered adapters have explicit Proc capability version 1; this is separate from having any eligible current-spec entries. New class factories run only for the current spec and cache filtered definitions until identity/talent change. The 37 non-Mage specs have 63 admitted spec-scoped definitions / 81 regions in total, but those are not all instantiated or monitored together. Four reviewed specs currently have no admitted entry and no Proc business events/native slots. Known-driver filters do not query hidden Aura IDs as spellbook abilities.
+
+Three generic callbacks (`SPELLS_CHANGED`, `PLAYER_TALENT_UPDATE`, `TRAIT_CONFIG_UPDATED`) remain available independently of Mobility and Proc enabled state so a newly eligible catalogue can be discovered. Current graphical SHOW/HIDE uses owner/texture/location indices and only refreshes affected definitions; unrelated events do not rerun factories or refresh the full panel. The public-event diagnostic ring is bounded at 16. Native provider identity is immutable for each pooled region; conflicts stop that slot instead of changing its Aura or discarding saved settings. No addon periodic timer or frame scanner is added.
+
+Live/Preview entries are merged without making Proc depend on Mobility. Old-spec slots are disabled on transition; revisiting scopes reuses bounded allocated objects. Core callback counts and native-container requested enabled counts remain distinct. Native static provider-switch listeners on retained containers are not misreported as unloaded objects. Current validation and client measurement steps are in [UPGRADE_ALPHA15.md](UPGRADE_ALPHA15.md); real CPU/memory remain pending.

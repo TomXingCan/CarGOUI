@@ -4958,8 +4958,14 @@ test("Time Spiral Free move covers all thirteen class receiver auras without ord
         equal(procText(addon, state, entry.id), "", "natural receiver expiry removes native text")
         equal(state.realReads, 0, "receiver tracking never starts unrelated ordinary cooldown queries")
         if class ~= "MAGE" then
-            equal(addon.procTracking, false, "non-Mage never activates Mage Proc mapping")
-            equal(#state.auraSlots, 1, "non-Mage only allocates its one confirmed receiver slot")
+            local definitions, expectedSlots = addon:GetProcDefinitions(), 1
+            for _, definition in ipairs(definitions) do
+                equal(definition.class, class, "receiver never causes another class's Proc data to activate")
+                equal(definition.specID, spec, "receiver never activates a different specialization's Proc data")
+                expectedSlots = expectedSlots + #definition.regions
+            end
+            equal(addon.procTracking, #definitions > 0, "Proc tracking follows actual eligible catalog independently of Free move")
+            equal(#state.auraSlots, expectedSlots, "only independently eligible Proc regions and confirmed Free move allocate slots")
         end
         local found = false
         for _, preview in ipairs(addon:GetPreviewEntries()) do
@@ -5828,6 +5834,396 @@ test("non-Mage Frost Death Knight tracks separately filtered finite native Proc 
     equal(procText(addon, state, rime), "", "natural expiry has no fabricated remaining time")
     equal(state.realReads, 0, "no Lua aura, cooldown, or stack read occurs")
     equal(#state.errors, 0, "non-Mage native lifecycle produces no mock contract errors")
+end)
+
+-- This fixture intentionally models only the APIs, not the truth of any spell mapping.
+local function procClassFixture(class, spec, known, saved)
+    local data = genericEngine({})
+    local allowed, allKnown = {}, {}
+    for _, definition in ipairs(definitionsFor(data, class, spec ~= false and spec or nil)) do includeDefinitionIDs(allowed, definition) end
+    for _, definition in ipairs(spec ~= false and data.adapters[class].procFactory(spec) or {}) do
+        for _, field in ipairs({ "requiresKnown", "requiresAnyKnown" }) do
+            for _, id in ipairs(definition[field] or {}) do allKnown[id] = true end
+        end
+        for _, id in ipairs(definition.excludesKnown or {}) do allKnown[id] = nil end
+    end
+    return login(saved, false, { classToken = class, specID = spec, proc = {},
+        procKnown = known or allKnown, mobility = { known = {}, spells = {} }, allowedSpellIDs = allowed })
+end
+
+test("new Proc definitions agree with independently pinned target source facts before runtime simulation", function()
+    local facts = assert(loadfile(root .. "/tests/fixtures/proc_sources_69933.lua"))()
+    equal(facts.build, "12.1.0.69933", "source fixture targets the requested client")
+    local data, _, _, addon, state = genericEngine({})
+    local classes, specs, definitions, regions, ownerKeys = 0, 0, 0, 0, {}
+    for _, row in ipairs(themeRoster) do
+        if row[1] ~= "MAGE" then
+            classes = classes + 1
+            local adapter = assert(data.adapters[row[1]])
+            truthy(adapter.procCapability and adapter.procCapability.version == 1 and adapter.procFactory,
+                "audited class has a concrete Proc capability: " .. row[1])
+            for _, spec in ipairs(row[2]) do
+                specs = specs + 1
+                local records = adapter.procFactory(spec[1])
+                truthy(addon:CompileProcDefinitions(records, row[1], spec[1]), "source catalog has no ambiguous provider/region ownership")
+                for _, definition in ipairs(records) do
+                    definitions = definitions + 1
+                    truthy(definition.evidence and #definition.evidence > 15, "every admitted record links its audit")
+                    local aura = assert(facts.auras[definition.auraID], "timer has independent finite-aura evidence")
+                    truthy(aura.durationSeconds > 0 and aura.durationSeconds < math.huge, "pure resource/infinite owners are not timers")
+                    for _, source in ipairs(definition.overlaySources) do
+                        local key = source.overlayID .. ":" .. source.textureID .. ":" .. source.locationTypeName
+                        local fact = assert(facts.overlays[key], "exact owner/texture/location belongs to pinned native table: " .. key)
+                        truthy(math.abs(source.scale - fact.scale) < 0.000001, "native graphical scale matches source data")
+                        ownerKeys[key] = true
+                    end
+                    for _, region in ipairs(definition.regions) do
+                        regions = regions + 1
+                        equal(region.class, row[1], "region cannot inherit previous class")
+                        equal(region.specID, spec[1], "region cannot inherit another spec")
+                    end
+                end
+            end
+            equal(#adapter.procFactory(nil), 0, "unselected spec never borrows a known catalog")
+            equal(#adapter.procFactory(999999), 0, "unknown spec is explicitly empty")
+            equal(adapter.procDefinitions, nil, "audit metadata iteration did not activate another class's runtime catalog")
+        end
+    end
+    equal(classes, 12, "remaining target classes are independently enumerated")
+    equal(specs, 37, "remaining target specs include Devourer")
+    equal(#state.auraSlots, 0, "source audit does not create any native display")
+    print("OFFLINE-PROC-SOURCE-AUDIT classes=" .. classes .. ", specs=" .. specs .. ", candidate-definitions=" .. definitions
+        .. ", regions=" .. regions .. ", native-graphic-keys=" .. countKeys(ownerKeys) .. "; client acceptance separate")
+end)
+
+test("every new admitted current-spec Proc runs real native timers with combat and secrecy modeled independently", function()
+    local exercised, regions, emptySpecs = 0, 0, 0
+    for _, row in ipairs(themeRoster) do
+        if row[1] ~= "MAGE" then
+            for _, spec in ipairs(row[2]) do
+                local env, addon, state = procClassFixture(row[1], spec[1])
+                local definitions = addon:GetProcDefinitions()
+                if #definitions == 0 then
+                    emptySpecs = emptySpecs + 1
+                    equal(addon.procTracking, false, "audited empty spec is not advertised as an active monitor")
+                else
+                    truthy(addon.procTracking, "concrete current-spec catalog activates real Proc tracking")
+                    local count = 0
+                    for _, definition in ipairs(definitions) do count = count + #definition.regions end
+                    equal(#state.auraSlots, count + 1, "only active spec regions plus independent Free move own slots")
+                    local slots, bindings, fonts = #state.auraSlots, #state.bindings, #state.auraFonts
+                    exercised, regions = exercised + #definitions, regions + count
+                    for _, combat in ipairs({ false, true }) do
+                        for _, restricted in ipairs({ false, true }) do
+                            state.inCombat = combat
+                            local times = {}
+                            for index, definition in ipairs(definitions) do
+                                times[definition.auraID] = 20 + index
+                                putAura(state, definition.auraID, times[definition.auraID], 2, restricted)
+                                for _, source in ipairs(definition.overlaySources) do
+                                    showProc(env, state, source.overlayID, source.textureID, source.locationTypeName, source.scale)
+                                end
+                            end
+                            for _, definition in ipairs(definitions) do
+                                for _, entry in ipairs(definition.regions) do
+                                    equal(procText(addon, state, entry.id), string.format("%.1f", times[definition.auraID]),
+                                        "native live timer for " .. entry.id .. " combat=" .. tostring(combat) .. " secret=" .. tostring(restricted))
+                                end
+                                state.proc.auras[definition.auraID].applications = restricted and secret(1) or 1
+                            end
+                            state:advance(1)
+                            for _, definition in ipairs(definitions) do
+                                for _, entry in ipairs(definition.regions) do
+                                    equal(procText(addon, state, entry.id), string.format("%.1f", times[definition.auraID] - 1),
+                                        "partial layers retain current native remaining time")
+                                end
+                            end
+                            state.proc.auras = {}; state:fire("UNIT_AURA", "player")
+                            for _, definition in ipairs(definitions) do
+                                for _, entry in ipairs(definition.regions) do equal(procText(addon, state, entry.id), "", "native absence clears only real aura-owned digits") end
+                            end
+                        end
+                    end
+                    equal(#state.auraSlots, slots, "repeat combat/secrecy transitions reuse native slots")
+                    equal(#state.bindings, bindings, "repeat events do not allocate new duration bindings")
+                    equal(#state.auraFonts, fonts, "repeat events reuse own Font objects")
+                end
+                for class, adapter in pairs(state.moduleNamespaces.CarGOUI_Data.adapters) do
+                    if class ~= row[1] then equal(adapter.procDefinitions, nil, "unrelated class code is loaded but Proc catalog is not instantiated") end
+                end
+                for class in pairs(addon.db.classes) do equal(class, row[1], "only current class saved defaults may be instantiated") end
+                equal(#state.spellReads, 0, "Proc never obtains timer data from spell cooldown queries")
+                equal(state.realReads, 0, "no Lua aura/state reading replaces native ownership")
+                equal(#state.errors, 0, "all admitted records satisfy the offline native contract")
+            end
+        end
+    end
+    print("OFFLINE-PROC-RUNTIME candidate-definitions=" .. exercised .. ", regions=" .. regions .. ", empty-specs=" .. emptySpecs
+        .. "; four independent combat/secrecy combinations; client acceptance separate")
+end)
+
+test("empty learned Proc catalogs react to talent changes while Mobility stays disabled", function()
+    local env, addon, state = procClassFixture("PALADIN", 70, {})
+    addon:UpdateSettings({ mobility = { enabled = false } })
+    equal(#addon:GetProcDefinitions(), 0, "no relevant learned drivers means no Proc data or available sample")
+    equal(addon.procTracking, false, "empty catalog starts no Proc business listeners")
+    for _, entry in ipairs(addon:GetPreviewEntries()) do truthy(entry.kind ~= "proc", "empty spec cannot offer fake available Proc previews") end
+    state.procKnown[406064] = true; syncEvent(state, "TRAIT_CONFIG_UPDATED")
+    equal(#addon:GetProcDefinitions(), 0, "Art of War reset alone is not a finite timer Proc")
+    state.procKnown[1261113] = true; syncEvent(state, "PLAYER_TALENT_UPDATE")
+    equal(#addon:GetProcDefinitions(), 1, "Light Within activates the actual finite empowerment")
+    truthy(addon.procTracking, "lightweight catalog listener can discover Proc while Mobility is disabled")
+    local entry = regionEntry(addon, "paladin_retribution_art_war_left")
+    truthy(entry, "eligible Proc is now in the same existing preview catalog")
+    putAura(state, 406086, 23, 1, true)
+    equal(procText(addon, state, entry.id), "23.0", "catalog activation supplies native real countdown")
+    local slots, bindings, events = #state.auraSlots, #state.bindings, addon:GetEventDiagnostics().callbacks
+    for _ = 1, 12 do
+        state.procKnown[1261113] = nil; syncEvent(state, "SPELLS_CHANGED")
+        equal(addon.procTracking, false, "removing required talent releases Proc subscriptions")
+        equal(procFrame(addon, entry.id).auraHandle.enabled, false, "obsolete native provider is inactive")
+        state.procKnown[1261113] = true; syncEvent(state, "SPELLS_CHANGED")
+    end
+    equal(#state.auraSlots, slots, "relearning reuses region slots")
+    equal(#state.bindings, bindings, "relearning creates no unbounded duration bindings")
+    equal(addon:GetEventDiagnostics().callbacks, events, "relearning has bounded event ownership")
+    equal(#state.spellReads, 0, "learning Proc talents never starts disabled movement queries")
+    equal(#state.errors, 0, "catalog changes remain independent of Mobility")
+end)
+
+test("Proc event index refreshes affected definitions only and unrelated secret events do not disturb other timers", function()
+    local env, addon, state = procClassFixture("DEATHKNIGHT", 251)
+    putAura(state, 59052, 19, 1, true); putAura(state, 51124, 17, 1, true)
+    local calls, acquire = {}, addon.AcquireAuraReminder
+    addon.AcquireAuraReminder = function(self, entry, ...) calls[#calls + 1] = entry.id; return acquire(self, entry, ...) end
+    local left = procFrame(addon, "deathknight_frost_killing_machine_left")
+    local writes, binding = left.alphaWrites, left.auraHandle.container.nativeBinding
+    showProc(env, state, 59052, 450930, "Top")
+    same(calls, { "deathknight_frost_rime_top" }, "indexed event touches the named definition only")
+    equal(left.alphaWrites, writes, "unrelated Proc native visibility is not rewritten")
+    equal(left.auraHandle.container.nativeBinding, binding, "unrelated native binding is preserved")
+    calls = {}
+    showProc(env, state, 999999, 450930, "Top")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 999999)
+    state:fire("SPELL_ACTIVATION_OVERLAY_SHOW", secret(59052), secret(450930), secret(4), secret(1))
+    equal(#calls, 0, "unmapped or restricted identities never trigger full-catalog rendering")
+    equal(procText(addon, state, left.entryId), "17.0", "unrelated event cannot clear valid native reminder")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 59052)
+    same(calls, { "deathknight_frost_rime_top" }, "HIDE is also indexed")
+    equal(procText(addon, state, left.entryId), "17.0", "hiding Rime leaves Killing Machine intact")
+    equal(#state.errors, 0, "secret payload never leaks into formatting or comparison")
+end)
+
+test("native Proc providers reject aura scope and text-mode reassignment before cached-frame reuse", function()
+    local _, addon, state = procClassFixture("DEATHKNIGHT", 251)
+    local entry = regionEntry(addon, "deathknight_frost_rime_top")
+    local frame = procFrame(addon, entry.id)
+    local original, slots, bindings = frame.auraHandle, #state.auraSlots, #state.bindings
+    for _, variant in ipairs({ { aura = 51124 }, { aura = 59052, text = "Free move" },
+        { aura = 59052, class = "MAGE" }, { aura = 59052, specID = 252 } }) do
+        local invalid = copy(entry)
+        invalid.class, invalid.specID = variant.class or invalid.class, variant.specID or invalid.specID
+        local received, reason = addon:AcquireAuraReminder(invalid, variant.aura, variant.text)
+        equal(received, nil, "stable region cannot be rebound to another native provider")
+        truthy(reason and reason:find("another Aura or scope", 1, true), "rejection explains exact ownership conflict")
+        equal(frame.auraHandle, original, "provider mismatch never mutates old slot")
+        equal(original.enabled, false, "conflicting provider leaves old timer safely inactive")
+        equal(addon:AcquireAuraReminder(entry, 59052), frame, "correct provider remains reusable")
+    end
+    equal(#state.auraSlots, slots, "mismatch cannot create replacement slot under old region ID")
+    equal(#state.bindings, bindings, "mismatch cannot leak timer binding")
+end)
+
+test("Proc compiler rejects duplicate and ambiguous registrations while explicit shared owners update both providers", function()
+    local env, addon, state = procClassFixture("DEATHKNIGHT", 251)
+    local data = state.moduleNamespaces.CarGOUI_Data
+    local function definition(id, aura, location, shared)
+        return data:ProcDefinition({ id = id, name = id, class = "DEATHKNIGHT", specID = 251, auraID = aura,
+            nativeEventOnly = true, evidence = "Synthetic contract test: explicit one-to-many owner, not a real spell mapping",
+            overlaySources = { { overlayID = 987010, textureID = 987011, locationTypeName = "LeftRight", scale = 1, shared = shared } },
+            regions = { { id = id .. "_region", label = id, location = location } } })
+    end
+    local first, second = definition("offline_shared_a", 987012, "Left", true), definition("offline_shared_b", 987013, "Right", true)
+    truthy(addon:CompileProcDefinitions({ first, second }, "DEATHKNIGHT", 251), "explicit audited shared owner can address two actual providers")
+    local invalid = copy(second); invalid.overlaySources[1].shared = false
+    equal(addon:CompileProcDefinitions({ first, invalid }, "DEATHKNIGHT", 251), nil, "implicit owner overwrite is forbidden")
+    invalid = copy(second); invalid.regions[1].id = first.regions[1].id
+    equal(addon:CompileProcDefinitions({ first, invalid }, "DEATHKNIGHT", 251), nil, "duplicate stable region cannot reuse unrelated aura slot")
+    invalid = copy(second); invalid.specID = 252
+    equal(addon:CompileProcDefinitions({ first, invalid }, "DEATHKNIGHT", 251), nil, "foreign specialization cannot enter active catalog")
+    invalid = copy(second); invalid.overlaySources[1].locationTypeName = "Top"
+    equal(addon:CompileProcDefinitions({ invalid }, "DEATHKNIGHT", 251), nil, "unsupported region-to-graphic geometry is rejected")
+    addon.activeClassAdapter.procDefinitions = { first, second }
+    addon.activeClassAdapter.procDefinitionSpec = 251
+    addon:ConfigureProc()
+    putAura(state, 987012, 14, 1, true); putAura(state, 987013, 29, 1, true)
+    equal(procText(addon, state, first.regions[1].id), "", "event-only entry does not invent graphic activation")
+    showProc(env, state, 987010, 987011, "LeftRight")
+    equal(procText(addon, state, first.regions[1].id), "14.0", "one owner activates first exact provider")
+    equal(procText(addon, state, second.regions[1].id), "29.0", "one owner also activates the separate second provider")
+    state.proc.auras[987012] = nil; state:fire("UNIT_AURA", "player")
+    equal(procText(addon, state, first.regions[1].id), "", "one provider's absence cannot be guessed from the shared owner")
+    equal(procText(addon, state, second.regions[1].id), "29.0", "other provider survives partial shared-owner consumption")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 987010)
+    equal(procText(addon, state, second.regions[1].id), "", "shared owner HIDE visits every registered provider")
+    equal(#state.errors, 0, "one-to-many dispatch never overwrites a provider")
+end)
+
+test("non-Mage Proc styles colors coordinates and native ownership survive spec cycles and reload", function()
+    local env, addon, state = procClassFixture("DEATHKNIGHT", 251)
+    local region = "deathknight_frost_rime_top"
+    local entry = regionEntry(addon, region)
+    addon:UpdateReminderStyle("proc:DEATHKNIGHT:251", { font = { size = 37 }, scale = 1.2 })
+    addon:UpdateSettings({ reminders = { [region] = { position = { x = 18, y = -12 } } } })
+    addon:SetProcRegionColor(entry, { r = 0.2, g = 0.8, b = 0.3 })
+    putAura(state, 59052, 24, 1, true)
+    options(addon); addon:SetPreview("single", region)
+    same(addon.previewFrames[region].text.textColor, { 0.2, 0.8, 0.3, 1 }, "non-Mage external preview resolves its exact region RGB")
+    same(procFrame(addon, region).text.textColor, addon.previewFrames[region].text.textColor, "live and sample resolve the same saved color")
+    addon:StopPreview(); addon:CloseOptions()
+    local mobility = copy(addon:GetMobilityConfig())
+    state.procKnown[49530], state.procKnown[81136], state.procKnown[1264506] = true, true, true
+    for _, spec in ipairs({ 250, 252, 251 }) do
+        state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    end
+    local slots, bindings, fonts, callbacks = #state.auraSlots, #state.bindings, #state.auraFonts, addon:GetEventDiagnostics().callbacks
+    for _ = 1, 8 do
+        for _, spec in ipairs({ 250, 252, 251 }) do
+            state.specID = spec; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+            for _, frame in pairs(addon.reminderFrames.nativeAura) do
+                if frame.reminderEntry.kind == "proc" and frame.reminderEntry.specID ~= spec then equal(frame.auraHandle.enabled, false, "old spec native slots are inactive") end
+            end
+        end
+    end
+    equal(#state.auraSlots, slots, "repeated DK spec changes do not grow native slot pool")
+    equal(#state.bindings, bindings, "repeated DK spec changes do not grow binding pool")
+    equal(#state.auraFonts, fonts, "repeated DK spec changes do not grow Font pool")
+    equal(addon:GetEventDiagnostics().callbacks, callbacks, "repeated DK spec changes do not grow event listeners")
+    same(addon:GetMobilityConfig(), mobility, "Proc spec and color changes leave class Mobility config intact")
+    equal(addon:GetReminderPosition(entry).x, 18, "spec changes preserve region offset")
+    equal(procFrame(addon, region).text.font[2], 37, "returning spec restores its own shared font")
+    same(procFrame(addon, region).text.textColor, { 0.2, 0.8, 0.3, 1 }, "returning spec restores region RGB")
+    local _, fresh, reloaded = procClassFixture("DEATHKNIGHT", 251, nil, copy(addon.db))
+    putAura(reloaded, 59052, 31, 1, true); syncEvent(reloaded, "PLAYER_ENTERING_WORLD")
+    equal(procText(fresh, reloaded, region), "31.0", "reload/world entry sync actual current native aura")
+    equal(fresh:GetProcConfig().style.font.size, 37, "reload restores class/spec style")
+    equal(fresh:GetReminderPosition(regionEntry(fresh, region)).y, -12, "reload restores independent region offset")
+    same(procFrame(fresh, region).text.textColor, { 0.2, 0.8, 0.3, 1 }, "reload restores optional RGB without affecting other regions")
+    equal(#state.errors + #reloaded.errors, 0, "non-Mage persistence and lifecycle produce no errors")
+end)
+
+test("Hunter Precise Shots separates actual timer aura from graphic tiers and preserves ongoing duration", function()
+    local env, addon, state = procClassFixture("HUNTER", 254, { [260240] = true })
+    local left, right = "hunter_254_precise_shots_left", "hunter_254_precise_shots_right"
+    putAura(state, 270436, 90, 1, true); putAura(state, 270437, 90, 1, true)
+    equal(procText(addon, state, left), "", "graphic owner auras cannot masquerade as actual Precise Shots duration")
+    putAura(state, 260242, 18, 2, true)
+    showProc(env, state, 270436, 1029138, "LeftRight")
+    state:advance(4)
+    showProc(env, state, 270437, 1029139, "LeftRight")
+    state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", 270436)
+    equal(procText(addon, state, left), "14.0", "new graphic tier keeps the already-running real aura duration")
+    equal(procText(addon, state, right), "14.0", "old owner HIDE cannot kill current tier's other region")
+    state.proc.auras[260242].applications = secret(1); state:fire("UNIT_AURA", "player")
+    equal(procText(addon, state, left), "14.0", "partial aura consumption is not inferred from event count")
+    state.proc.auras[260242] = nil; state:fire("UNIT_AURA", "player")
+    equal(procText(addon, state, left), "", "real timer absence clears even while synthetic graphic owners remain present")
+    equal(#state.errors, 0, "split graphic/timer mapping uses no hidden aura learning checks")
+end)
+
+test("alternate learned Proc drivers exclusions and non-talent finite-aura paths resolve without hidden Buff learning", function()
+    local _, mageFree, dh = procClassFixture("DEMONHUNTER", 1480, {})
+    equal(#mageFree:GetProcDefinitions(), 1, "Devourer exact aura covers talent OR set effect without guessing learned gear IDs")
+    putAura(dh, 1238495, 11, 1, true)
+    equal(procText(mageFree, dh, "demonhunter_1480_moment_of_craving_top"), "11.0", "set-provided finite aura uses the same true native timer")
+    local _, hunter = procClassFixture("HUNTER", 254, { [1301406] = true })
+    equal(#hunter:GetProcDefinitions(), 1, "Tactical Reload alone supplies the audited Lock and Load path")
+    equal(hunter:GetProcDefinitions()[1].auraID, 194594, "alternate driver cannot become the timer ID")
+    local _, monk = procClassFixture("MONK", 269, { [1250042] = true })
+    equal(#monk:GetProcDefinitions(), 1, "Echo Technique alone supplies finite Blackout Kick")
+    equal(monk:GetProcDefinitions()[1].auraID, 116768, "Monk uses hidden effect only as native aura filter")
+    local _, druid, state = procClassFixture("DRUID", 104, { [203964] = true, [1252871] = true })
+    for _, definition in ipairs(druid:GetProcDefinitions()) do truthy(definition.auraID ~= 213708, "Red Moon excludes replaced Galactic Guardian Proc") end
+    state.procKnown[1252871] = nil; syncEvent(state, "TRAIT_CONFIG_UPDATED")
+    local found = false
+    for _, definition in ipairs(druid:GetProcDefinitions()) do if definition.auraID == 213708 then found = true end end
+    truthy(found, "removing replacement discovers original without reading any Buff")
+end)
+
+test("all new native regions use existing Proc controls for independent RGB XY and shared specialization font", function()
+    local totalRegions = 0
+    for _, row in ipairs(themeRoster) do
+        if row[1] ~= "MAGE" then
+            for _, spec in ipairs(row[2]) do
+                local env, addon, state = procClassFixture(row[1], spec[1])
+                local panel, controls = options(addon)
+                addon:SelectOptionsCategory("proc")
+                local definitions, entries = addon:GetProcDefinitions(), {}
+                for _, definition in ipairs(definitions) do
+                    for _, entry in ipairs(definition.regions) do entries[#entries + 1] = entry end
+                end
+                if #entries == 0 then
+                    equal(controls.procPreview:IsEnabled(), false, "audited-empty spec offers no dummy sample")
+                    equal(controls.procColor:IsEnabled(), false, "no nonexistent region color control is active")
+                else
+                    local mobility = copy(addon:GetMobilityConfig())
+                    local events, slots, bindings = addon:GetEventDiagnostics().callbacks, #state.auraSlots, #state.bindings
+                    for index, entry in ipairs(entries) do
+                        totalRegions = totalRegions + 1
+                        choose(controls.procEntry, entry.id)
+                        equal(panel.selectedProcEntry, entry.id, "existing selector resolves stable region identity")
+                        controls.procPreview:Click()
+                        truthy(addon.previewFrames[entry.id] and addon.previewFrames[entry.id]:IsShown(), "each admitted region has an operative external preview")
+                        equal(addon:GetProcRegionColor(entry), nil, "every new region starts with dynamic class color")
+                        controls.procColor:Click()
+                        local picker = env.ColorPickerFrame
+                        truthy(picker:IsShown(), "existing native picker opens on current non-Mage region")
+                        local rgb = { index / (#entries + 1), 0.2, 0.7 }
+                        picker.rgb = rgb; picker.swatchFunc(); picker.Footer.OkayButton:Click()
+                        same(addon:GetProcRegionColor(entry), { r = rgb[1], g = rgb[2], b = rgb[3] }, "native confirmation saves only selected region")
+                        truthy(addon:UpdateSettings({ reminders = { [entry.id] = { position = { x = index * 3, y = -index * 2 } } } }), "stable region stores independent offsets")
+                    end
+                    addon:StopPreview()
+                    addon:UpdateReminderStyle("proc:" .. row[1] .. ":" .. spec[1], { font = { size = 32 }, scale = 1.1 })
+                    for index, entry in ipairs(entries) do
+                        equal(procFrame(addon, entry.id).text.font[2], 32, "one current specialization font styles every native region")
+                        equal(addon:GetReminderPosition(entry).x, index * 3, "shared font does not merge or scale region coordinates")
+                        same(procFrame(addon, entry.id).text.textColor, { index / (#entries + 1), 0.2, 0.7, 1 }, "shared font retains independent per-region RGB")
+                    end
+                    same(addon:GetMobilityConfig(), mobility, "all region edits preserve class Mobility style layout and switches")
+                    equal(#state.auraSlots, slots, "all-region editor uses already-created active native providers")
+                    equal(#state.bindings, bindings, "picker and style edits never allocate extra native bindings")
+                    equal(addon:GetEventDiagnostics().callbacks, events, "editor adds no business monitor subscriptions")
+                end
+                addon:CloseOptions()
+                equal(state.realReads, 0, "all-region UI never queries buffs or cooldowns")
+                equal(#state.errors, 0, "all-region controls remain operational")
+            end
+        end
+    end
+    print("OFFLINE-PROC-CONTROLS verified-regions=" .. totalRegions .. "; actual existing picker/preview controls exercised")
+end)
+
+test("threshold and gear Proc sources require actual native SHOW while unknown identities stay empty", function()
+    for _, row in ipairs({ { "PRIEST", 256, { [373180] = true }, 373183, 469752, "priest_discipline_harsh_discipline_top" },
+        { "DRUID", 104, {}, 1272376, 592058, "druid_guardian_celestial_might_right" } }) do
+        local env, addon, state = procClassFixture(row[1], row[2], row[3])
+        local location = row[1] == "PRIEST" and "Top" or "Right"
+        putAura(state, row[4], 22, 1, true)
+        equal(procText(addon, state, row[6]), "", "finite aura alone cannot invent threshold/set graphic state")
+        showProc(env, state, row[4], row[5] + 1, location)
+        equal(procText(addon, state, row[6]), "", "unverified artwork does not unlock event-only mapping")
+        state.inCombat = true
+        showProc(env, state, row[4], row[5], location)
+        equal(procText(addon, state, row[6]), "22.0", "public native graphic plus matching restricted finite aura supplies real countdown")
+        state:fire("SPELL_ACTIVATION_OVERLAY_HIDE", row[4])
+        equal(procText(addon, state, row[6]), "", "native threshold HIDE immediately suppresses timer without counting applications")
+        state.specID = nil; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        equal(#addon:GetProcDefinitions(), 0, "unknown current spec does not borrow last valid spec mapping")
+        equal(addon.procTracking, false, "unknown scope stops old Proc business subscriptions")
+        equal(procFrame(addon, row[6]).auraHandle.enabled, false, "unknown scope stops old native slot")
+        equal(#state.errors, 0, "public graphic lifecycle never reads hidden threshold or gear state")
+    end
 end)
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")

@@ -1,8 +1,8 @@
 ## Interface: 120100
 ## Title: CarGOUI
-## Notes: Class Mobility, Mage native Proc timers, Time Spiral Free move and separate previews.
+## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.14
+## Version: 0.1.0-alpha.15
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua

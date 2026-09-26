@@ -68,7 +68,7 @@ def main():
     files = {path: git("show", "HEAD:" + path) for path in git("ls-tree", "-r", "--name-only", "HEAD").decode().splitlines()}
     version = next(line.split(":", 1)[1].strip() for line in files["CarGOUI.toc"].decode().splitlines() if line.startswith("## Version:"))
     args.output.mkdir(parents=True, exist_ok=True)
-    target = args.output / ("CarGOUI-" + version + "-Options-Combat-Lock.zip")
+    target = args.output / ("CarGOUI-" + version + "-Native-Proc.zip")
     installed = install_files(files)
     digest = write_archive(installed, target)
     extraction = args.output / ("package-check-" + digest[:12])

@@ -1,8 +1,10 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.14**，在 alpha.13 提交 `7ba1dae6` 上只调整 Options 的战斗打开/关闭生命周期。目标 WoW Retail 12.1.0（Interface 120100），已有数据/API 核查固定 build 69933。Mobility、Free move、Options 格局、主题、Proc 区域颜色、字体范围及用户坐标保留；不扩展其他职业真实 Proc 或已排除的特殊 Mobility。
+当前版本 **0.1.0-alpha.15**，在 alpha.14 提交 `bd96dbc46dd2c79f294bb35fcbce0dc8863677ab` 上审查其余 12 职业、37 专精并接入符合范围的原生 Proc 计时。目标 WoW Retail 12.1.0（Interface 120100），数据/API 核查固定 build 69933。保留法师映射、Mobility、Free move、Options 战斗锁、主题、区域颜色、字体范围及用户坐标；不扩展已排除的特殊 Mobility。
 
-用户于 2026-09-27 确认当前法师 Proc 正常。本轮保留这份实机反馈和 alpha.13 的映射/颜色实现，不将它扩写为每种天赋、布局或重载场景的逐项验收。其他 12 职业 Proc 仍只处于清单核查范围，没有新增真实监控。历史 [Clearcasting 修复依据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md) 保留；本轮见 [战斗锁定说明与验收步骤](docs/OPTIONS_COMBAT_LOCK.md)。
+本轮新增 **63 个按专精归属的真实 Proc 定义、81 个区域**，来自 52 个原生图形来源键和 51 个有限计时 Aura。37 个非 Mage 专精中，33 个有符合条件的条目；Enhancement、Destruction、Arms、Fury 当前没有纳入的合格条目，显示明确空状态。不能把这解释成每个专精都有计时器。完整映射、条件、证据及排除项见 [Proc 覆盖表](docs/PROC_COVERAGE.md)，安装和实机步骤见 [alpha.15 升级说明](docs/UPGRADE_ALPHA15.md)。
+
+用户已确认此前法师 Proc、区域颜色与 alpha.14 Options 战斗锁在其测试场景正常。本轮保留这份反馈，不将其扩写为新增职业或全部天赋/布局的实机验收。新增映射均为**已实现、已离线验证、真实客户端待验收**。历史 [Clearcasting 修复依据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md) 与 [战斗锁定说明](docs/OPTIONS_COMBAT_LOCK.md) 保留。
 
 ## 安装与升级
 
@@ -40,7 +42,7 @@ Proc 页面在所选条目旁显示明确的技能/位置名称与 **Timer color
 
 字体内置 Friz Quadrata、Arial Narrow、Morpheus、Skurri（必要时提供 Client default）。工厂样式为 Friz Quadrata 24、OUTLINE、阴影开启、Scale 1。字号 8–72，缩放 0.5–3，新编辑 XY -10000–10000。缩放不会放大已有坐标。
 
-Test Mode 使用外部游戏空间的固定 `8.0` 样例并标记 TEST；Free move 样例只有文字。法师 Proc 菜单复用已核查的当前专精区域。样例与原生 Aura/计时隔离，不向真实槽位写入样例状态。未实现且已移出范围的 Mobility 候选不再进入可选预览。
+Test Mode 使用外部游戏空间的固定 `8.0` 样例并标记 TEST；Free move 样例只有文字。Proc 菜单只包含当前职业/专精及已核查天赋条件下的合格区域；即使未触发也可以配置。Proc 菜单与真实监控不依赖 Mobility 是否开启或学会技能。样例与原生 Aura/计时隔离，不向真实槽位写入样例状态。未确认或不符合范围的候选不进入可选预览。
 
 关闭窗口、Stop test、进战斗或切专精会停止样例并清理旧临时状态。Live 继续按真实 API 更新；正在测试同一区域时只暂时抑制对应 live 输出。提醒和引导不可拖动，没有 Unlock Mode。
 
@@ -66,11 +68,13 @@ Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标
 
 历史普通 Mobility 实现与逐项限制见 [Mobility 覆盖表](docs/MOBILITY_COVERAGE.md)。范围外机制不再作为开发阻塞项或本轮必测任务。
 
-## 真实法师 Proc 与 Free move
+## 真实 Proc 与 Free move
 
 Proc 正式显示仅包含数字，使用该区域自定义 RGB 或默认职业色，放在对应暴雪图形区域的视觉中点。以原生图形根框体的实际缩放/布局、核验的区域几何和 SHOW 事件缩放定位，叠加原有区域 XY；不读取图形子框体的显隐、Buff 或数字，不修改暴雪图形。旧存档的偏移不清空；默认中点由真实原生布局决定，不再以旧样例绝对坐标代替。
 
 奥法覆盖 Clearcasting、Arcane Soul、Overpowered Missiles；火法覆盖 Hot Streak、Heating Up、**Pyroclasm（需读条的炎爆/烈焰风暴增益）**、Hyperthermia；冰法覆盖 Fingers of Frost 左右和 Brain Freeze。保留的 Fury of the Sun King 图形行仅在实际原生 SHOW 事件后接入，不作为当前可用天赋展示样例。图形 ID、Buff ID、纹理、大小和区域分别记录，详见覆盖表。
+
+其余职业通过同一个原生 Proc 引擎接入，含 Rime、Infusion of Light、Surge of Light、Nightfall、Clearcasting、Lava Surge、Essence Burst、Opportunity、Lock and Load、Blackout Kick!、Revenge!、Chaos Theory 等符合条件的条目。各专精完整清单和必要天赋以 [PROC_COVERAGE.md](docs/PROC_COVERAGE.md) 为准；同名效果不自动共用 Aura ID，左右来源和多阶段图形分别核查。
 
 客户端原生 `CustomAuraContainerTemplate` 以 `HELPFUL + includeSpellIDs` 筛选自身 Aura，在原生侧管理触发、消耗、刷新和到期。数字使用原生复制的 DurationTextBinding；Lua 不查询/比较秘密 Buff、剩余时间或层数。正式显示没有技能名、图标和背景。没有原生 Aura 或原生接口缺失时不制造替代时间。原生图形缺乏通用历史重放接口，重载时使用明确映射的计时 Aura 原生匹配启动（它不一定与图形 owner 同 ID）；相关图形实际出现条件仍列入实机验收。
 
@@ -93,7 +97,7 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 离线测试保留战斗秘密值与战斗标志分别模拟的回归，并验证范围隔离、延迟初始化、加载/订阅/绑定有界、主题和草稿行为。交付报告记录**最终 ZIP 解包后的测试**及 SHA256。
 
-**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer 及法师 Header/Body 正常；Arcane Soul 和 Overpowered Missiles 也已有用户对应场景正常的反馈。Clearcasting 本轮修复、颜色交互、其他未反馈 Proc/Free move 场景、alpha.11 非 Mage 技能路径、alpha.10 新主题视觉、本包战斗回归及 CPU/内存仍待客户端验收。离线测试只能验证提供的 API 响应下的行为，不能证明客户端所有天赋/热修/秘密值语义。Body 主题覆盖与真实 Mobility 覆盖始终分别记录。
+**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer、法师 Header/Body、当前法师 Proc、区域颜色和 Options 战斗锁在其测试场景正常。本轮新增职业的原生 Aura 匹配、战斗安全性、图形中点、触发/消费/刷新/重载及 CPU/内存均待客户端验收；没有据此生成实机性能数值。离线测试验证给定 API 响应下的行为，固定版本资料另行验证数据来源，两者均不等于目标客户端实测。Body 主题、Mobility 与 Proc 覆盖分别记录。
 
 ## 源码结构
 
@@ -101,4 +105,4 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`、`python tests/check_proc_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
 
-本轮安装与验收见 [UPGRADE_ALPHA13.md](docs/UPGRADE_ALPHA13.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，只在当前区域保存可选 color，不写入职业色默认值或重置现有样式/坐标。
+本轮安装与验收见 [UPGRADE_ALPHA15.md](docs/UPGRADE_ALPHA15.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，只按访问初始化当前范围，不写入职业色默认值或重置现有样式/坐标。
