@@ -16,7 +16,7 @@ function addon:Enable()
     self:CreateDisplay()
     self:ApplySettings()
     self.enabled = true
-    self:Print("Alpha 0.1 Phase 1 loaded. Type /cargoui for settings.")
+    self:Print("Alpha 0.1 loaded. Type /cui for settings and simulated Test Mode.")
 end
 
 local function OnPlayerLogin(self)

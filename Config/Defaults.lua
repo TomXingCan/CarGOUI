@@ -1,7 +1,7 @@
 local _, addon = ...
 
 addon.defaults = {
-    schemaVersion = 1,
+    schemaVersion = 2,
     enabled = true,
     position = { x = 0, y = 0 },
     font = {
@@ -11,7 +11,14 @@ addon.defaults = {
     },
     scale = 1,
     shadow = { enabled = true },
+    options = { position = { x = 0, y = 0 }, animatedTitle = true },
+    reminders = {},
 }
+
+-- Per-region offsets share the same database and validation pipeline as other settings.
+for _, entry in ipairs(addon.previewEntries) do
+    addon.defaults.reminders[entry.id] = { position = { x = 0, y = 0 } }
+end
 
 addon.limits = {
     offset = { min = -10000, max = 10000 },

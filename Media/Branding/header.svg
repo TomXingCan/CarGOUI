@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 128" width="1024" height="128">
+<title>CarGOUI Options header background</title>
+<desc>Original CarGOUI geometric artwork: blue arcane light, gold navigation ornament, and a cargo cube.</desc>
+<defs><radialGradient id="navy"><stop stop-color="#091625"/><stop offset="1" stop-color="#060c14"/></radialGradient></defs>
+<rect width="1024" height="128" fill="url(#navy)"/>
+<polyline points="4,42 4,12 30,12 40,4 173,4" fill="none" stroke="#9f8050" stroke-width="1" stroke-opacity="1.000" stroke-linejoin="round"/>
+<polyline points="4,88 4,116 30,116 40,124 1000,124 1020,104" fill="none" stroke="#9f8050" stroke-width="1" stroke-opacity="1.000" stroke-linejoin="round"/>
+<polyline points="470,4 988,4 1020,28 1020,83" fill="none" stroke="#9f8050" stroke-width="1" stroke-opacity="1.000" stroke-linejoin="round"/>
+<polyline points="176,4 330,4 350,13 380,13 400,4 466,4" fill="none" stroke="#3b718b" stroke-width="1" stroke-opacity="1.000" stroke-linejoin="round"/>
+<polyline points="487,116 650,116 675,106 976,106" fill="none" stroke="#3b718b" stroke-width="1" stroke-opacity="0.529" stroke-linejoin="round"/>
+<polyline points="625,22 808,22 838,12 965,12 1008,43" fill="none" stroke="#3b718b" stroke-width="1" stroke-opacity="0.588" stroke-linejoin="round"/>
+<polygon points="450,0 454,4 450,8 446,4" fill="#183849" stroke="#bd9c60" stroke-width="1"/>
+<polygon points="671,112 675,116 671,120 667,116" fill="#183849" stroke="#bd9c60" stroke-width="1"/>
+<polygon points="988,7 993,12 988,17 983,12" fill="#183849" stroke="#bd9c60" stroke-width="1"/>
+<polyline points="693,116 699,111" fill="none" stroke="#9f8050" stroke-width="1" stroke-opacity="0.627" stroke-linejoin="round"/>
+<polyline points="706,116 712,111" fill="none" stroke="#9f8050" stroke-width="1" stroke-opacity="0.627" stroke-linejoin="round"/>
+<polyline points="719,116 725,111" fill="none" stroke="#9f8050" stroke-width="1" stroke-opacity="0.627" stroke-linejoin="round"/>
+</svg>

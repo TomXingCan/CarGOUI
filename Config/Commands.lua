@@ -1,13 +1,13 @@
 local _, addon = ...
 
 local function PrintHelp()
-    addon:Print("/cargoui opens or closes Options. All display settings are available there.")
-    addon:Print("Optional commands: /cargoui help | status | show | hide | reset")
-    addon:Print("/cargoui position <x> <y>  (-10000 to 10000; right/up are positive)")
-    addon:Print("/cargoui font <friz|arial|morpheus|skurri|default>")
-    addon:Print("/cargoui fontsize <8-72>")
-    addon:Print("/cargoui outline <none|outline|thickoutline>")
-    addon:Print("/cargoui scale <0.5-3> | shadow <on|off>")
+    addon:Print("/cui opens or closes Options. All display settings are available there. /cargoui remains an alias.")
+    addon:Print("Optional commands: /cui help | status | show | hide | reset")
+    addon:Print("/cui position <x> <y>  (-10000 to 10000; right/up are positive)")
+    addon:Print("/cui font <friz|arial|morpheus|skurri|default>")
+    addon:Print("/cui fontsize <8-72>")
+    addon:Print("/cui outline <none|outline|thickoutline>")
+    addon:Print("/cui scale <0.5-3> | shadow <on|off>")
 end
 
 local function PrintStatus()
@@ -59,7 +59,7 @@ function addon:HandleSlashCommand(message)
             face = supported and canonicalFace or self.defaults.font.face
         end
         if not face then
-            self:Print("Font must be friz, arial, morpheus, skurri, or default. Type /cargoui help for help.")
+            self:Print("Font must be friz, arial, morpheus, skurri, or default. Type /cui help for help.")
             return
         end
         patch = { font = { face = face } }
@@ -77,20 +77,21 @@ function addon:HandleSlashCommand(message)
         self:Print("Settings reset to defaults.")
         return
     else
-        self:Print("Invalid command. Type /cargoui help for help.")
+        self:Print("Invalid command. Type /cui help for help.")
         return
     end
 
     local valid, errorMessage = self:UpdateSettings(patch)
     if not valid then
-        self:Print(errorMessage .. " Type /cargoui help for help.")
+        self:Print(errorMessage .. " Type /cui help for help.")
         return
     end
     PrintStatus()
 end
 
 function addon:RegisterSlashCommands()
-    SLASH_CARGOUI1 = "/cargoui"
+    SLASH_CARGOUI1 = "/cui"
+    SLASH_CARGOUI2 = "/cargoui"
     SlashCmdList.CARGOUI = function(message)
         addon:HandleSlashCommand(message)
     end

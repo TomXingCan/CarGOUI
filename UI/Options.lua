@@ -46,6 +46,7 @@ end
 
 local function ClearEdits(panel)
     panel.positionDirty = false
+    panel.entryPositionDirty = false
     for _, edit in ipairs(panel.editBoxes) do
         edit.dirty = false
         edit:ClearFocus()
@@ -92,7 +93,7 @@ local function CheckBox(panel, parent, text, x, y, buildPatch)
     return check
 end
 
-local function Dropdown(panel, parent, text, x, y, entries, buildPatch)
+local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect)
     Label(parent, text, x, y, 400, 22, "GameFontNormal")
     local dropdown = Button(parent, "", x, y - 26, 280, nil)
     local menu = CreateFrame("Frame", nil, panel, "BackdropTemplate")
@@ -107,7 +108,7 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch)
     for index, entry in ipairs(entries) do
         local value = entry.value
         local choice = Button(menu, entry.label, 6, -6 - (index - 1) * 28, 268, function()
-            Submit(panel, buildPatch(value))
+            if onSelect then onSelect(value) else Submit(panel, buildPatch(value)) end
             menu:Hide()
         end)
         choice.value = value
@@ -127,6 +128,22 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch)
             end
         end
     end
+    function dropdown:FilterChoices(allowed)
+        local count = 0
+        for _, choice in ipairs(self.choices) do
+            local available = allowed[choice.value] == true
+            choice:SetShown(available)
+            choice:SetEnabled(available)
+            if available then
+                choice:ClearAllPoints()
+                choice:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -6 - count * 28)
+                count = count + 1
+            end
+        end
+        menu:SetHeight(math.max(1, count) * 28 + 12)
+        self:SetEnabled(count > 0)
+        if count == 0 then self:SetText("No entries"); self.value = nil; menu:Hide() end
+    end
     panel.dropdowns[#panel.dropdowns + 1] = dropdown
     return dropdown
 end
@@ -135,7 +152,7 @@ local function Slider(panel, parent, text, y, range, step, buildPatch, errorText
     Label(parent, text, 0, y, 470, 22, "GameFontNormal")
     local slider = CreateFrame("Slider", nil, parent)
     slider:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 30)
-    slider:SetSize(288, 18)
+    slider:SetSize(330, 18)
     slider:SetOrientation("HORIZONTAL")
     slider:SetMinMaxValues(range.min, range.max)
     slider:SetValueStep(step)
@@ -149,9 +166,9 @@ local function Slider(panel, parent, text, y, range, step, buildPatch, errorText
     slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
     slider:GetThumbTexture():SetSize(18, 24)
     Label(parent, tostring(range.min), 0, y - 54, 56)
-    local maximum = Label(parent, tostring(range.max), 232, y - 54, 56)
+    local maximum = Label(parent, tostring(range.max), 274, y - 54, 56)
     maximum:SetJustifyH("RIGHT")
-    local edit = EditBox(panel, parent, 316, y - 24, 78)
+    local edit = EditBox(panel, parent, 362, y - 24, 112)
     slider.editBox = edit
     edit:SetScript("OnTextChanged", function(self, userInput)
         if userInput and not panel.refreshing then self.dirty = true end
@@ -165,7 +182,6 @@ local function Slider(panel, parent, text, y, range, step, buildPatch, errorText
         end
     end
     edit:SetScript("OnEnterPressed", CommitEdit)
-    slider.applyButton = Button(parent, L.apply, 406, y - 24, 68, CommitEdit)
     slider:SetScript("OnValueChanged", function(_, value)
         if panel.refreshing or not panel:IsShown() then return end
         local rounded = tonumber(string.format("%.2f", math.floor(value / step + 0.5) * step))
@@ -188,6 +204,7 @@ function addon:RefreshOptions()
     local controls, db = panel.controls, self.db
     panel.refreshing = true
     controls.enabled:SetChecked(db.enabled)
+    controls.animatedTitle:SetChecked(db.options.animatedTitle)
     if not panel.positionDirty then
         controls.x:SetText(string.format("%g", db.position.x))
         controls.y:SetText(string.format("%g", db.position.y))
@@ -198,21 +215,60 @@ function addon:RefreshOptions()
     SetSlider(controls.fontSize, db.font.size)
     SetSlider(controls.scale, db.scale)
     panel.refreshing = false
+    self:ApplyOptionsPosition()
+    self:RefreshTitleAnimation()
 
-    if panel.activeCategory == "preview" then
-        local preview = panel.previewFrame
-        self:ApplyFontSettings(preview.text)
-        preview.text:SetText("CarGOUI")
-        preview.text:SetScale(math.min(db.scale,
-            (preview:GetWidth() - 32) / math.max(1, preview.text:GetStringWidth()),
-            (preview:GetHeight() - 32) / math.max(1, preview.text:GetStringHeight())))
-        panel.previewStatus:SetText(string.format("X: %g    Y: %g    %s: %g    %s: %g",
-            db.position.x, db.position.y, L.fontSize, db.font.size, L.scale, db.scale))
-        panel.previewHidden:SetText(db.enabled and "" or L.previewHidden)
-        preview:Show()
-    else
-        panel.previewFrame:Hide()
+    local entries, allowed = self:GetPreviewEntries(), {}
+    for _, entry in ipairs(entries) do allowed[entry.id] = true end
+    if not allowed[panel.selectedPreviewEntry] then
+        panel.selectedPreviewEntry = entries[1] and entries[1].id
+        panel.entryPositionDirty = false
+        controls.entryX:ClearFocus()
+        controls.entryY:ClearFocus()
     end
+    local selected = panel.selectedPreviewEntry
+    controls.previewEntry:FilterChoices(allowed)
+    controls.previewEntry:SelectValue(selected)
+    controls.previewSingle:SetEnabled(selected ~= nil)
+    controls.previewAll:SetEnabled(selected ~= nil)
+    controls.entryReset:SetEnabled(selected ~= nil)
+    if selected then controls.entryX:Enable(); controls.entryY:Enable()
+    else controls.entryX:Disable(); controls.entryY:Disable() end
+    if not panel.entryPositionDirty then
+        local position = selected and db.reminders[selected].position
+        controls.entryX:SetText(position and string.format("%g", position.x) or "")
+        controls.entryY:SetText(position and string.format("%g", position.y) or "")
+    end
+    local state = self.previewState
+    local mode = state and state.mode or "off"
+    controls.previewStop:SetEnabled(mode ~= "off")
+    panel.previewStatus:SetText(not selected and L.noEntries or (mode == "off" and L.previewOff
+        or (not db.enabled and L.previewHidden or string.format(L.previewRunning,
+            mode == "all" and "all defined entries for this spec" or "selected entry"))))
+end
+
+function addon:ApplyOptionsPosition(force)
+    local panel, position = self.optionsFrame, self.db.options.position
+    if not panel or panel.dragging then return end
+    local scale = panel:GetScale()
+    if force or panel.appliedX ~= position.x or panel.appliedY ~= position.y or panel.appliedScale ~= scale then
+        panel:ClearAllPoints()
+        panel:SetPoint("CENTER", UIParent, "CENTER", position.x / scale, position.y / scale)
+        panel.appliedX, panel.appliedY, panel.appliedScale = position.x, position.y, scale
+    end
+end
+
+function addon:SaveOptionsPosition()
+    local panel = self.optionsFrame
+    if not panel or not panel.dragging then return end
+    panel:StopMovingOrSizing()
+    panel.dragging = false
+    local x, y = panel:GetCenter()
+    local px, py = UIParent:GetCenter()
+    if not x or not y or not px or not py then return end
+    local factor = panel:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    panel.appliedX = nil
+    self:UpdateSettings({ options = { position = { x = x * factor - px, y = y * factor - py } } })
 end
 
 function addon:SelectOptionsCategory(key)
@@ -234,6 +290,12 @@ function addon:SelectOptionsCategory(key)
     self:RefreshOptions()
 end
 
+local function OnOptionsSpecializationChanged(self, _, unit)
+    if unit and unit ~= "player" then return end
+    CloseMenus(self.optionsFrame)
+    self:RefreshOptions()
+end
+
 function addon:CreateOptions()
     if self.optionsFrame then return self.optionsFrame end
     local panel = CreateFrame("Frame", "CarGOUIOptionsFrame", UIParent, "BackdropTemplate")
@@ -242,14 +304,21 @@ function addon:CreateOptions()
     panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     panel:SetFrameStrata("DIALOG")
     panel:SetClampedToScreen(true)
+    panel:SetMovable(true)
     panel:EnableMouse(true)
     Backdrop(panel, 0.045, 0.06, 0.075)
     panel.controls, panel.pages, panel.categories = {}, {}, {}
     panel.editBoxes, panel.dropdowns = {}, {}
     panel.activeCategory = "general"
     self.optionsFrame = panel
-    Label(panel, "CarGOUI  |  " .. L.options, 22, -20, 580, 26, "GameFontNormalLarge")
-    Label(panel, "Alpha 0.1", 24, -50, 630)
+    local header = self:CreateOptionsBranding(panel)
+    panel.header = header
+    header:RegisterForDrag("LeftButton")
+    header:SetScript("OnDragStart", function()
+        panel.dragging = true
+        panel:StartMoving()
+    end)
+    header:SetScript("OnDragStop", function() addon:SaveOptionsPosition() end)
     local divider = panel:CreateTexture(nil, "ARTWORK")
     divider:SetColorTexture(0.22, 0.30, 0.34, 1)
     divider:SetPoint("TOPLEFT", panel, "TOPLEFT", 192, -82)
@@ -298,10 +367,10 @@ function addon:CreateOptions()
     Label(general, L.generalHint, 0, -32, 470, 32)
     panel.controls.enabled = CheckBox(panel, general, L.enabled, 0, -70,
         function(value) return { enabled = value } end)
-    Label(general, L.x, 0, -118, 130, 22, "GameFontNormal")
-    Label(general, L.y, 156, -118, 130, 22, "GameFontNormal")
-    panel.controls.x = EditBox(panel, general, 0, -146, 130)
-    panel.controls.y = EditBox(panel, general, 156, -146, 130)
+    Label(general, L.x, 0, -112, 222, 22, "GameFontNormal")
+    Label(general, L.y, 248, -112, 226, 22, "GameFontNormal")
+    panel.controls.x = EditBox(panel, general, 0, -138, 222)
+    panel.controls.y = EditBox(panel, general, 248, -138, 226)
     local function CommitPosition()
         panel.positionDirty = false
         local c = panel.controls
@@ -320,14 +389,18 @@ function addon:CreateOptions()
             if userInput and not panel.refreshing then panel.positionDirty = true end
         end)
     end
-    panel.controls.applyPosition = Button(general, L.apply, 316, -146, 158, CommitPosition)
-    panel.controls.centerPosition = Button(general, L.center, 0, -188, 130, function()
+    panel.controls.centerPosition = Button(general, "Reset global offsets", 0, -214, 180, function()
         panel.positionDirty = false
         Submit(panel, { position = { x = 0, y = 0 } })
     end)
-    Label(general, L.positionHint, 0, -232, 470, 40)
-    panel.controls.scale = Slider(panel, general, L.scale, -284, addon.limits.scale, 0.05,
+    Label(general, L.positionHint, 0, -174, 470, 36)
+    panel.controls.scale = Slider(panel, general, L.scale, -250, addon.limits.scale, 0.05,
         function(value) return { scale = value or false } end, L.invalidScale)
+    panel.controls.animatedTitle = CheckBox(panel, general, L.animatedTitle, 0, -332,
+        function(value) return { options = { animatedTitle = value } } end)
+    panel.controls.centerOptions = Button(general, L.centerOptions, 316, -332, 158, function()
+        Submit(panel, { options = { position = { x = 0, y = 0 } } })
+    end)
 
     local typography = panel.pages.typography
     Label(typography, L.appearanceHint, 0, -32, 470, 32)
@@ -345,29 +418,74 @@ function addon:CreateOptions()
 
     local page = panel.pages.preview
     Label(page, L.previewHint, 0, -32, 470, 44)
-    local preview = CreateFrame("Frame", nil, page, "BackdropTemplate")
-    preview:SetPoint("TOPLEFT", page, "TOPLEFT", 0, -94)
-    preview:SetSize(474, 150)
-    Backdrop(preview, 0.025, 0.03, 0.04)
-    preview.text = preview:CreateFontString(nil, "OVERLAY")
-    preview.text:SetPoint("CENTER", preview, "CENTER", 0, 0)
-    preview.text:SetTextColor(0.92, 0.97, 1, 1)
-    preview:Hide()
-    panel.previewFrame = preview
-    panel.previewStatus = Label(page, "", 0, -262, 470, 24)
-    panel.previewHidden = Label(page, "", 0, -294, 470, 24)
-    Label(page, L.previewFit, 0, -328, 470, 44)
+    local previewEntries = {}
+    for _, entry in ipairs(self.previewEntries) do
+        previewEntries[#previewEntries + 1] = { value = entry.id, label = entry.label }
+    end
+    panel.controls.previewEntry = Dropdown(panel, page, L.previewEntry, 0, -86, previewEntries, nil, function(id)
+        panel.selectedPreviewEntry = id
+        panel.entryPositionDirty = false
+        panel.controls.entryX:ClearFocus()
+        panel.controls.entryY:ClearFocus()
+        if addon.previewState and addon.previewState.mode == "single" then addon:SetPreview("single", id) end
+        addon:RefreshOptions()
+    end)
+    panel.controls.previewEntry:SetWidth(474)
+    local function StartPreview(mode)
+        local ok, message = addon:SetPreview(mode, panel.selectedPreviewEntry)
+        addon:RefreshOptions()
+        if ok == false then Feedback(panel, message or L.noEntries, true) end
+    end
+    panel.controls.previewSingle = Button(page, L.previewSingle, 0, -154, 148, function() StartPreview("single") end)
+    panel.controls.previewAll = Button(page, L.previewAll, 160, -154, 158, function() StartPreview("all") end)
+    panel.controls.previewStop = Button(page, L.previewStop, 330, -154, 144, function()
+        addon:StopPreview()
+        addon:RefreshOptions()
+    end)
+    Label(page, L.entryX, 0, -198, 140, 22, "GameFontNormal")
+    Label(page, L.entryY, 158, -198, 140, 22, "GameFontNormal")
+    panel.controls.entryX = EditBox(panel, page, 0, -224, 140)
+    panel.controls.entryY = EditBox(panel, page, 158, -224, 140)
+    local function CommitEntryPosition()
+        local id = panel.selectedPreviewEntry
+        if not id then return end
+        local x, y = tonumber(panel.controls.entryX:GetText()), tonumber(panel.controls.entryY:GetText())
+        panel.entryPositionDirty = false
+        if Submit(panel, { reminders = { [id] = { position = { x = x or false, y = y or false } } } }, L.invalidPosition) then
+            panel.controls.entryX:ClearFocus()
+            panel.controls.entryY:ClearFocus()
+        else panel.entryPositionDirty = true end
+    end
+    for _, edit in ipairs({ panel.controls.entryX, panel.controls.entryY }) do
+        edit:SetScript("OnEnterPressed", CommitEntryPosition)
+        edit:SetScript("OnTextChanged", function(_, userInput)
+            if userInput and not panel.refreshing then panel.entryPositionDirty = true end
+        end)
+    end
+    panel.controls.entryReset = Button(page, L.entryReset, 316, -224, 158, function()
+        local id = panel.selectedPreviewEntry
+        if not id then return end
+        panel.entryPositionDirty = false
+        Submit(panel, { reminders = { [id] = { position = { x = 0, y = 0 } } } })
+    end)
+    Label(page, L.entryHint, 0, -266, 470, 44)
+    panel.previewStatus = Label(page, "", 0, -324, 470, 48)
 
     panel:SetScript("OnShow", function()
         -- Re-evaluate only when opened; no frame or timer keeps the panel updating.
         panel:SetScale(math.min(1, UIParent:GetWidth() / 752, UIParent:GetHeight() / 592))
+        addon:ApplyOptionsPosition(true)
+        addon:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
     panel:SetScript("OnHide", function()
+        addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
+        addon:StopPreview()
+        addon:StopTitleAnimation()
+        addon:SaveOptionsPosition()
         CloseMenus(panel)
         ClearEdits(panel)
         CancelReset(panel)
-        preview:Hide()
     end)
     UISpecialFrames[#UISpecialFrames + 1] = "CarGOUIOptionsFrame"
     return panel

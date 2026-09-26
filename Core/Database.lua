@@ -29,7 +29,22 @@ local settingsSchema = {
     },
     scale = NumberSetting(addon.limits.scale, "Scale must be a number from 0.5 to 3."),
     shadow = { enabled = BooleanSetting },
+    options = {
+        animatedTitle = BooleanSetting,
+        position = {
+            x = NumberSetting(addon.limits.offset, "Window X must be from -10000 to 10000."),
+            y = NumberSetting(addon.limits.offset, "Window Y must be from -10000 to 10000."),
+        },
+    },
+    reminders = {},
 }
+
+for _, entry in ipairs(addon.previewEntries) do
+    settingsSchema.reminders[entry.id] = { position = {
+        x = NumberSetting(addon.limits.offset, "Region X must be from -10000 to 10000."),
+        y = NumberSetting(addon.limits.offset, "Region Y must be from -10000 to 10000."),
+    } }
+end
 
 local function ApplyDefaults(target, defaults)
     for key, value in pairs(defaults) do

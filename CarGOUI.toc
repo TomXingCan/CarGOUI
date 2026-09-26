@@ -1,16 +1,19 @@
 ## Interface: 120100
 ## Title: CarGOUI
-## Notes: Lightweight CarGOUI Alpha 0.1 framework (Phase 1).
+## Notes: Lightweight settings and simulated reminder previews. Live detection not yet implemented.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.2
+## Version: 0.1.0-alpha.3
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua
 Core\Events.lua
+Database\PreviewEntries.lua
 Config\Defaults.lua
 Config\Locale.lua
 Core\Database.lua
 UI\Display.lua
+UI\Preview.lua
+UI\Branding.lua
 UI\Options.lua
 Config\Commands.lua
 Core\Initialize.lua

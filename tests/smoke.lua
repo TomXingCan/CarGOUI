@@ -59,13 +59,15 @@ local function setup(saved, loggedIn, client)
     env.SlashCmdList = {}
     env.UISpecialFrames = {}
     env.UIParent = { name = "UIParent", GetWidth = function() return 1920 end,
-        GetHeight = function() return 1080 end }
+        GetHeight = function() return 1080 end, GetEffectiveScale = function() return 1 end }
+    function env.UIParent:GetCenter() return self:GetWidth() / 2, self:GetHeight() / 2 end
     env.STANDARD_TEXT_FONT = client.standardFont or "Fonts\\FRIZQT__.ttf"
     env.GameFontNormal = { template = "GameFontNormal" }
     env.GameFontHighlight = { template = "GameFontHighlight" }
     env.GameFontHighlightSmall = { template = "GameFontHighlightSmall" }
     local state = { frames = {}, errors = {}, messages = {}, loggedIn = loggedIn or false,
-        fontWrites = 0, textWrites = 0, timers = 0 }
+        fontWrites = 0, textWrites = 0, timers = 0, animations = {}, textures = {}, fontStrings = {},
+        specID = client.specID or 63, classToken = client.classToken or "MAGE", realReads = 0 }
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
         state.messages[#state.messages + 1] = message
@@ -77,8 +79,21 @@ local function setup(saved, loggedIn, client)
     env.InCombatLockdown = function() return false end
     env.GetBuildInfo = function() return "12.1.0", "99999", "Sep 26 2026", 120100 end
     env.GetLocale = function() return client.locale or "enUS" end
+    env.UnitClass = function() return state.classToken, state.classToken, state.classToken == "MAGE" and 8 or 1 end
+    env.GetSpecialization = function() return state.specID and 2 or nil end
+    env.GetSpecializationInfo = function() return state.specID, "Mock specialization" end
+    env.C_SpecializationInfo = { GetSpecialization = env.GetSpecialization, GetSpecializationInfo = env.GetSpecializationInfo }
+    local function noRealRead()
+        state.realReads = state.realReads + 1
+        error("Sample previews must not query live buffs, cooldowns, or charges")
+    end
+    env.UnitAura, env.UnitBuff, env.GetSpellCooldown, env.GetSpellCharges = noRealRead, noRealRead, noRealRead, noRealRead
+    env.C_UnitAuras = { GetPlayerAuraBySpellID = noRealRead, GetAuraDataByIndex = noRealRead,
+        GetAuraDataBySpellName = noRealRead }
+    env.C_Spell = { GetSpellCooldown = noRealRead, GetSpellCharges = noRealRead }
     env.C_Timer = { After = function() error("Options must not schedule polling timers") end,
-        NewTicker = function() error("Options must not schedule polling tickers") end }
+        NewTicker = function() error("Options must not schedule polling tickers") end,
+        NewTimer = function() error("Options must not schedule polling timers") end }
 
     local object = {}
     function object:GetName() return self.name end
@@ -97,6 +112,24 @@ local function setup(saved, loggedIn, client)
     function object:GetHeight() return self.height end
     function object:SetScale(scale) self.scale = scale end
     function object:GetScale() return self.scale or 1 end
+    function object:GetEffectiveScale()
+        return self:GetScale() * (self.parent and self.parent.GetEffectiveScale and self.parent:GetEffectiveScale() or 1)
+    end
+    function object:GetCenter()
+        if self.mockCenter then return unpack(self.mockCenter) end
+        local relative = self.point and self.point[2] or env.UIParent
+        local x, y = relative:GetCenter()
+        local ratio = (relative.GetEffectiveScale and relative:GetEffectiveScale() or 1) / self:GetEffectiveScale()
+        return x * ratio + (self.point and self.point[4] or 0), y * ratio + (self.point and self.point[5] or 0)
+    end
+    function object:SetMovable(value) self.movable = value end
+    function object:RegisterForDrag(...) self.dragButtons = { ... } end
+    function object:StartMoving()
+        assert(self.movable, "Only movable frames can start moving")
+        self.moving = true
+        state.movingFrame = self
+    end
+    function object:StopMovingOrSizing() self.moving = false; state.movingFrame = nil end
     function object:Show()
         local wasShown = self:IsShown()
         self.shown = true
@@ -184,6 +217,9 @@ local function setup(saved, loggedIn, client)
     function object:SetBackdropBorderColor(...) self.backdropBorderColor = { ... } end
     function object:SetColorTexture(...) self.color = { ... } end
     function object:SetTexture(value) self.texture = value end
+    function object:SetBlendMode(value) self.blendMode = value end
+    function object:SetRotation(value) self.rotation = value end
+    function object:SetAtlas(value) self.atlas = value end
     function object:SetVertexColor(...) self.vertexColor = { ... } end
     function object:SetTexCoord(...) self.texCoord = { ... } end
     function object:SetDrawLayer(layer) self.layer = layer end
@@ -246,13 +282,53 @@ local function setup(saved, loggedIn, client)
         local texture = setmetatable({ parent = self, name = name, layer = layer,
             scripts = {}, events = {}, kind = "Texture" }, { __index = object })
         if name then env[name] = texture end
+        state.textures[#state.textures + 1] = texture
         return texture
     end
     function object:CreateFontString(name, layer, template)
         local fontString = setmetatable({ parent = self, name = name, layer = layer,
             template = template, scripts = {}, events = {}, kind = "FontString" }, { __index = object })
         if name then env[name] = fontString end
+        state.fontStrings[#state.fontStrings + 1] = fontString
         return fontString
+    end
+    function object:CreateAnimationGroup()
+        local group = { parent = self, animations = {}, scripts = {}, playing = false, plays = 0, stops = 0 }
+        function group:SetLooping(value) self.looping = value end
+        function group:SetScript(event, callback)
+            assert(event ~= "OnUpdate" or callback == nil, "Decorative animation must use native interpolation")
+            self.scripts[event] = callback
+        end
+        function group:GetScript(event) return self.scripts[event] end
+        function group:Play()
+            self.playing, self.plays = true, self.plays + 1
+            if self.scripts.OnPlay then self.scripts.OnPlay(self) end
+        end
+        function group:Stop()
+            local playing = self.playing
+            self.playing, self.stops = false, self.stops + 1
+            if playing and self.scripts.OnStop then self.scripts.OnStop(self) end
+        end
+        function group:IsPlaying() return self.playing end
+        function group:SetToFinalAlpha(value) self.toFinalAlpha = value end
+        function group:CreateAnimation(kind)
+            local animation = { kind = kind }
+            function animation:SetOrder(value) self.order = value end
+            function animation:SetDuration(value) self.duration = value end
+            function animation:SetStartDelay(value) self.startDelay = value end
+            function animation:SetEndDelay(value) self.endDelay = value end
+            function animation:SetFromAlpha(value) self.fromAlpha = value end
+            function animation:SetToAlpha(value) self.toAlpha = value end
+            function animation:SetSmoothing(value) self.smoothing = value end
+            function animation:SetOffset(x, y) self.offset = { x, y } end
+            function animation:SetScale(x, y) self.scale = { x, y } end
+            function animation:SetFromScale(x, y) self.fromScale = { x, y } end
+            function animation:SetToScale(x, y) self.toScale = { x, y } end
+            self.animations[#self.animations + 1] = animation
+            return animation
+        end
+        state.animations[#state.animations + 1] = group
+        return group
     end
     env.CreateFrame = function(kind, name, parent, template)
         local frame = setmetatable({ kind = kind, name = name, parent = parent, template = template,
@@ -296,21 +372,15 @@ local function login(saved, late, client)
     return env, addon, state
 end
 
-local function anchor(addon, env, x, y)
-    local point, relative, relativePoint, actualX, actualY = addon.frame:GetPoint()
-    equal(point, "CENTER", "anchor")
-    equal(relative, env.UIParent, "relative frame")
-    equal(relativePoint, "CENTER", "relative anchor")
-    local scale = addon.frame:GetScale()
-    truthy(math.abs(actualX * scale - x) < 0.000001, "horizontal offset in UIParent units")
-    truthy(math.abs(actualY * scale - y) < 0.000001, "vertical offset in UIParent units")
+local function savedPosition(addon, env, x, y)
+    equal(addon.db.position.x, x, "saved horizontal reminder offset")
+    equal(addon.db.position.y, y, "saved vertical reminder offset")
 end
 
-local function font(addon, size, outline)
-    local face, actualSize, actualOutline = addon.frame.text:GetFont()
-    equal(face, "Fonts\\FRIZQT__.ttf", "font face")
-    equal(actualSize, size, "font size")
-    equal(actualOutline or "", outline, "font outline")
+local function savedFont(addon, size, outline)
+    equal(addon.db.font.face, "Fonts\\FRIZQT__.ttf", "saved font face")
+    equal(addon.db.font.size, size, "saved font size")
+    equal(addon.db.font.outline, outline, "saved font outline")
 end
 
 local function test(name, callback)
@@ -338,16 +408,16 @@ test("fresh install initializes once and waits for PLAYER_LOGIN", function()
     state:fire("ADDON_LOADED", "CarGOUI")
     truthy(addon.initialized, "own ADDON_LOADED initializes")
     equal(addon.db, env.CarGOUIDB, "saved variables reference")
-    equal(addon.db.schemaVersion, 1, "schema version")
+    equal(addon.db.schemaVersion, 2, "schema version migrated")
     equal(addon.frame, nil, "display before login")
-    equal(env.SLASH_CARGOUI1, "/cargoui", "slash alias")
+    equal(env.SLASH_CARGOUI1, "/cui", "primary slash")
+    equal(env.SLASH_CARGOUI2, "/cargoui", "compatibility slash")
     equal(type(env.SlashCmdList.CARGOUI), "function", "slash callback")
     state:fire("PLAYER_LOGIN")
     truthy(addon.enabled, "enabled after login")
-    truthy(addon.frame and addon.frame.text, "frame and font string created")
-    anchor(addon, env, 0, 0)
-    font(addon, 24, "OUTLINE")
-    truthy(addon.frame:GetWidth() > 0 and addon.frame:GetHeight() > 0, "display dimensions")
+    truthy(not addon.frame or not addon.frame:IsShown(), "no obsolete live placeholder at login")
+    savedPosition(addon, env, 0, 0)
+    savedFont(addon, 24, "OUTLINE")
     local frame, db, frameCount = addon.frame, addon.db, #state.frames
     state:fire("ADDON_LOADED", "CarGOUI")
     state:fire("PLAYER_LOGIN")
@@ -362,20 +432,22 @@ test("valid SavedVariables survive a simulated reload", function()
         font = { face = "Fonts\\FRIZQT__.ttf", size = 32, outline = "THICKOUTLINE" },
         scale = 1.25, shadow = { enabled = false }, futureOption = { value = 42 } }
     local env, addon = login(saved)
-    anchor(addon, env, 125, -75)
-    font(addon, 32, "THICKOUTLINE")
-    equal(addon.frame:GetScale(), 1.25, "saved scale")
+    savedPosition(addon, env, 125, -75)
+    savedFont(addon, 32, "THICKOUTLINE")
+    equal(addon.db.scale, 1.25, "saved scale")
     equal(addon.db.futureOption.value, 42, "unrelated key preserved")
     local env2, addon2 = login(copy(env.CarGOUIDB))
-    anchor(addon2, env2, 125, -75)
-    font(addon2, 32, "THICKOUTLINE")
+    savedPosition(addon2, env2, 125, -75)
+    savedFont(addon2, 32, "THICKOUTLINE")
     same(addon2.db, addon.db, "reload persistence")
 end)
 
-test("late loading after login creates the display", function()
-    local env, addon = login(nil, true)
-    truthy(addon.initialized and addon.enabled and addon.frame, "late-loaded startup")
-    anchor(addon, env, 0, 0)
+test("late loading initializes without showing fabricated reminder content", function()
+    local _, addon, state = login(nil, true)
+    truthy(addon.initialized and addon.enabled, "late-loaded startup")
+    truthy(not addon.frame or not addon.frame:IsShown(), "no obsolete live placeholder")
+    equal(addon.optionsFrame, nil, "late load defers Options")
+    equal(state.realReads, 0, "startup never queries live reminder state")
 end)
 
 test("malformed SavedVariables and non-finite numbers recover safely", function()
@@ -387,8 +459,8 @@ test("malformed SavedVariables and non-finite numbers recover safely", function(
         position = { x = math.huge, y = 0 / 0 },
         font = { face = false, size = -10, outline = "INVALID" },
         scale = math.huge, shadow = { enabled = "yes" }, other = "preserve me" })
-    anchor(addon, env, 0, 0)
-    font(addon, 24, "OUTLINE")
+    savedPosition(addon, env, 0, 0)
+    savedFont(addon, 24, "OUTLINE")
     equal(addon.db.enabled, true, "invalid enabled setting")
     equal(addon.db.scale, 1, "invalid scale")
     equal(addon.db.shadow.enabled, true, "invalid shadow")
@@ -399,8 +471,8 @@ test("malformed SavedVariables and non-finite numbers recover safely", function(
     equal(addon2.db.shadow.enabled, true, "malformed shadow")
     local env3, addon3 = login({ position = { x = 10001, y = -10001 },
         font = { size = 73 }, scale = 3.01 })
-    anchor(addon3, env3, 0, 0)
-    font(addon3, 24, "OUTLINE")
+    savedPosition(addon3, env3, 0, 0)
+    savedFont(addon3, 24, "OUTLINE")
     equal(addon3.db.scale, 1, "finite out-of-range scale")
 end)
 
@@ -410,31 +482,26 @@ test("slash commands apply position, typography, visibility and reset", function
     command("help")
     command("status")
     command("position 35 -60")
-    anchor(addon, env, 35, -60)
+    savedPosition(addon, env, 35, -60)
     equal(addon.db.position.x, 35, "saved x")
     equal(addon.db.position.y, -60, "saved y")
     command("fontsize 30")
-    font(addon, 30, "OUTLINE")
+    savedFont(addon, 30, "OUTLINE")
     command("outline none")
-    font(addon, 30, "")
+    savedFont(addon, 30, "")
     command("outline thickoutline")
-    font(addon, 30, "THICKOUTLINE")
+    savedFont(addon, 30, "THICKOUTLINE")
     command("outline outline")
-    font(addon, 30, "OUTLINE")
+    savedFont(addon, 30, "OUTLINE")
     command("scale 1.2")
-    equal(addon.frame:GetScale(), 1.2, "applied scale")
-    anchor(addon, env, 35, -60)
+    equal(addon.db.scale, 1.2, "saved scale")
+    savedPosition(addon, env, 35, -60)
     command("shadow off")
     equal(addon.db.shadow.enabled, false, "disabled shadow")
-    local shadowX, shadowY = addon.frame.text:GetShadowOffset()
-    equal(shadowX, 0, "disabled shadow x")
-    equal(shadowY, 0, "disabled shadow y")
     command("hide")
     equal(addon.db.enabled, false, "saved hidden state")
-    equal(addon.frame:IsShown(), false, "hidden display")
     command("show")
     equal(addon.db.enabled, true, "saved shown state")
-    equal(addon.frame:IsShown(), true, "shown display")
     command("shadow on")
     equal(addon.db.shadow.enabled, true, "enabled shadow")
     local prior = copy(addon.db)
@@ -446,9 +513,9 @@ test("slash commands apply position, typography, visibility and reset", function
         same(addon.db, prior, "invalid command must not mutate settings: " .. invalid)
     end
     command("reset")
-    anchor(addon, env, 0, 0)
-    font(addon, 24, "OUTLINE")
-    equal(addon.frame:GetScale(), 1, "reset scale")
+    savedPosition(addon, env, 0, 0)
+    savedFont(addon, 24, "OUTLINE")
+    equal(addon.db.scale, 1, "reset scale")
     equal(#state.errors, 0, "command errors")
 end)
 
@@ -457,7 +524,7 @@ test("saved hidden state remains hidden on reload", function()
     env.SlashCmdList.CARGOUI("hide")
     local _, reloaded = login(copy(addon.db))
     equal(reloaded.db.enabled, false, "hidden preference persisted")
-    equal(reloaded.frame:IsShown(), false, "reload honors hidden preference")
+    truthy(not reloaded.frame or not reloaded.frame:IsShown(), "reload shows no live placeholder")
 end)
 
 test("event dispatch uses a snapshot and ignores duplicate listeners", function()
@@ -608,8 +675,8 @@ test("settings API rejects malformed patches atomically and preserves DB identit
     equal(addon.db.position, position, "position reference stable")
     equal(addon.db.font, fontSettings, "font reference stable")
     equal(addon.db.shadow, shadow, "shadow reference stable")
-    anchor(addon, env, 40, 0)
-    font(addon, 28, "OUTLINE")
+    savedPosition(addon, env, 40, 0)
+    savedFont(addon, 28, "OUTLINE")
 end)
 
 test("all daily GUI controls route through shared settings and survive reload", function()
@@ -628,24 +695,23 @@ test("all daily GUI controls route through shared settings and survive reload", 
     end
     typeText(controls.x, "165")
     typeText(controls.y, "-85")
-    changed(function() controls.applyPosition:Click() end, "position")
-    anchor(addon, env, 165, -85)
+    changed(function() enter(controls.y, "-85") end, "position Enter")
+    savedPosition(addon, env, 165, -85)
     changed(function() controls.enabled:Click() end, "visibility")
     equal(addon.db.enabled, false, "checkbox hides actual display")
-    equal(addon.frame:IsShown(), false, "actual display hidden")
     controls.enabled:Click()
     changed(function() controls.scale:SetValue(1.35) end, "scale slider")
     equal(addon.db.scale, 1.35, "slider saves scale")
-    anchor(addon, env, 165, -85)
+    savedPosition(addon, env, 165, -85)
     changed(function() enter(controls.scale.editBox, "1.6") end, "scale numeric field")
     equal(addon.db.scale, 1.6, "numeric scale saved")
     addon:SelectOptionsCategory("typography")
     changed(function() controls.fontSize:SetValue(36) end, "font size slider")
-    font(addon, 36, "OUTLINE")
+    savedFont(addon, 36, "OUTLINE")
     changed(function() enter(controls.fontSize.editBox, "32") end, "font size numeric field")
-    font(addon, 32, "OUTLINE")
+    savedFont(addon, 32, "OUTLINE")
     changed(function() choose(controls.outline, "THICKOUTLINE") end, "outline dropdown")
-    font(addon, 32, "THICKOUTLINE")
+    savedFont(addon, 32, "THICKOUTLINE")
     truthy(controls.font.choices and #controls.font.choices >= 1, "font choices available")
     changed(function() choose(controls.font, controls.font.choices[1].value) end, "font dropdown")
     equal(addon.db.font.face, controls.font.choices[1].value, "font choice saved")
@@ -659,13 +725,13 @@ test("all daily GUI controls route through shared settings and survive reload", 
     equal(#state.errors, 0, "GUI interactions cause no errors")
 end)
 
-test("pending XY edits are atomic, preserved until Apply, and discarded on close", function()
+test("pending XY edits are atomic, preserved until Enter, and discarded on close", function()
     local env, addon = login(nil)
     local panel, controls = options(addon)
     typeText(controls.x, "250")
     typeText(controls.y, "not a number")
     local before = copy(addon.db)
-    controls.applyPosition:Click()
+    enter(controls.x, "250")
     same(addon.db, before, "invalid coordinate pair changes neither axis")
     truthy(type(panel.feedback:GetText()) == "string" and #panel.feedback:GetText() > 0,
         "invalid input has visible feedback")
@@ -673,7 +739,7 @@ test("pending XY edits are atomic, preserved until Apply, and discarded on close
     equal(controls.x:GetText(), "250", "unrelated update preserves pending X")
     equal(controls.y:GetText(), "not a number", "unrelated update preserves pending Y")
     enter(controls.y, "-125")
-    anchor(addon, env, 250, -125)
+    savedPosition(addon, env, 250, -125)
     typeText(controls.x, "900")
     controls.x:SetFocus()
     controls.close:Click()
@@ -682,7 +748,7 @@ test("pending XY edits are atomic, preserved until Apply, and discarded on close
     equal(tonumber(controls.x:GetText()), 250, "reopen discards unapplied X")
     equal(tonumber(controls.y:GetText()), -125, "reopen restores saved Y")
     controls.centerPosition:Click()
-    anchor(addon, env, 0, 0)
+    savedPosition(addon, env, 0, 0)
     equal(tonumber(controls.x:GetText()), 0, "center updates X field")
     equal(tonumber(controls.y:GetText()), 0, "center updates Y field")
 end)
@@ -725,37 +791,25 @@ test("categories expose working pages and disable unfinished features", function
     end
 end)
 
-test("preview and dropdowns stop on category change and close, hidden refresh is idle", function()
+test("dropdown lifecycle and hidden refresh remain idle", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
-    equal(panel.previewFrame:IsShown(), false, "no preview on General page")
-    addon:SelectOptionsCategory("preview")
-    equal(panel.previewFrame:IsShown(), true, "preview visible on Preview page")
-    addon:UpdateSettings({ font = { size = 40, outline = "" }, scale = 1.5, shadow = { enabled = false } })
-    local _, size, outline = panel.previewFrame.text:GetFont()
-    equal(size, 40, "visible preview updates font size")
-    equal(outline or "", "", "visible preview updates outline")
     addon:SelectOptionsCategory("typography")
-    equal(panel.previewFrame:IsShown(), false, "preview stops when leaving page")
     controls.outline:Click()
-    truthy(controls.outline.menu:IsShown(), "dropdown open before close")
+    truthy(controls.outline.menu:IsShown(), "dropdown open")
     addon:SelectOptionsCategory("general")
     equal(controls.outline.menu:IsShown(), false, "category change dismisses dropdown")
     addon:SelectOptionsCategory("typography")
     controls.outline:Click()
     panel:Hide()
     equal(controls.outline.menu:IsShown(), false, "closing window dismisses menu")
-    addon:ToggleOptions()
-    addon:SelectOptionsCategory("preview")
-    panel:Hide()
-    equal(panel.previewFrame:IsShown(), false, "closing window hides preview")
     local fontWrites, textWrites = state.fontWrites, state.textWrites
     for _ = 1, 5 do addon:RefreshOptions() end
-    equal(state.fontWrites, fontWrites, "hidden refresh does not rerender preview font")
+    equal(state.fontWrites, fontWrites, "hidden refresh does not redraw")
     equal(state.textWrites, textWrites, "hidden refresh does not update control text")
     local savedScale = addon.db.scale
     controls.scale:SetValue(2.25)
-    equal(addon.db.scale, savedScale, "hidden slider event cannot update settings")
+    equal(addon.db.scale, savedScale, "hidden slider cannot update settings")
     local calls = 0
     local update = addon.UpdateSettings
     addon.UpdateSettings = function(self, patch) calls = calls + 1; return update(self, patch) end
@@ -780,8 +834,8 @@ test("reset requires confirmation and close cancels an unconfirmed reset", funct
     same(addon.db, before, "closing cancels old reset confirmation")
     typeText(controls.x, "999")
     controls.reset:Click()
-    anchor(addon, env, 0, 0)
-    font(addon, 24, "OUTLINE")
+    savedPosition(addon, env, 0, 0)
+    savedFont(addon, 24, "OUTLINE")
     equal(addon.db.scale, 1, "confirmed reset restores scale")
     equal(tonumber(controls.x:GetText()), 0, "reset clears pending X")
     equal(tonumber(controls.y:GetText()), 0, "reset refreshes Y")
@@ -802,25 +856,39 @@ test("Escape from any editable field closes Options and releases input focus", f
     end
 end)
 
-test("preview fits maximum settings and slider steps remain in range", function()
-    local _, addon = login(nil)
+test("sliders round safely while numeric inputs retain precision and require Enter", function()
+    local _, addon, state = login(nil)
     local panel, controls = options(addon)
+    equal(controls.applyPosition, nil, "no XY Apply button")
+    equal(controls.scale.applyButton, nil, "no scale Apply button")
+    equal(controls.fontSize.applyButton, nil, "no font-size Apply button")
+    for _, frame in ipairs(state.frames) do
+        if frame.kind == "Button" then
+            truthy(frame:GetText() ~= "Apply", "Options contains no normal-setting Apply buttons")
+        end
+    end
     for _, value in ipairs({ 0.5, 0.5000001, 1.049999999, 2.999999999, 3 }) do
         controls.scale:SetValue(value)
         truthy(addon:IsNumberInRange(addon.db.scale, addon.limits.scale), "rounded scale stays valid")
         truthy(math.abs(addon.db.scale * 20 - math.floor(addon.db.scale * 20 + 0.5)) < 0.00001,
             "slider produces 0.05 increments")
     end
-    addon:UpdateSettings({ font = { size = 72 }, scale = 3 })
-    addon:SelectOptionsCategory("preview")
-    local preview = panel.previewFrame
-    truthy(preview.text:GetStringWidth() * preview.text:GetScale() <= preview:GetWidth() - 32 + 0.001,
-        "maximum-size preview fits horizontal bounds")
-    truthy(preview.text:GetStringHeight() * preview.text:GetScale() <= preview:GetHeight() - 32 + 0.001,
-        "maximum-size preview fits vertical bounds")
-    equal(addon.db.scale, 3, "fitting preview does not alter actual scale setting")
-    equal(addon.db.font.size, 72, "fitting preview does not alter actual font setting")
-    equal(addon.frame:GetScale(), 3, "display keeps requested scale")
+    enter(controls.scale.editBox, "1.2375")
+    equal(addon.db.scale, 1.2375, "typed scale keeps precision")
+    enter(controls.fontSize.editBox, "31.5")
+    equal(addon.db.font.size, 31.5, "typed font size keeps precision")
+    typeText(controls.scale.editBox, "2.8")
+    typeText(controls.fontSize.editBox, "70")
+    controls.scale.editBox:SetFocus()
+    controls.scale.editBox:ClearFocus()
+    controls.fontSize.editBox:SetFocus()
+    controls.fontSize.editBox:ClearFocus()
+    equal(addon.db.scale, 1.2375, "unconfirmed scale stays pending")
+    equal(addon.db.font.size, 31.5, "unconfirmed font stays pending")
+    panel:Hide()
+    addon:ToggleOptions()
+    equal(tonumber(controls.scale.editBox:GetText()), 1.2375, "closing discards pending scale")
+    equal(tonumber(controls.fontSize.editBox:GetText()), 31.5, "closing discards pending font size")
 end)
 
 test("interactive controls stay inside their pages and panel fits small screens", function()
@@ -846,11 +914,11 @@ test("interactive controls stay inside their pages and panel fits small screens"
     truthy(panel:GetHeight() * panel:GetScale() <= 480, "panel fits short viewport")
 end)
 
-test("zhCN clients use English Options on first load and saved-data reload", function()
+test("zhCN clients retain English Options and saved appearance on reload", function()
     local saved
     for pass = 1, 2 do
         local env, addon = login(saved, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
-        equal(env.GetLocale(), "zhCN", "regression runs on a Chinese client")
+        equal(env.GetLocale(), "zhCN", "regression runs on Chinese client")
         if pass == 2 then
             equal(addon.db.position.x, 37, "saved position survives reload")
             equal(addon.db.font.size, 32, "saved appearance survives reload")
@@ -861,26 +929,18 @@ test("zhCN clients use English Options on first load and saved-data reload", fun
         for _, category in ipairs(panel.categories) do categories[category.key] = category end
         equal(categories.general:GetText(), "> General", "active category is English")
         equal(categories.typography:GetText(), "Font & appearance", "appearance category is English")
-        equal(controls.applyPosition:GetText(), "Apply", "apply button is English")
         equal(controls.close:GetText(), "Close", "close button is English")
-        equal(panel.feedback:GetText(), "Changes apply immediately. For typed numbers, press Enter or Apply.",
-            "opening guidance is English")
-
+        truthy(panel.feedback:GetText():find("Enter", 1, true), "opening guidance teaches Enter")
+        truthy(not panel.feedback:GetText():find("Apply", 1, true), "obsolete Apply instruction gone")
         enter(controls.x, "invalid")
-        equal(panel.feedback:GetText(), "Enter X and Y from -10000 to 10000.",
-            "validation feedback is English")
+        truthy(panel.feedback:GetText():find("X", 1, true), "coordinate error is readable")
         enter(controls.x, "37")
         equal(panel.feedback:GetText(), "Settings applied.", "success feedback is English")
         addon:SelectOptionsCategory("typography")
         equal(controls.outline.choices[1]:GetText(), "None", "dropdown choice is English")
         enter(controls.fontSize.editBox, "32")
-        addon:SelectOptionsCategory("preview")
-        equal(panel.previewStatus:GetText(), "X: 37    Y: 0    Font size: 32    Scale: 1",
-            "dynamic preview labels are English")
         controls.reset:Click()
         equal(controls.reset:GetText(), "Confirm reset", "reset confirmation button is English")
-        equal(panel.feedback:GetText(), "Click Confirm reset to restore all CarGOUI defaults.",
-            "reset confirmation guidance is English")
         controls.close:Click()
         saved = copy(addon.db)
     end
@@ -894,8 +954,6 @@ test("font menu applies each supported face and localized client font persists",
     for _, entry in ipairs(controls.font.choices) do
         choose(controls.font, entry.value)
         equal(addon.db.font.face, entry.value, "font dropdown writes chosen face")
-        local face = addon.frame.text:GetFont()
-        equal(face, entry.value, "font dropdown changes display face")
         if entry.value == "Fonts\\FRIZQT__.ttf" then foundFriz = true end
         if entry.value == "Fonts\\ARKai_T.ttf" then foundClient = true end
     end
@@ -908,6 +966,343 @@ test("font menu applies each supported face and localized client font persists",
     truthy(ok, "supported font accepted case-insensitively")
     equal(addon.db.font.face, "Fonts\\FRIZQT__.ttf", "font path canonicalized")
     equal(panel:IsShown(), true, "Options created successfully with a localized client font")
+end)
+
+
+test("only the Options header starts dragging and its saved position is independent", function()
+    local env, addon, state = login(nil)
+    addon:UpdateSettings({ position = { x = 37, y = -19 } })
+    local panel, controls = options(addon)
+    truthy(panel.movable and panel.clampedToScreen, "Options movable and clamped")
+    local header = panel.header
+    truthy(header and header.parent == panel, "distinct title drag region")
+    same(header.dragButtons, { "LeftButton" }, "header accepts only left drag")
+    equal(panel:GetScript("OnDragStart"), nil, "panel body never starts dragging")
+    equal(panel:GetScript("OnDragStop"), nil, "panel body has no drag handler")
+    for _, frame in ipairs(state.frames) do
+        if frame ~= header then
+            equal(frame:GetScript("OnDragStart"), nil, "only header owns a drag-start handler")
+        end
+    end
+    header:GetScript("OnDragStart")(header, "LeftButton")
+    equal(state.movingFrame, panel, "header starts moving Options")
+    panel.mockCenter = { (960 + 120) / panel:GetScale(), (540 - 80) / panel:GetScale() }
+    header:GetScript("OnDragStop")(header)
+    equal(panel.moving, false, "release stops moving")
+    equal(addon.db.options.position.x, 120, "window X saved independently")
+    equal(addon.db.options.position.y, -80, "window Y saved independently")
+    savedPosition(addon, env, 37, -19)
+    panel.mockCenter = nil
+    local saved = copy(addon.db)
+    panel:Hide()
+    addon:ToggleOptions()
+    local x, y = panel:GetCenter()
+    equal(x * panel:GetScale(), 1080, "reopen restores X")
+    equal(y * panel:GetScale(), 460, "reopen restores Y")
+    local _, reload = login(saved)
+    local reloaded = options(reload)
+    local rx, ry = reloaded:GetCenter()
+    equal(rx * reloaded:GetScale(), 1080, "reload restores X")
+    equal(ry * reloaded:GetScale(), 460, "reload restores Y")
+    controls.centerOptions:Click()
+    equal(addon.db.options.position.x, 0, "center-window button resets only Options X")
+    equal(addon.db.options.position.y, 0, "center-window button resets only Options Y")
+    savedPosition(addon, env, 37, -19)
+    header:GetScript("OnDragStart")(header, "LeftButton")
+    panel.mockCenter = { 960 - 45, 540 + 30 }
+    panel:Hide()
+    equal(panel.moving, false, "closing during drag releases movement")
+    equal(addon.db.options.position.x, -45, "closing during drag saves final window X")
+    equal(addon.db.options.position.y, 30, "closing during drag saves final window Y")
+end)
+
+test("title animation defaults on, has a static fallback, and stops when hidden", function()
+    local _, addon, state = login(nil)
+    equal(#state.animations, 0, "branding animation deferred until Options opens")
+    local panel, controls = options(addon)
+    local group = panel.titleAnimation
+    truthy(group and #group.animations > 0, "native animation group created")
+    equal(addon.db.options.animatedTitle, true, "animated title defaults on")
+    truthy(group:IsPlaying(), "visible Options plays title animation")
+    truthy(panel.brandingHeader:IsShown(), "designed title is visible")
+    for _, animation in ipairs(group.animations) do
+        truthy(animation.kind == "Alpha" or animation.kind == "Translation" or animation.kind == "Scale",
+            "decoration uses native animation types")
+        truthy(animation.duration and animation.duration > 0, "native animation has duration")
+    end
+    local count = #state.animations
+    controls.animatedTitle:Click()
+    equal(addon.db.options.animatedTitle, false, "toggle saved")
+    equal(group:IsPlaying(), false, "disabled title animation stops")
+    truthy(panel.brandingHeader:IsShown(), "disabled animation keeps static title art")
+    controls.animatedTitle:Click()
+    truthy(group:IsPlaying(), "enabled title animation resumes")
+    panel:Hide()
+    equal(group:IsPlaying(), false, "closing Options stops native animation")
+    addon:RefreshTitleAnimation()
+    equal(group:IsPlaying(), false, "hidden refresh cannot restart title animation")
+    addon:ToggleOptions()
+    equal(panel.titleAnimation, group, "reopen reuses native animation")
+    equal(#state.animations, count, "reopen does not allocate animation groups")
+    truthy(group:IsPlaying(), "reopen resumes enabled animation")
+    controls.animatedTitle:Click()
+    local _, reloaded = login(copy(addon.db))
+    local reloadPanel = options(reloaded)
+    equal(reloadPanel.titleAnimation:IsPlaying(), false, "disabled preference survives reload")
+end)
+
+test("new Options settings validate atomically and migrate malformed saved data", function()
+    local _, addon = login({ schemaVersion = 1, options = { position = { x = math.huge, y = "bad" },
+        animatedTitle = "yes" }, position = { x = 15, y = -25 }, futureOption = true })
+    equal(addon.db.options.position.x, 0, "bad window X normalized")
+    equal(addon.db.options.position.y, 0, "bad window Y normalized")
+    equal(addon.db.options.animatedTitle, true, "bad title toggle normalized")
+    equal(addon.db.position.x, 15, "migration preserves reminder X")
+    equal(addon.db.position.y, -25, "migration preserves reminder Y")
+    truthy(addon.db.futureOption, "migration preserves unknown keys")
+    local before = copy(addon.db)
+    for _, patch in ipairs({
+        { options = false }, { options = { animatedTitle = 1 } },
+        { options = { position = { x = 1, y = 0/0 } }, scale = 2 },
+        { options = { position = { x = math.huge } } }, { options = { unsupported = true } },
+    }) do
+        local ok, message = addon:UpdateSettings(patch)
+        equal(ok, false, "invalid Options patch rejected")
+        truthy(type(message) == "string", "validation message returned")
+        same(addon.db, before, "invalid Options patch has no partial effects")
+    end
+end)
+
+
+local function visiblePreviews(addon)
+    local result = {}
+    for id, frame in pairs(addon.previewFrames or {}) do
+        if frame:IsShown() then result[id] = frame end
+    end
+    return result
+end
+
+local function countKeys(value)
+    local count = 0
+    for _ in pairs(value) do count = count + 1 end
+    return count
+end
+
+local function reminderAnchor(frame, entry, addon, env)
+    local point, relative, relativePoint, x, y = frame:GetPoint()
+    equal(point, "CENTER", "reminder anchor")
+    equal(relative, env.UIParent, "preview renders in actual game UI space")
+    equal(relativePoint, "CENTER", "reminder relative anchor")
+    local perEntry = addon.db.reminders[entry.id].position
+    local expectedX = entry.anchor.x + addon.db.position.x + perEntry.x
+    local expectedY = entry.anchor.y + addon.db.position.y + perEntry.y
+    truthy(math.abs(x * frame:GetScale() - expectedX) < 0.001, "rendered reminder X matches visual region and offsets")
+    truthy(math.abs(y * frame:GetScale() - expectedY) < 0.001, "rendered reminder Y matches visual region and offsets")
+end
+
+test("preview catalog separates Mage specs and gives each Proc region its own anchor", function()
+    local _, addon, state = login(nil)
+    local seen = {}
+    for _, entry in ipairs(addon.previewEntries) do
+        truthy(not seen[entry.id], "preview IDs unique")
+        seen[entry.id] = true
+        truthy(type(entry.label) == "string" and type(entry.region) == "string", "entry explains reminder region")
+        truthy(addon.db.reminders[entry.id], "known entry settings initialized")
+        if entry.kind == "proc" then
+            truthy(entry.anchor.x ~= 0 or entry.anchor.y ~= 0, "Proc timers do not use global screen center")
+        end
+    end
+    for specID, expected in pairs({ [62] = 3, [63] = 3, [64] = 4 }) do
+        state.specID = specID
+        local entries = addon:GetPreviewEntries()
+        equal(#entries, expected, "defined entries for current Mage spec")
+        local regions = {}
+        for _, entry in ipairs(entries) do
+            equal(entry.specID, specID, "no cross-spec reminder entry")
+            if entry.kind == "proc" then
+                local key = entry.anchor.x .. ":" .. entry.anchor.y
+                truthy(not regions[key], "separate Proc regions have separate centers")
+                regions[key] = true
+            end
+        end
+    end
+    state.classToken = "WARRIOR"
+    equal(#addon:GetPreviewEntries(), 0, "unsupported class has no fabricated preview entries")
+    equal(state.realReads, 0, "catalog does not query real aura/cooldown state")
+end)
+
+test("external single/all preview renders fixed samples and cleans up on stop and close", function()
+    local env, addon, state = login(nil)
+    equal(countKeys(visiblePreviews(addon)), 0, "no samples at login")
+    local panel, controls = options(addon)
+    equal(panel.previewFrame, nil, "obsolete static in-panel preview removed")
+    addon:SelectOptionsCategory("preview")
+    local entries = addon:GetPreviewEntries()
+    choose(controls.previewEntry, entries[1].id)
+    local saved = copy(addon.db)
+    controls.previewSingle:Click()
+    equal(addon.previewState.mode, "single", "single preview mode")
+    equal(addon.previewState.entryId, entries[1].id, "selected sample remembered for session")
+    equal(countKeys(visiblePreviews(addon)), 1, "single mode shows one defined entry")
+    controls.previewAll:Click()
+    equal(addon.previewState.mode, "all", "all mode selected")
+    equal(countKeys(visiblePreviews(addon)), #entries, "all current-spec entries visible")
+    local frames = {}
+    for _, entry in ipairs(entries) do
+        local frame = addon.previewFrames[entry.id]
+        frames[entry.id] = frame
+        equal(frame:GetParent(), env.UIParent, "external frame parent is UIParent")
+        equal(frame.mouseEnabled, false, "reminder cannot intercept mouse input")
+        equal(frame:GetScript("OnDragStart"), nil, "reminder anchors are never draggable")
+        reminderAnchor(frame, entry, addon, env)
+        truthy(frame.guidance and frame.guidance:IsShown(), "test mode explains target visual region")
+        truthy(frame.guidance:GetFrameLevel() < frame:GetFrameLevel(), "test guidance stays behind readable timer text")
+        if entry.kind == "mobility" then
+            truthy(frame.text:GetText():find("No Shimmer", 1, true), "Mobility uses sample label")
+            truthy(frame.text:GetText():find("8.0", 1, true), "Mobility uses fixed sample time")
+        else
+            truthy(frame.text:GetText():match("^%d+%.%d+$"), "Proc timer has only numeric sample text")
+        end
+    end
+    same(addon.db, saved, "sample content never pollutes saved reminder settings")
+    controls.previewStop:Click()
+    equal(addon.previewState.mode, "off", "Stop returns to off")
+    equal(countKeys(visiblePreviews(addon)), 0, "Stop hides all simulated reminders")
+    for _, frame in pairs(frames) do equal(frame.guidance:IsVisible(), false, "Stop hides region guidance") end
+    controls.previewAll:Click()
+    for id, frame in pairs(frames) do equal(addon.previewFrames[id], frame, "preview frames reused") end
+    controls.close:Click()
+    equal(countKeys(visiblePreviews(addon)), 0, "closing window removes external preview")
+    equal(addon.previewState.mode, "off", "closing resets transient preview mode")
+    for _, frame in ipairs(state.frames) do
+        equal(frame:IsEventRegistered("PLAYER_SPECIALIZATION_CHANGED"), false, "closed preview unsubscribes spec changes")
+        equal(frame:GetScript("OnUpdate"), nil, "preview never polls per frame")
+    end
+    addon:ToggleOptions()
+    equal(countKeys(visiblePreviews(addon)), 0, "reopening does not silently re-enable samples")
+    equal(state.realReads, 0, "simulated content never reads live buffs or cooldowns")
+end)
+
+test("external preview reacts to shared settings and selected-entry positions without moving Proc centers", function()
+    local env, addon = login(nil)
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("preview")
+    local entries = addon:GetPreviewEntries()
+    local selected
+    for _, entry in ipairs(entries) do if entry.kind == "proc" then selected = entry; break end end
+    truthy(selected, "spec defines a Proc preview")
+    choose(controls.previewEntry, selected.id)
+    controls.previewAll:Click()
+    typeText(controls.entryX, "34")
+    typeText(controls.entryY, "invalid")
+    local prior = copy(addon.db)
+    enter(controls.entryX, "34")
+    same(addon.db, prior, "invalid entry offset pair is atomic")
+    enter(controls.entryY, "-17")
+    equal(addon.db.reminders[selected.id].position.x, 34, "per-entry X saved")
+    equal(addon.db.reminders[selected.id].position.y, -17, "per-entry Y saved")
+    for _, entry in ipairs(entries) do
+        if entry.id ~= selected.id then
+            equal(addon.db.reminders[entry.id].position.x, 0, "editing one region leaves other X offsets alone")
+            equal(addon.db.reminders[entry.id].position.y, 0, "editing one region leaves other Y offsets alone")
+        end
+    end
+    addon:SelectOptionsCategory("general")
+    enter(controls.x, "25")
+    enter(controls.y, "-50")
+    enter(controls.scale.editBox, "1.5")
+    addon:SelectOptionsCategory("typography")
+    enter(controls.fontSize.editBox, "40")
+    choose(controls.outline, "THICKOUTLINE")
+    choose(controls.font, "Fonts\\MORPHEUS.TTF")
+    controls.shadow:Click()
+    equal(countKeys(visiblePreviews(addon)), #entries, "preview stays active while editing appearance")
+    for _, entry in ipairs(entries) do
+        local frame = addon.previewFrames[entry.id]
+        reminderAnchor(frame, entry, addon, env)
+        local face, size, outline = frame.text:GetFont()
+        equal(face, "Fonts\\MORPHEUS.TTF", "external renderer updates font")
+        equal(size, 40, "external renderer updates font size")
+        equal(outline, "THICKOUTLINE", "external renderer updates outline")
+        equal(frame:GetScale(), 1.5, "external renderer updates scale")
+        if entry.kind == "proc" then
+            local guide = frame.guidance
+            local point, relative, relativePoint, x, y = guide:GetPoint()
+            equal(point, "CENTER", "Proc guide anchor")
+            equal(relative, env.UIParent, "Proc shape stays in stock UI space")
+            equal(relativePoint, "CENTER", "Proc guide relative anchor")
+            local factor = guide:GetEffectiveScale() / env.UIParent:GetEffectiveScale()
+            truthy(math.abs(factor - 1) < 0.000001, "Proc shape ignores typography scale")
+            truthy(math.abs(x * factor - entry.anchor.x) < 0.001, "timer offsets never move stock guide X")
+            truthy(math.abs(y * factor - entry.anchor.y) < 0.001, "timer offsets never move stock guide Y")
+        end
+        local sx, sy = frame.text:GetShadowOffset()
+        equal(sx, 0, "external renderer disables shadow X")
+        equal(sy, 0, "external renderer disables shadow Y")
+    end
+    local reloadEnv, reloaded = login(copy(addon.db))
+    options(reloaded)
+    truthy(reloaded:SetPreview("single", selected.id), "saved region can be previewed after reload")
+    equal(reloaded.db.reminders[selected.id].position.x, 34, "per-region X persists after reload")
+    equal(reloaded.db.reminders[selected.id].position.y, -17, "per-region Y persists after reload")
+    reminderAnchor(reloaded.previewFrames[selected.id], selected, reloaded, reloadEnv)
+    addon:SelectOptionsCategory("preview")
+    controls.entryReset:Click()
+    equal(addon.db.reminders[selected.id].position.x, 0, "entry reset restores default-region X")
+    equal(addon.db.reminders[selected.id].position.y, 0, "entry reset restores default-region Y")
+    typeText(controls.entryX, "900")
+    panel:Hide()
+    addon:ToggleOptions()
+    equal(tonumber(controls.entryX:GetText()), 0, "closing discards uncommitted entry offset")
+end)
+
+test("active preview follows current specialization and unsupported classes disable preview controls", function()
+    local _, addon, state = login(nil)
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("preview")
+    controls.previewAll:Click()
+    state.specID = 64
+    state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(countKeys(visiblePreviews(addon)), 4, "active all mode switches to Frost entries")
+    for id in pairs(visiblePreviews(addon)) do truthy(id:find("mage_frost_", 1, true), "old spec samples hidden") end
+    state.classToken = "WARRIOR"
+    state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(countKeys(visiblePreviews(addon)), 0, "unsupported class removes stale samples")
+    equal(controls.previewSingle:IsEnabled(), false, "unsupported single-preview action disabled")
+    equal(controls.previewAll:IsEnabled(), false, "unsupported all-preview action disabled")
+    truthy(panel.previewStatus:GetText() and #panel.previewStatus:GetText() > 0, "unsupported state explained")
+    equal(state.realReads, 0, "specialization change does not read real reminder state")
+end)
+
+test("preview validation, visibility and shared renderer keep sample state separate", function()
+    local _, addon, state = login(nil)
+    local entries = addon:GetPreviewEntries()
+    local entry = entries[2]
+    equal(addon:SetPreview("single", entry.id), false, "cannot start preview with closed Options")
+    equal(countKeys(visiblePreviews(addon)), 0, "closed request allocates no visible samples")
+    options(addon)
+    equal(addon:SetPreview("invalid", entry.id), false, "unknown mode rejected")
+    equal(addon:SetPreview("single", "missing-entry"), false, "unknown entry rejected")
+    truthy(addon:SetPreview("all"), "all preview started")
+    addon:UpdateSettings({ enabled = false })
+    equal(countKeys(visiblePreviews(addon)), 0, "display preference hides all samples")
+    for _, frame in pairs(addon.previewFrames) do
+        truthy(not frame.guidance or not frame.guidance:IsVisible(), "hidden samples have no visible guidance")
+    end
+    addon:UpdateSettings({ enabled = true })
+    equal(countKeys(visiblePreviews(addon)), #entries, "re-enabling restores requested test mode")
+    local preview = addon.previewFrames[entry.id]
+    local liveFrame = addon:AcquireReminderFrame(entry, "live")
+    truthy(liveFrame ~= preview, "live and preview frames never share a pool entry")
+    local callerContent = { timer = "6.0" }
+    addon:RenderReminder(liveFrame, entry, callerContent, false)
+    equal(liveFrame.text:GetText(), "6.0", "shared Proc renderer displays timer only")
+    truthy(not liveFrame.guidance or not liveFrame.guidance:IsShown(), "normal renderer has no Test Mode decorations")
+    same(callerContent, { timer = "6.0" }, "rendering leaves caller state untouched")
+    addon:StopPreview()
+    equal(liveFrame.text:GetText(), "6.0", "stopping samples does not replace caller reminder content")
+    truthy(liveFrame:IsShown(), "stopping preview leaves a separate caller-owned frame alone")
+    equal(state.realReads, 0, "renderer never reads live combat state")
 end)
 
 print("All " .. total .. " offline smoke tests passed.")

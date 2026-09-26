@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+<title>CarGOUI soft blue title radiance</title>
+<desc>Original CarGOUI geometric artwork: blue arcane light, gold navigation ornament, and a cargo cube.</desc>
+<defs><radialGradient id="glow"><stop stop-color="#42acec" stop-opacity="0.392"/><stop offset="1" stop-color="#42acec" stop-opacity="0"/></radialGradient></defs>
+<circle cx="64" cy="64" r="64" fill="url(#glow)"/>
+</svg>
