@@ -28,7 +28,7 @@ end
 
 function addon:NewMobilityConfig()
     return { enabled = true, style = self:NewReminderStyle(),
-        position = self:NewReminderPosition(), preferences = {} }
+        position = self:NewReminderPosition(), freeMovePosition = self:NewReminderPosition(), preferences = {} }
 end
 
 function addon:NewProcConfig()

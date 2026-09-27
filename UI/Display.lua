@@ -109,6 +109,31 @@ function addon:RefreshReminderStyle(key)
     end
 end
 
+-- Position ownership is distinct from font ownership: Free move and ordinary
+-- Mobility intentionally share one class font, but never translate together.
+-- Only public addon wrappers are positioned; native timing/alpha are untouched.
+function addon:RefreshReminderPositions(changes)
+    for _, pool in pairs(self.reminderFrames or {}) do
+        for _, frame in pairs(pool) do
+            local entry = frame.reminderEntry
+            if entry and self:GetReminderStyleKey(entry) then
+                local changed
+                if entry.kind == "mobility" then
+                    if entry.freeMove then changed = changes.freeMove
+                    else changed = changes.mobility end
+                elseif entry.kind == "proc" then changed = changes.proc[entry.id] end
+                if changed then
+                    if frame.nativeAuraOwned then self:StyleAuraReminder(frame)
+                    else self:LayoutReminder(frame, entry) end
+                    if frame.channel == "preview" then
+                        self:UpdatePreviewGuidance(frame, entry, frame:IsShown())
+                    end
+                end
+            end
+        end
+    end
+end
+
 function addon:ApplySettings()
     if not self.db then return end
     if self.ConfigureMobility then self:ConfigureMobility() end

@@ -310,6 +310,9 @@ function addon:GetProcConfig(specID)
     for id, region in pairs(config.regions) do
         if type(region) == "table" then
             region = ShallowCopy(region)
+            -- Detach positions before any direct proc.regions patch can merge
+            -- into them, not only after the first render of each region.
+            if region.position ~= nil then region.position = Position(region.position) end
             region.color = ColorCopy(region.color)
             config.regions[id] = region
         end
@@ -334,6 +337,12 @@ function addon:RefreshConfigurationContext()
         local mobility = type(config.mobility) == "table" and CopyTable(config.mobility) or {}
         mobility.style = Style(mobility.style)
         mobility.position = Position(mobility.position)
+        -- Additive, once-per-scope migration: old Free move used this class's
+        -- ordinary Mobility offset. Copy that effective offset only when the
+        -- independent field is absent; later edits never inherit it again.
+        -- Position() detaches both existing/legacy tables, including aliases.
+        local freePosition = mobility.freeMovePosition
+        mobility.freeMovePosition = Position(freePosition, freePosition == nil and mobility.position or nil)
         if type(mobility.enabled) ~= "boolean" then mobility.enabled = true end
         mobility.preferences = type(mobility.preferences) == "table" and CopyTable(mobility.preferences) or {}
         config.mobility = mobility
@@ -363,7 +372,11 @@ end
 
 function addon:GetReminderPosition(entry)
     if type(entry) ~= "table" or not self:GetReminderStyleKey(entry) then return self:NewReminderPosition() end
-    if entry.kind == "mobility" then return self:GetMobilityConfig().position end
+    if entry.kind == "mobility" then
+        local config = self:GetMobilityConfig()
+        -- Free move shares typography/enable scope, NOT the position table.
+        return entry.freeMove and config.freeMovePosition or config.position
+    end
     local proc = self:GetProcConfig()
     if not proc or type(entry.id) ~= "string" then return self:NewReminderPosition() end
     local region = proc.regions[entry.id]
@@ -419,12 +432,49 @@ function addon:ResetReminderStyle(key)
     return self:UpdateReminderStyle(key, self:NewReminderStyle())
 end
 
+-- Pure coordinate edits only need to re-anchor their own existing wrappers.
+-- These keys describe configuration ownership, not live aura/charge state.
+local function PositionChanges(patch, entries)
+    local changes = { proc = {} }
+    local any = false
+    local function Mark(entry)
+        if entry.kind == "mobility" then
+            changes[entry.freeMove and "freeMove" or "mobility"] = true
+        elseif entry.kind == "proc" then changes.proc[entry.id] = true end
+        any = true
+    end
+    for key, value in pairs(patch) do
+        if key == "position" then changes.mobility, any = true, true
+        elseif key == "mobility" then
+            for field in pairs(value) do
+                if field == "position" then changes.mobility, any = true, true
+                elseif field == "freeMovePosition" then changes.freeMove, any = true, true
+                else return end
+            end
+        elseif key == "reminders" then
+            for id, record in pairs(value) do
+                if record.position then Mark(entries[id]) end
+            end
+        elseif key == "proc" then
+            for field, regions in pairs(value) do
+                if field ~= "regions" then return end
+                for id, record in pairs(regions) do
+                    for setting in pairs(record) do if setting ~= "position" then return end end
+                    if record.position then changes.proc[id], any = true, true end
+                end
+            end
+        else return end
+    end
+    if any then return changes end
+end
+
 function addon:UpdateSettings(patch)
     if not self.db then return false, "Settings are not initialized yet." end
     if type(patch) ~= "table" then return false, "Settings must be supplied as a table." end
     local class = self:GetPlayerContext()
     local schema = { options = optionsSchema, enabled = BooleanSetting, position = positionSchema,
-        mobility = { enabled = BooleanSetting, style = styleSchema, position = positionSchema, preferences = Preferences },
+        mobility = { enabled = BooleanSetting, style = styleSchema, position = positionSchema,
+            freeMovePosition = positionSchema, preferences = Preferences },
         proc = { enabled = BooleanSetting, style = styleSchema, regions = {} }, styles = {}, reminders = {} }
     local entries = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
@@ -446,6 +496,7 @@ function addon:UpdateSettings(patch)
     if writesProc and (not procContext or not self:GetProcConfig()) then
         return false, "Proc settings are unavailable until the current specialization module is ready."
     end
+    local changedPositions = PositionChanges(patch, entries)
     local changedStyles, changedColors, stylesOnly = {}, {}, true
     local optionsOnly = patch.options ~= nil
     for key in pairs(patch) do if key ~= "options" then optionsOnly = false end end
@@ -495,6 +546,8 @@ function addon:UpdateSettings(patch)
         -- changes the shell. Do not reconfigure live modules or their bindings.
         if self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
         if self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
+    elseif changedPositions then
+        if self.RefreshReminderPositions then self:RefreshReminderPositions(changedPositions) end
     elseif stylesOnly then
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
         if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end

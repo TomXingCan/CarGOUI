@@ -18,7 +18,7 @@ local english = {
     animatedTitle = "Animated title", centerOptions = "Center window",
     previewEntry = "Reminder / indicator region", previewSingle = "Test selected", previewAll = "Test current spec",
     previewStop = "Stop test", entryX = "Region X offset", entryY = "Region Y offset", entryReset = "Reset region offsets",
-    entryHint = "Enter saves this region's X/Y pair. Guides identify the default Blizzard region; reminders themselves cannot be dragged.",
+    entryHint = "Enter saves X/Y. Free move and each Proc region are independent. Ordinary Mobility entries share class offsets.",
     noEntries = "No preview entries defined for this specialization.",
     previewCombat = "Test Mode is unavailable in combat. Live reminders continue.",
     previewOff = "Test Mode is off. Samples stop when this window closes.",

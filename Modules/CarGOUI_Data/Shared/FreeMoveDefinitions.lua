@@ -19,8 +19,9 @@ function data.host:GetFreeMoveDefinition(classToken)
         kind = "mobility", freeMove = true, textOnly = true,
         label = "Free move - Time Spiral", spellName = "Free move",
         auraID = auraID, sourceCastID = 374968, region = "CENTER", slot = 0,
-        -- The fixed extra slot sits above ordinary Mobility slots. The same
-        -- class-level anchor/XY translates the whole group without migration.
+        -- Keep the original default center (+84) for visual compatibility.
+        -- Free move now uses its own class-scoped offset; ordinary Mobility
+        -- movement must not translate this receiver or its Preview.
         anchor = { x = 0, y = 84 },
         sample = { message = "Free move", timer = "" },
     }

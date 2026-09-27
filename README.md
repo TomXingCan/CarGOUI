@@ -1,10 +1,12 @@
 # CarGOUI Alpha 0.1
 
-当前版本 **0.1.0-alpha.15**，在 alpha.14 提交 `bd96dbc46dd2c79f294bb35fcbce0dc8863677ab` 上审查其余 12 职业、37 专精并接入符合范围的原生 Proc 计时。目标 WoW Retail 12.1.0（Interface 120100），数据/API 核查固定 build 69933。保留法师映射、Mobility、Free move、Options 战斗锁、主题、区域颜色、字体范围及用户坐标；不扩展已排除的特殊 Mobility。
+当前版本 **0.1.0-alpha.16**，在 alpha.15 提交 `10bbad6b53382a9f352676f207ba83cf961b4d96` 上合入并复核独立坐标修复。本轮只隔离 Free move 与普通 Mobility 的 XY，并避免纯坐标更新重配 live 监控。目标 WoW Retail 12.1.0（Interface 120100），原数据/API 核查固定 build 69933。保留现有 Proc 映射、Mobility、Free move 效果来源、Options 战斗锁、主题、区域颜色、字体范围及用户坐标；不扩展新功能。
 
-本轮新增 **63 个按专精归属的真实 Proc 定义、81 个区域**，来自 52 个原生图形来源键和 51 个有限计时 Aura。37 个非 Mage 专精中，33 个有符合条件的条目；Enhancement、Destruction、Arms、Fury 当前没有纳入的合格条目，显示明确空状态。不能把这解释成每个专精都有计时器。完整映射、条件、证据及排除项见 [Proc 覆盖表](docs/PROC_COVERAGE.md)，安装和实机步骤见 [alpha.15 升级说明](docs/UPGRADE_ALPHA15.md)。
+保留 alpha.15 新增的 **63 个按专精归属的真实 Proc 定义、81 个区域**，来自 52 个原生图形来源键和 51 个有限计时 Aura。37 个非 Mage 专精中，33 个有符合条件的条目；Enhancement、Destruction、Arms、Fury 当前没有纳入的合格条目，显示明确空状态。不能把这解释成每个专精都有计时器。完整映射、条件、证据及排除项见 [Proc 覆盖表](docs/PROC_COVERAGE.md)，该阶段实机步骤见 [alpha.15 升级说明](docs/UPGRADE_ALPHA15.md)。
 
 用户已确认此前法师 Proc、区域颜色与 alpha.14 Options 战斗锁在其测试场景正常。本轮保留这份反馈，不将其扩写为新增职业或全部天赋/布局的实机验收。新增映射均为**已实现、已离线验证、真实客户端待验收**。历史 [Clearcasting 修复依据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md) 与 [战斗锁定说明](docs/OPTIONS_COMBAT_LOCK.md) 保留。
+
+**本轮：Free move 的 XY 与普通 Mobility 解耦；一次迁移保留升级前实际位置。纯坐标编辑只重新定位对应现有框体。来源与实际 Lua 5.1 验证见 [坐标修复与验收](docs/POSITION_ISOLATION_XYFIX1.md)。**
 
 ## 安装与升级
 
@@ -22,6 +24,7 @@
 | 设置 | 归属 |
 | --- | --- |
 | Mobility 开关、字体、字号、描边、阴影、缩放、锚点、XY、偏好 | 当前 classToken，共用一套；Mage 三系及 Blink/Shimmer 共用 |
+| Free move 锚点、XY | 当前职业的独立 `mobility.freeMovePosition`；不跟随普通 Mobility 的 XY |
 | Proc 字体、字号、描边、阴影、文字缩放 | 当前 classToken + specID，同专精所有区域共用 |
 | Proc 区域锚点、XY、可选 RGB | 对应职业/专精下稳定区域 ID 分别保存；无自定义 RGB 时动态使用职业色 |
 | Options 窗口位置、品牌动画开关 | 插件外壳独立保存 |
@@ -78,7 +81,7 @@ Proc 正式显示仅包含数字，使用该区域自定义 RGB 或默认职业�
 
 客户端原生 `CustomAuraContainerTemplate` 以 `HELPFUL + includeSpellIDs` 筛选自身 Aura，在原生侧管理触发、消耗、刷新和到期。数字使用原生复制的 DurationTextBinding；Lua 不查询/比较秘密 Buff、剩余时间或层数。正式显示没有技能名、图标和背景。没有原生 Aura 或原生接口缺失时不制造替代时间。原生图形缺乏通用历史重放接口，重载时使用明确映射的计时 Aura 原生匹配启动（它不一定与图形 owner 同 ID）；相关图形实际出现条件仍列入实机验收。
 
-Free move 的含义已确认是 Time Spiral 374968 赋予的职业接收增益，而非 Hover 的移动施法。原生槽位只匹配当前职业的接收 Aura，真实存在时显示 `Free move`，消耗或到期时消失；不加倒计时，不计施法次数。使用本职业 Mobility 字体和坐标组，固定预设在第一条普通 Mobility 上方 84 UI 单位，不清除其他技能提醒。
+Free move 的含义已确认是 Time Spiral 374968 赋予的职业接收增益，而非 Hover 的移动施法。原生槽位只匹配当前职业的接收 Aura，真实存在时显示 `Free move`，消耗或到期时消失；不加倒计时，不计施法次数。共用本职业 Mobility 字体、Scale、开关和职业色，但坐标独立存于 `mobility.freeMovePosition`。默认基准仍是屏幕中心上方 84 UI 单位；其自身 XY 不再叠加普通 Mobility 的 XY。不清除其他技能提醒。
 
 关闭 Options/停止 Test Mode/进入战斗不停止真实监控。关闭 Proc 只停用 Proc 槽位与该模块的事件；关闭 Mobility 只停用 Mobility 与 Free move。原生容器停用后以透明但保持显示的公开父容器完成一次原生清理，避免隐藏父框体冻结清理流程。
 ## 加载、诊断和限制
@@ -105,4 +108,4 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`、`python tests/check_proc_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
 
-本轮安装与验收见 [UPGRADE_ALPHA15.md](docs/UPGRADE_ALPHA15.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，只按访问初始化当前范围，不写入职业色默认值或重置现有样式/坐标。
+本轮安装与验收见 [坐标修复说明](docs/POSITION_ISOLATION_XYFIX1.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，只按访问初始化当前范围，不写入职业色默认值或重置现有样式/坐标。

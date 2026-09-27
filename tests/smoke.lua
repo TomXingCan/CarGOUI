@@ -6226,5 +6226,274 @@ test("threshold and gear Proc sources require actual native SHOW while unknown i
     end
 end)
 
+
+-- XY isolation regressions: configuration and addon-owned geometry only.
+-- Observation helpers below are offline mock assertions, never production APIs.
+do
+local function xy(frame)
+    local _, _, _, x, y = frame:GetPoint()
+    return { x = x * frame:GetScale(), y = y * frame:GetScale() }
+end
+local function pos(x, y) return { anchor = "CENTER", x = x, y = y } end
+local function scopedSaved(class, spec, procRegions)
+    return { schemaVersion = 5, classes = { [class] = {
+        mobility = { enabled = true, position = pos(170, -95),
+            style = { font = { face = "Fonts\\FRIZQT__.ttf", size = 30, outline = "OUTLINE" },
+                shadow = { enabled = true }, scale = 1.5 } },
+        proc = { [spec] = { regions = procRegions or {} } },
+    } } }
+end
+local function counts(addon, state)
+    return { frames = #state.frames, slots = #state.auraSlots, bindings = #state.bindings,
+        callbacks = addon:GetEventDiagnostics().callbacks, reads = state.realReads }
+end
+
+test("XY FIX reproduces and isolates Free move from Mage ordinary position in live and TEST", function()
+    local env, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2,
+        chargeStart = 95, chargeDuration = 20, secretDuration = true }, { specID = 62, proc = {} })
+    local freeEntry, ordinaryEntry = addon:GetFreeMoveEntry(), addon:GetMobilityEntry()
+    local free = procFrame(addon, freeEntry.id)
+    local before = xy(free)
+    truthy(addon:UpdateSettings({ position = { x = 180, y = -100 } }))
+    local after = xy(free)
+    print("XY-OBSERVED before Mobility edit: Free move=(" .. before.x .. "," .. before.y
+        .. "); after: (" .. after.x .. "," .. after.y .. ")")
+    same(after, before, "ordinary class position must not move native Free move")
+    truthy(addon:GetReminderPosition(freeEntry) ~= addon:GetMobilityConfig().position,
+        "free/ordinary positions are different mutable objects")
+    local ordinary = xy(currentLive(addon))
+    truthy(addon:UpdateSettings({ reminders = { [freeEntry.id] = { position = { x = -210, y = 65 } } } }))
+    same(xy(currentLive(addon)), ordinary, "Free move position must not move Shimmer")
+    same(xy(free), { x = -210, y = 149 }, "independent free offset keeps original +84 default anchor")
+    options(addon); addon:SetPreview("all")
+    reminderAnchor(addon.previewFrames[ordinaryEntry.id], ordinaryEntry, addon, env)
+    reminderAnchor(addon.previewFrames[freeEntry.id], freeEntry, addon, env)
+    local freePreview = xy(addon.previewFrames[freeEntry.id])
+    truthy(addon:UpdateSettings({ mobility = { position = { x = 321, y = -122 } } }))
+    same(xy(addon.previewFrames[freeEntry.id]), freePreview, "ordinary update cannot move free sample")
+    same(xy(free), freePreview, "native and TEST use the same independent position")
+    truthy(addon:UpdateSettings({ reminders = { [freeEntry.id] = { position = { x = 0, y = 0 } } } }))
+    same(xy(currentLive(addon)), { x = 321, y = -122 }, "Free move reset leaves ordinary anchor intact")
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 38 }, scale = 2 })
+    equal(free.text.font[2], 38, "shared class font is intentionally retained")
+    same(xy(free), { x = 0, y = 84 }, "scale is not applied twice to independent free coordinates")
+    equal(#state.errors, 0, "no mock errors")
+end)
+
+test("XY FIX existing GUI Free move inputs do not write Mobility inputs and Enter remains atomic", function()
+    local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2,
+        chargeStart = 95, chargeDuration = 20 }, { proc = {} })
+    local panel, controls = options(addon)
+    addon:SelectOptionsCategory("preview")
+    choose(controls.previewEntry, "free_move_mage")
+    typeText(controls.entryX, "240"); enter(controls.entryY, "-31")
+    same(addon:GetMobilityConfig().position, pos(0, 0), "Free move editor does not modify ordinary config")
+    same(addon:GetReminderPosition(addon:GetFreeMoveEntry()), pos(240, -31), "Free move Enter updates both axes")
+    addon:SelectOptionsCategory("mobility")
+    equal(tonumber(controls.mobilityX:GetText()), 0, "ordinary editor reflects its own X")
+    equal(tonumber(controls.mobilityY:GetText()), 0, "ordinary editor reflects its own Y")
+    typeText(controls.mobilityX, "-117"); enter(controls.mobilityY, "53")
+    addon:SelectOptionsCategory("preview")
+    choose(controls.previewEntry, "free_move_mage")
+    equal(tonumber(controls.entryX:GetText()), 240, "Free move X survives ordinary editor changes")
+    equal(tonumber(controls.entryY:GetText()), -31, "Free move Y survives ordinary editor changes")
+    local before = copy(addon.db)
+    typeText(controls.entryX, "999"); enter(controls.entryY, "bad")
+    same(addon.db, before, "invalid pair cannot partially write either position scope")
+    controls.entryReset:Click()
+    same(addon:GetMobilityConfig().position, pos(-117, 53), "Reset Free move does not reset class group")
+    same(addon:GetReminderPosition(addon:GetFreeMoveEntry()), pos(0, 0), "Reset targets Free move only")
+    typeText(controls.entryX, "450")
+    addon:CloseOptions(); addon:OpenOptions()
+    addon:SelectOptionsCategory("preview"); choose(controls.previewEntry, "free_move_mage")
+    equal(tonumber(controls.entryX:GetText()), 0, "unconfirmed input discarded on close")
+    equal(#state.errors, 0, "GUI input isolation")
+end)
+
+test("XY FIX every class and specialization separates Free move Mobility and each native Proc region", function()
+    local visitedSpecs, visitedRegions = 0, 0
+    for _, row in ipairs(themeRoster) do
+        for _, spec in ipairs(row[2]) do
+            local env, addon, state
+            if row[1] == "MAGE" then env, addon, state = auraFixture(spec[1])
+            else env, addon, state = procClassFixture(row[1], spec[1]) end
+            visitedSpecs = visitedSpecs + 1
+            local freeEntry = assert(addon:GetFreeMoveEntry())
+            local free = procFrame(addon, freeEntry.id)
+            local initialFree = xy(free)
+            local regions = {}
+            for _, definition in ipairs(addon:GetProcDefinitions()) do
+                for _, entry in ipairs(definition.regions) do
+                    regions[#regions + 1] = entry
+                end
+            end
+            local function snapshots()
+                local values = {}
+                for _, entry in ipairs(regions) do values[entry.id] = xy(procFrame(addon, entry.id)) end
+                return values
+            end
+            local configurable = {}
+            for _, entry in ipairs(addon:GetPreviewEntries()) do
+                if entry.kind == "proc" then configurable[entry.id] = true end
+            end
+            local initialProc = snapshots()
+            truthy(addon:UpdateSettings({ position = { x = 207, y = -99 } }))
+            same(xy(free), initialFree, row[1] .. " free follows its own offset in spec " .. spec[1])
+            same(snapshots(), initialProc, "ordinary change cannot move any Proc")
+            truthy(addon:UpdateSettings({ reminders = { [freeEntry.id] = { position = { x = -91, y = 122 } } } }))
+            same(addon:GetMobilityConfig().position, pos(207, -99), "free writes do not mutate ordinary storage")
+            same(snapshots(), initialProc, "free change cannot move any Proc")
+            for i, entry in ipairs(regions) do
+                -- Event-only legacy Mage definitions intentionally excluded
+                -- from the existing settings catalog remain unchanged. They
+                -- are still observed in snapshots of every native region.
+                if configurable[entry.id] then
+                visitedRegions = visitedRegions + 1
+                local before = snapshots()
+                truthy(addon:UpdateSettings({ proc = { regions = {
+                    [entry.id] = { position = { x = i * 7, y = -i * 3 } },
+                } } }))
+                for _, other in ipairs(regions) do
+                    if other.id ~= entry.id then same(xy(procFrame(addon, other.id)), before[other.id], "only selected region moves") end
+                end
+                same(xy(free), { x = -91, y = 206 }, "Proc does not move Free move")
+                same(addon:GetMobilityConfig().position, pos(207, -99), "Proc does not mutate Mobility")
+                end
+            end
+            options(addon); addon:SetPreview("all")
+            for _, entry in ipairs(addon:GetPreviewEntries()) do
+                local native = addon.reminderFrames.nativeAura[entry.id]
+                local sample = addon.previewFrames[entry.id]
+                if native and sample then same(xy(sample), xy(native), "each native region and its preview use identical offsets") end
+            end
+            local pooled = counts(addon, state)
+            for i = 1, 10 do
+                addon:UpdateSettings({ position = { x = i, y = -i },
+                    reminders = { [freeEntry.id] = { position = { x = 50 + i, y = 60 + i } } } })
+            end
+            same(counts(addon, state), pooled, "position changes do not allocate or subscribe or query")
+            equal(#state.errors, 0, "cross-class/spec position checks")
+        end
+    end
+    equal(visitedSpecs, 40, "all catalogued specs tested, including audited-empty Proc scopes")
+    print("XY-ISOLATION-MATRIX specs=" .. visitedSpecs .. "; configured/native/preview regions=" .. visitedRegions)
+end)
+
+test("XY FIX old class offsets migrate once without changing visual position or borrowing other classes", function()
+    local saved = scopedSaved("MAGE", 62)
+    saved.classes.WARRIOR = { mobility = { position = pos(-310, 120) }, proc = {} }
+    local _, addon = login(saved, false, { specID = 62, proc = {} })
+    local freeEntry = addon:GetFreeMoveEntry()
+    same(xy(procFrame(addon, freeEntry.id)), { x = 170, y = -11 }, "old effective Free move screen position retained")
+    same(addon:GetReminderPosition(freeEntry), pos(170, -95), "migration copies legacy offset exactly once without scale")
+    addon:UpdateSettings({ position = { x = 25, y = 35 } })
+    same(addon:GetReminderPosition(freeEntry), pos(170, -95), "later Mobility changes no longer inherit")
+    addon:UpdateSettings({ reminders = { [freeEntry.id] = { position = { x = 99, y = -77 } } } })
+    local persisted = copy(addon.db)
+    local _, reloaded = login(persisted, false, { specID = 63, proc = {} })
+    same(reloaded:GetReminderPosition(reloaded:GetFreeMoveEntry()), pos(99, -77), "same class different spec/reload retains independent choice")
+    same(reloaded:GetMobilityConfig().position, pos(25, 35), "ordinary choice also retained")
+    local _, warrior = login(copy(reloaded.db), false, { classToken = "WARRIOR", specID = 71, proc = {} })
+    same(warrior:GetReminderPosition(warrior:GetFreeMoveEntry()), pos(-310, 120), "unvisited old class migrates from its own Mobility only")
+    warrior:UpdateSettings({ reminders = { free_move_warrior = { position = { x = -70, y = -80 } } } })
+    local _, mage = login(copy(warrior.db), false, { specID = 64, proc = {} })
+    same(mage:GetReminderPosition(mage:GetFreeMoveEntry()), pos(99, -77), "other class writes cannot alter Mage free offsets")
+    local _, fresh = login(copy(warrior.db), false, { classToken = "PALADIN", specID = 66, proc = {} })
+    same(fresh:GetReminderPosition(fresh:GetFreeMoveEntry()), pos(0, 0), "fresh class does not inherit previous class")
+end)
+
+test("XY FIX detached preexisting position tables and direct Proc patches cannot mutate sibling regions", function()
+    local shared = pos(17, -8)
+    local left, right = "mage_arcane_clearcasting_left", "mage_arcane_clearcasting_right"
+    local saved = scopedSaved("MAGE", 62, { [left] = { position = shared }, [right] = { position = shared } })
+    saved.classes.MAGE.mobility.freeMovePosition = saved.classes.MAGE.mobility.position
+    -- Force configuration normalization before any frame/GetReminderPosition call
+    -- can mask aliasing through lazy rendering of both regions.
+    local env, addon, state = login(saved, false, { specID = 62, proc = {} })
+    local config = addon:GetProcConfig()
+    local alias = pos(88, 99)
+    config.regions[left].position, config.regions[right].position = alias, alias
+    addon.procConfigurationCache = {} -- model a saved aliased current-spec load
+    addon:GetProcConfig()
+    truthy(addon:UpdateSettings({ proc = { regions = { [left] = { position = { x = 73, y = -12 } } } } }))
+    same(addon:GetProcConfig().regions[right].position, pos(88, 99), "direct patch cannot mutate not-yet-rendered aliased sibling")
+    local ordinary = copy(addon:GetMobilityConfig().position)
+    truthy(addon:UpdateSettings({ reminders = { free_move_mage = { position = { x = -1, y = -2 } } } }))
+    same(addon:GetMobilityConfig().position, ordinary, "aliased saved free/ordinary tables detached")
+    equal(#state.errors, 0, "aliased saved input normalized safely")
+end)
+
+test("XY FIX pure coordinate edits never query spells reconfigure monitors replace timers or write alpha", function()
+    local env, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2,
+        chargeStart = 95, chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {}, specID = 62 })
+    putAura(state, 263725, 22, 2, true); putAura(state, 375240, 20, 1, true)
+    showProc(env, state, 1277420, 1027131, "LeftRight")
+    options(addon); addon:SetPreview("all")
+    local freeEntry = addon:GetFreeMoveEntry()
+    local left = "mage_arcane_clearcasting_left"
+    local original = {}
+    local function forbidden() error("Coordinate-only editing must not reconfigure/query/rebind active state") end
+    for _, name in ipairs({ "ConfigureMobility", "ConfigureProc", "ConfigureFreeMove", "RenderMobilityState",
+        "RenderProcState", "RenderFreeMoveState", "RefreshMobility", "RefreshPreview" }) do
+        original[name] = addon[name]; addon[name] = forbidden
+    end
+    local metrics, writeCounts = counts(addon, state), {}
+    for _, pool in pairs(addon.reminderFrames) do
+        for _, frame in pairs(pool) do
+            writeCounts[frame] = frame.alphaWrites or 0
+            if frame.durationBinding then frame.durationBinding.SetDuration = forbidden end
+            if frame.auraHandle then frame.auraHandle.SetEnabled = forbidden end
+        end
+    end
+    truthy(addon:UpdateSettings({ reminders = { [freeEntry.id] = { position = { x = 144, y = -28 } } } }))
+    truthy(addon:UpdateSettings({ position = { x = -199, y = 36 } }))
+    truthy(addon:UpdateSettings({ mobility = { freeMovePosition = { x = 101, y = 102 } } }))
+    truthy(addon:UpdateSettings({ proc = { regions = { [left] = { position = { x = 21, y = 22 } } } } }))
+    same(counts(addon, state), metrics, "coordinate-only edits are layout-only")
+    for frame, writes in pairs(writeCounts) do equal(frame.alphaWrites or 0, writes, "no wrapper opacity write") end
+    same(xy(procFrame(addon, freeEntry.id)), { x = 101, y = 186 }, "live free wrapper was relaid out")
+    same(xy(addon.previewFrames[freeEntry.id]), { x = 101, y = 186 }, "same sample was relaid out")
+    equal(#state.errors, 0, "native/data secrecy not read by editor")
+end)
+
+test("XY FIX intentional ordinary multi-skill class grouping is preserved without dragging Free move", function()
+    local env, addon, state = warriorLogin({
+        [100] = { charges = 0, maxCharges = 2, chargeStart = 90, chargeDuration = 20 },
+        [6544] = { charges = 0, maxCharges = 1, chargeStart = 90, chargeDuration = 40 },
+        [3411] = { charges = 1, maxCharges = 1, chargeStart = 100, chargeDuration = 30 },
+    })
+    -- This fixture has no native aura templates, but the same Free move position
+    -- and Preview path are always defined for the current class.
+    local freeEntry = addon:GetFreeMoveEntry()
+    local before = copy(addon:GetReminderPosition(freeEntry))
+    local entries = addon:GetMobilityEntries()
+    truthy(#entries > 1, "multiple real ordinary Mobility families")
+    truthy(addon:UpdateSettings({ reminders = { [entries[2].id] = { position = { x = 61, y = -27 } } } }))
+    for _, entry in ipairs(entries) do
+        same(addon:GetReminderPosition(entry), pos(61, -27), "ordinary reminders intentionally share class group offsets")
+        local frame = addon.reminderFrames.live[entry.id]
+        if frame then same(xy(frame), { x = entry.anchor.x + 61, y = entry.anchor.y - 27 }, "stable preset slot retained") end
+    end
+    same(addon:GetReminderPosition(freeEntry), before, "Free move is not an ordinary class slot anymore")
+end)
+
+test("XY FIX no-specialization scopes use class-owned independent offsets for all thirteen classes", function()
+    local visited = 0
+    for _, row in ipairs(themeRoster) do
+        local _, addon, state = login(nil, false, { classToken = row[1], specID = false, proc = {} })
+        local freeEntry = addon:GetFreeMoveEntry()
+        truthy(freeEntry and freeEntry.class == row[1])
+        addon:UpdateSettings({ position = { x = 90, y = 91 } })
+        same(addon:GetReminderPosition(freeEntry), pos(0, 0), "unselected-spec free offset independent")
+        addon:UpdateSettings({ reminders = { [freeEntry.id] = { position = { x = -20, y = -21 } } } })
+        same(addon:GetMobilityConfig().position, pos(90, 91), "unselected-spec ordinary offset preserved")
+        equal(#state.errors, 0)
+        visited = visited + 1
+    end
+    equal(visited, 13)
+end)
+end
+
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")

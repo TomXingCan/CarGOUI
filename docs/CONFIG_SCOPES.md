@@ -100,3 +100,8 @@ delivery report contains extracted-package test output, not client sign-off.
 Font, font size, outline, shadow and scale remain in `classes[classToken].proc[specID].style`. Only RGB is added to `regions[stableRegionID].color = {r=...,g=...,b=...}`. Existing `.position` is unchanged. Omitted color resolves dynamically to the current class color; the default is not persisted. Resetting region color removes the optional key. Valid custom RGB values are finite in [0,1], without alpha. Invalid optional color data falls back safely; valid colors are copied independently even when old tables were aliased. Only the current requested specialization is normalized.
 
 Changing a timer Aura/graphic owner does not rename region IDs. Existing Clearcasting left/right coordinates, shared fonts, options and all other classes survive. Temporary picker drafts live outside SavedVariables; only a confirmed still-current class/spec/region writes through the shared configuration validator. Future classes reuse the same definition-driven interface. Mobility and Time Spiral Free move retain fixed class color.
+
+
+## Additive XY isolation (alpha.16, integrated from alpha.15-xyfix.1)
+
+`mobility.freeMovePosition` is now independent of `mobility.position`. It retains the same class (not specialization) scope. Free move still shares the class font, scale and enable behavior. This intentionally narrows the older phrase "all Mobility positions share one group" to ordinary mobility reminders only. Missing independent fields migrate once from that class's old offset; old coordinates are not scaled or deleted. Current-spec Proc positions are detached before region patch writes. See [implementation, limits and acceptance](POSITION_ISOLATION_XYFIX1.md).
