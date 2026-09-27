@@ -39,8 +39,18 @@ and no development payloads, wrapped source archive, unsafe paths, or symlinks.
 The downloaded bytes are kept unchanged in memory through the final upload.
 
 The author API is `https://wow.curseforge.com`. The workflow checks authentication
-with `/api/game/versions`, verifies the project through `/api/projects`, and
-checks existing files through `/api/projects/1712424/files`. It resolves the
+with `/api/game/versions`. The author API does not provide a project-list route.
+Project identity and existing files are checked through the official website's
+public `https://www.curseforge.com/api/v1/mods/1712424/files` endpoint, without
+sending any credentials to that host. Every page is read and its project IDs
+are checked. The existing manual CarGOUI 1.0.0 file (ID `8990958`, exact filename,
+display name, and byte length) anchors the project identity. Its ZIP is downloaded
+read-only from the official file endpoint/CDN and its SHA256 must equal the
+approved GitHub 1.0.0 installer digest. The baseline ZIP is separately inspected
+and never used as the upload payload for another version. A missing or altered
+baseline stops the workflow for review. This file is never modified.
+
+The workflow resolves the
 Retail type with `/api/game/version-types` and selects exactly one version whose
 name matches the Interface declared in the installer (`120100` means `12.1.0`).
 No game version ID is hardcoded. Unknown API schemas, incomplete file listings,

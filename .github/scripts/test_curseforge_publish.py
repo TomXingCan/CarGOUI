@@ -294,6 +294,18 @@ class MetadataTests(unittest.TestCase):
                 build_metadata("1.0.1", "Changes", game_version_id)
 
 
+def manual_file_fixture(**changes):
+    record = {
+        "id": 8990958,
+        "projectId": 1712424,
+        "fileName": "CarGOUI-1.0.0.zip",
+        "displayName": "CarGOUI 1.0.0",
+        "fileLength": 388040,
+    }
+    record.update(changes)
+    return record
+
+
 def api_client_fixture(version="1.0.1"):
     """A mocked API client with real release archive and checksum inputs."""
     archive = zip_fixture(version)
@@ -309,25 +321,28 @@ def api_client_fixture(version="1.0.1"):
         f"{publisher.CF_ORIGIN}/api/game/version-types": [
             {"id": 517, "name": "WoW Retail", "slug": "wow-retail"},
         ],
-        f"{publisher.CF_ORIGIN}/api/projects": [
-            {"id": 1712424, "name": "CarGOUI", "slug": "cargoui"},
-        ],
-        f"{publisher.CF_ORIGIN}/api/projects/1712424/files": [
-            {"id": 9001, "fileName": "CarGOUI-1.0.0.zip", "displayName": "CarGOUI 1.0.0"},
-        ],
     }
     client.get_json.side_effect = lambda url: responses[url]
     client.asset.side_effect = lambda asset, tag: archive if asset["name"].endswith(".zip") else checksum
+    client.project_files.return_value = [manual_file_fixture()]
+    client.manual_baseline_archive.return_value = zip_fixture("1.0.0")
     return client, responses, archive
 
 
 class ExecutionSafetyTests(unittest.TestCase):
+    def setUp(self):
+        # The published baseline is tested separately; these executions use tiny
+        # synthetic fixtures and never download a file or weaken production rules.
+        baseline = patch.object(publisher, "verify_manual_baseline", return_value=None)
+        self.baseline_validator = baseline.start()
+        self.addCleanup(baseline.stop)
+
     def test_validate_100_performs_no_upload_and_confirms_unchanged_files(self):
         client, _, _ = api_client_fixture("1.0.0")
         result = publisher.execute(client, tag="v1.0.0", mode="validate", project_id="1712424")
         client.upload_once.assert_not_called()
-        self.assertEqual(result["curseforge_files_before"], [9001])
-        self.assertEqual(result["curseforge_files_after"], [9001])
+        self.assertEqual(result["curseforge_files_before"], [8990958])
+        self.assertEqual(result["curseforge_files_after"], [8990958])
         self.assertFalse(result["real_upload_post"])
         self.assertFalse(result["new_curseforge_files"])
         self.assertEqual(result["duplicate_guard_1_0_0"], "passed")
@@ -335,6 +350,7 @@ class ExecutionSafetyTests(unittest.TestCase):
         self.assertEqual(result["zip_structure"], "passed")
         self.assertEqual(result["token_authentication"], "passed")
         self.assertEqual(result["game_version_id"], 123456)
+        self.baseline_validator.assert_called_once_with(client.manual_baseline_archive.return_value)
 
     def test_wrong_project_id_fails_before_network_or_upload(self):
         client, _, _ = api_client_fixture()
@@ -343,6 +359,7 @@ class ExecutionSafetyTests(unittest.TestCase):
         client.get_json.assert_not_called()
         client.asset.assert_not_called()
         client.upload_once.assert_not_called()
+        self.baseline_validator.assert_not_called()
 
     def test_100_publish_fails_before_network_or_upload(self):
         client, _, _ = api_client_fixture("1.0.0")
@@ -352,19 +369,11 @@ class ExecutionSafetyTests(unittest.TestCase):
         client.upload_once.assert_not_called()
 
     def test_validate_detects_external_file_list_change(self):
-        client, responses, _ = api_client_fixture()
-        files_url = f"{publisher.CF_ORIGIN}/api/projects/1712424/files"
-        files_reads = 0
-
-        def get_json(url):
-            nonlocal files_reads
-            if url == files_url:
-                files_reads += 1
-                if files_reads == 2:
-                    return responses[url] + [{"id": 9002, "fileName": "external.zip"}]
-            return responses[url]
-
-        client.get_json.side_effect = get_json
+        client, _, _ = api_client_fixture()
+        client.project_files.side_effect = [
+            [manual_file_fixture()],
+            [manual_file_fixture(), manual_file_fixture(id=9002, fileName="external.zip")],
+        ]
         with self.assertRaisesRegex(ValidationError, "file list changed"):
             publisher.execute(client, tag="v1.0.1", mode="validate", project_id="1712424")
         client.upload_once.assert_not_called()
@@ -391,12 +400,13 @@ class ExecutionSafetyTests(unittest.TestCase):
 
 
 class ApiIdentityTests(unittest.TestCase):
-    def test_project_must_be_unique_and_match_id_name_and_slug(self):
-        valid = {"id": 1712424, "name": "CarGOUI", "slug": "cargoui"}
+    def test_project_must_match_immutable_manual_release_identity(self):
+        valid = manual_file_fixture()
         self.assertEqual(publisher.confirm_project([valid]), valid)
         for payload in (
-            [], [valid, valid], [dict(valid, id=999)],
-            [dict(valid, name="Other")], [dict(valid, slug="other")],
+            [], [valid, valid], [dict(valid, projectId=999)], [dict(valid, id=999)],
+            [dict(valid, fileName="Other.zip")], [dict(valid, displayName="Other")],
+            [dict(valid, fileLength=123)], [valid, dict(valid, id=9002, projectId=999)],
         ):
             with self.subTest(payload=payload), self.assertRaises(ValidationError):
                 publisher.confirm_project(payload)
@@ -419,6 +429,74 @@ class ApiIdentityTests(unittest.TestCase):
             with self.subTest(versions=game_versions, types=version_types), self.assertRaises(ValidationError):
                 publisher.resolve_game_version(game_versions, version_types, "12.1.0")
 
+    def test_manual_baseline_rejects_any_unapproved_archive(self):
+        with self.assertRaisesRegex(ValidationError, "approved baseline"):
+            publisher.verify_manual_baseline(zip_fixture("1.0.0"))
+
+    def test_matching_baseline_checksum_still_requires_valid_100_package(self):
+        valid_archive = zip_fixture("1.0.0")
+        with patch.object(publisher, "MANUAL_BASELINE_SHA256", hashlib.sha256(valid_archive).hexdigest()):
+            self.assertIsNone(publisher.verify_manual_baseline(valid_archive))
+        invalid_archive = zip_fixture("1.0.1")
+        with patch.object(publisher, "MANUAL_BASELINE_SHA256", hashlib.sha256(invalid_archive).hexdigest()):
+            with self.assertRaises(ValidationError):
+                publisher.verify_manual_baseline(invalid_archive)
+
+
+class PublicFileListingTests(unittest.TestCase):
+    def make_client(self, pages):
+        client = publisher.Client("unit-test-curseforge-secret-marker")
+        client.get_json = Mock(side_effect=pages)
+        return client
+
+    def page(self, records, total, index=0):
+        return {"data": records, "pagination": {"index": index, "pageSize": 50, "totalCount": total}}
+
+    def test_all_pages_are_combined_before_duplicate_checks(self):
+        first = [manual_file_fixture(id=8990900 + index) for index in range(50)]
+        second = [manual_file_fixture()]
+        client = self.make_client([self.page(first, 51), self.page(second, 51, 1)])
+        self.assertEqual(client.project_files(), first + second)
+        self.assertEqual(client.get_json.call_count, 2)
+        urls = [call.args[0] for call in client.get_json.call_args_list]
+        self.assertEqual(urls, [
+            f"{publisher.CF_PUBLIC_ORIGIN}/api/v1/mods/1712424/files?pageIndex=0&pageSize=50",
+            f"{publisher.CF_PUBLIC_ORIGIN}/api/v1/mods/1712424/files?pageIndex=1&pageSize=50",
+        ])
+
+    def test_single_and_empty_complete_pages_are_supported(self):
+        for records in ([], [manual_file_fixture()]):
+            with self.subTest(count=len(records)):
+                client = self.make_client([self.page(records, len(records))])
+                self.assertEqual(client.project_files(), records)
+                client.get_json.assert_called_once()
+
+    def test_incomplete_or_invalid_pagination_fails(self):
+        for payload in (
+            self.page([], 1), self.page([manual_file_fixture()], 2),
+            self.page([manual_file_fixture()], 1, 1),
+            {"data": [manual_file_fixture()]},
+            {"data": [manual_file_fixture()], "pagination": None},
+            {"data": [manual_file_fixture()], "pagination": []},
+            {"data": [manual_file_fixture()], "pagination": {"index": 0, "pageSize": 20, "totalCount": 1}},
+        ):
+            with self.subTest(payload=payload), self.assertRaises(ValidationError):
+                self.make_client([payload]).project_files()
+
+    def test_duplicate_or_cross_project_records_fail(self):
+        for records in (
+            [manual_file_fixture(), manual_file_fixture()],
+            [manual_file_fixture(projectId=999)],
+        ):
+            with self.subTest(records=records), self.assertRaises(ValidationError):
+                self.make_client([self.page(records, len(records))]).project_files()
+
+    def test_total_count_changes_between_pages_fail(self):
+        first = [manual_file_fixture(id=8990900 + index) for index in range(50)]
+        client = self.make_client([self.page(first, 51), self.page([manual_file_fixture()], 52, 1)])
+        with self.assertRaises(ValidationError):
+            client.project_files()
+
 
 class HttpSafetyTests(unittest.TestCase):
     # Deliberately fake markers; no real credential is read by these tests.
@@ -429,10 +507,13 @@ class HttpSafetyTests(unittest.TestCase):
         client = publisher.Client(self.FAKE_CF_TOKEN, self.FAKE_GH_TOKEN)
         client._opener = Mock()
         client._asset_opener = Mock()
+        client._baseline_opener = Mock()
         response = Mock()
         response.read.return_value = b'{"id": 9002}'
         client._opener.open.return_value.__enter__ = Mock(return_value=response)
         client._opener.open.return_value.__exit__ = Mock(return_value=False)
+        client._baseline_opener.open.return_value.__enter__ = Mock(return_value=response)
+        client._baseline_opener.open.return_value.__exit__ = Mock(return_value=False)
         return client
 
     def test_missing_token_is_rejected(self):
@@ -497,6 +578,54 @@ class HttpSafetyTests(unittest.TestCase):
         gh_headers = dict((key.lower(), value) for key, value in client._opener.open.call_args.args[0].header_items())
         self.assertEqual(gh_headers["authorization"], "Bearer " + self.FAKE_GH_TOKEN)
         self.assertNotIn("x-api-token", gh_headers)
+
+    def test_public_project_listing_never_receives_credentials(self):
+        client = self.make_client()
+        url = f"{publisher.CF_PUBLIC_ORIGIN}/api/v1/mods/1712424/files?pageIndex=0&pageSize=50"
+        client._request(url)
+        request = client._opener.open.call_args.args[0]
+        headers = dict((key.lower(), value) for key, value in request.header_items())
+        self.assertNotIn("x-api-token", headers)
+        self.assertNotIn("authorization", headers)
+        self.assertEqual(request.get_method(), "GET")
+        with self.assertRaises(ValidationError):
+            client._request(url, data=b"forbidden-public-post")
+
+    def test_manual_baseline_download_is_read_only_without_credentials(self):
+        client = self.make_client()
+        client.manual_baseline_archive()
+        request = client._baseline_opener.open.call_args.args[0]
+        headers = dict((key.lower(), value) for key, value in request.header_items())
+        self.assertNotIn("x-api-token", headers)
+        self.assertNotIn("authorization", headers)
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(
+            request.full_url,
+            f"{publisher.CF_PUBLIC_ORIGIN}/api/v1/mods/1712424/files/8990958/download",
+        )
+        client._opener.open.assert_not_called()
+        with self.assertRaises(ValidationError):
+            client._request(request.full_url, baseline=True, data=b"forbidden-baseline-post")
+        with self.assertRaises(ValidationError):
+            client._request(request.full_url.replace("8990958", "9999999"), baseline=True)
+
+    def test_manual_baseline_redirect_requires_official_https_host(self):
+        request = urllib.request.Request(
+            f"{publisher.CF_PUBLIC_ORIGIN}/api/v1/mods/1712424/files/8990958/download"
+        )
+        for allowed in (
+            "https://edge.forgecdn.net/files/8990/958/CarGOUI-1.0.0.zip",
+            "https://mediafilez.forgecdn.net/files/8990/958/CarGOUI-1.0.0.zip",
+        ):
+            redirected = publisher.BaselineRedirect().redirect_request(request, None, 302, "redirect", {}, allowed)
+            self.assertEqual(redirected.full_url, allowed)
+        for target in (
+            "https://example.invalid/CarGOUI-1.0.0.zip",
+            "http://mediafilez.forgecdn.net/CarGOUI-1.0.0.zip",
+            "https://user:password@mediafilez.forgecdn.net/CarGOUI-1.0.0.zip",
+        ):
+            with self.subTest(target=target), self.assertRaises(ValidationError):
+                publisher.BaselineRedirect().redirect_request(request, None, 302, "redirect", {}, target)
 
     def test_main_does_not_log_tokens_from_network_errors(self):
         client = self.make_client()
