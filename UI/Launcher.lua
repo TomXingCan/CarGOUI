@@ -52,7 +52,7 @@ end
 local function OnTooltipShow(tooltip)
     tooltip:AddLine(NAME)
     tooltip:AddLine(addon.version, 0.75, 0.75, 0.75)
-    tooltip:AddLine("Left-click: Open / close Options.", 1, 1, 1)
+    tooltip:AddLine(addon:Text("Left-click: Open / close Options."), 1, 1, 1)
 end
 
 function addon:InitializeLauncher()

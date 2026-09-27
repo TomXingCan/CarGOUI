@@ -11,6 +11,46 @@ local function IsColorComponent(value)
         and value == value and value >= 0 and value <= 1
 end
 
+local romanFonts = {
+    ["fonts\\frizqt__.ttf"] = true, ["fonts\\arialn.ttf"] = true,
+    ["fonts\\morpheus.ttf"] = true, ["fonts\\skurri.ttf"] = true,
+}
+local wideLocales = { zhCN = true, zhTW = true, ruRU = true, koKR = true }
+local fontProbe, fontAvailability = nil, {}
+
+local function FontAvailable(face)
+    if not IsPublic(face) or type(face) ~= "string" then return false end
+    if not CreateFont then return true end
+    local key = face:lower():gsub("/", "\\")
+    if fontAvailability[key] ~= nil then return fontAvailability[key] end
+    fontProbe = fontProbe or CreateFont("CarGOUIReminderFontProbe")
+    -- This scratch Font contains no timer text or aura state. SetFont can return
+    -- nil on success; inspect only this public resource's resulting face path.
+    local ok, result = pcall(fontProbe.SetFont, fontProbe, face, 12, "")
+    local actual = ok and result ~= false and fontProbe:GetFont()
+    local available = IsPublic(actual) and type(actual) == "string"
+        and actual:lower():gsub("/", "\\") == key
+    fontAvailability[key] = available
+    return available
+end
+
+-- A successful SetFont only confirms that the file loaded, not that it covers
+-- the client alphabet. Use Blizzard's own locale font for the offered Roman
+-- faces on these clients; preserve the user's stored face and all style values.
+function addon:ResolveReminderFont(face)
+    if wideLocales[self.clientLocale] and IsPublic(face) and type(face) == "string"
+        and romanFonts[face:lower()] and IsPublic(STANDARD_TEXT_FONT)
+        and type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT ~= "" then
+        return STANDARD_TEXT_FONT
+    end
+    -- Imports retain the user's recognized font even when that file is absent
+    -- from this client installation. Only the effective rendering face changes.
+    if self:IsSupportedFont(face) and not FontAvailable(face) then
+        return STANDARD_TEXT_FONT or self.factoryReminderStyle.font.face
+    end
+    return face
+end
+
 local function ResolveClassColor(self, refresh)
     local classToken
     if UnitClass then
@@ -95,7 +135,7 @@ function addon:SetProcRegionColorPreview(entry, color)
         return true
     end
     if not self:GetCurrentProcRegion(entry) or not self:IsValidProcRegionColor(color) then
-        return false, "Choose a current Proc region and finite RGB values from 0 to 1."
+        return false, self:Text("Choose a current Proc region and finite RGB values from 0 to 1.")
     end
     if draft and not SameRegion(draft, entry) then
         self:SetProcRegionColorPreview(draft, nil)

@@ -1,7 +1,7 @@
 local _, addon = ...
 
 local function BooleanSetting(value)
-    return type(value) == "boolean", "Use a checkbox value (true or false)."
+    return type(value) == "boolean", addon:Text("Use a checkbox value (true or false).")
 end
 
 -- A region color is optional. Omission means dynamic class color; no default
@@ -25,8 +25,8 @@ local function ColorCopy(value)
 end
 
 local function RegionColorSetting(value)
-    if issecretvalue and issecretvalue(value) then return false, "Color must be a public RGB value." end
-    return value == false or addon:IsValidProcRegionColor(value), "Choose finite RGB values from 0 to 1; opacity is not configurable."
+    if issecretvalue and issecretvalue(value) then return false, addon:Text("Color must be a public RGB value.") end
+    return value == false or addon:IsValidProcRegionColor(value), addon:Text("Choose finite RGB values from 0 to 1; opacity is not configurable.")
 end
 
 local function NumberSetting(range, message)
@@ -35,36 +35,36 @@ end
 
 local styleSchema = {
     font = {
-        face = function(value) return addon:IsSupportedFont(value), "Choose a supported font." end,
-        size = NumberSetting(addon.limits.fontSize, "Font size must be a number from 8 to 72."),
+        face = function(value) return addon:IsSupportedFont(value), addon:Text("Choose a supported font.") end,
+        size = NumberSetting(addon.limits.fontSize, addon:Text("Font size must be a number from 8 to 72.")),
         outline = function(value)
             return type(value) == "string" and addon.outlines[value] == true,
-                "Outline must be none, outline, or thickoutline."
+                addon:Text("Outline must be none, outline, or thickoutline.")
         end,
     },
-    scale = NumberSetting(addon.limits.scale, "Scale must be a number from 0.5 to 3."),
+    scale = NumberSetting(addon.limits.scale, addon:Text("Scale must be a number from 0.5 to 3.")),
     shadow = { enabled = BooleanSetting },
 }
 local positionSchema = {
-    anchor = function(value) return value == "CENTER", "The reminder anchor must be CENTER." end,
-    x = NumberSetting(addon.limits.offset, "X offset must be a number from -10000 to 10000."),
-    y = NumberSetting(addon.limits.offset, "Y offset must be a number from -10000 to 10000."),
+    anchor = function(value) return value == "CENTER", addon:Text("The reminder anchor must be CENTER.") end,
+    x = NumberSetting(addon.limits.offset, addon:Text("X offset must be a number from -10000 to 10000.")),
+    y = NumberSetting(addon.limits.offset, addon:Text("Y offset must be a number from -10000 to 10000.")),
 }
 local minimapSchema = {
     hide = BooleanSetting,
     -- LibDBIcon stores an angle, not XY. Equivalent negative angles are valid.
     minimapPos = function(value)
-        if issecretvalue and issecretvalue(value) then return false, "Minimap angle must be public." end
+        if issecretvalue and issecretvalue(value) then return false, addon:Text("Minimap angle must be public.") end
         return addon:IsNumberInRange(value, { min = -360, max = 360 }),
-            "Minimap angle must be a finite number from -360 to 360."
+            addon:Text("Minimap angle must be a finite number from -360 to 360.")
     end,
 }
 local optionsSchema = {
     animatedTitle = BooleanSetting,
     minimap = minimapSchema,
     position = {
-        x = NumberSetting(addon.limits.offset, "Window X must be from -10000 to 10000."),
-        y = NumberSetting(addon.limits.offset, "Window Y must be from -10000 to 10000."),
+        x = NumberSetting(addon.limits.offset, addon:Text("Window X must be from -10000 to 10000.")),
+        y = NumberSetting(addon.limits.offset, addon:Text("Window Y must be from -10000 to 10000.")),
     },
 }
 
@@ -119,13 +119,13 @@ local function Position(target, defaults)
 end
 
 local function ValidatePatch(patch, schema, path)
-    if type(patch) ~= "table" then return false, "Settings must be supplied as a table." end
+    if type(patch) ~= "table" then return false, addon:Text("Settings must be supplied as a table.") end
     for key, value in pairs(patch) do
         local validator = schema[key]
         local field = path .. tostring(key)
-        if not validator then return false, "Unsupported setting: " .. field end
+        if not validator then return false, addon:Text("Unsupported setting: ") .. field end
         if type(validator) == "table" then
-            if type(value) ~= "table" then return false, field .. " must be supplied as a table." end
+            if type(value) ~= "table" then return false, field .. addon:Text(" must be supplied as a table.") end
             local valid, message = ValidatePatch(value, validator, field .. ".")
             if not valid then return false, message end
         else
@@ -146,18 +146,18 @@ local function MergePatch(target, patch)
 end
 
 local function Preferences(value, seen)
-    if type(value) ~= "table" then return false, "Preferences must be supplied as a table." end
+    if type(value) ~= "table" then return false, addon:Text("Preferences must be supplied as a table.") end
     seen = seen or {}
-    if seen[value] then return false, "Preferences cannot contain cycles." end
+    if seen[value] then return false, addon:Text("Preferences cannot contain cycles.") end
     seen[value] = true
     for key, item in pairs(value) do
-        if type(key) ~= "string" then return false, "Preference keys must be strings." end
+        if type(key) ~= "string" then return false, addon:Text("Preference keys must be strings.") end
         if type(item) == "table" then
             local valid, message = Preferences(item, seen)
             if not valid then return false, message end
         elseif type(item) ~= "boolean" and type(item) ~= "string"
             and not addon:IsNumberInRange(item, { min = -1000000, max = 1000000 }) then
-            return false, "Preferences must contain ordinary saved values."
+            return false, addon:Text("Preferences must contain ordinary saved values.")
         end
     end
     seen[value] = nil
@@ -433,13 +433,13 @@ function addon:GetProcRegionColor(entry)
 end
 
 function addon:SetProcRegionColor(entry, color)
-    if not self:GetCurrentProcRegion(entry) then return false, "Choose a defined Proc region for your current specialization." end
-    if color ~= nil and not self:IsValidProcRegionColor(color) then return false, "Choose finite RGB values from 0 to 1." end
+    if not self:GetCurrentProcRegion(entry) then return false, addon:Text("Choose a defined Proc region for your current specialization.") end
+    if color ~= nil and not self:IsValidProcRegionColor(color) then return false, addon:Text("Choose finite RGB values from 0 to 1.") end
     return self:UpdateSettings({ proc = { regions = { [entry.id] = { color = color or false } } } })
 end
 
 function addon:UpdateReminderStyle(key, patch)
-    if not self:GetReminderStyleKey(key) then return false, "Edit the current class / specialization Appearance." end
+    if not self:GetReminderStyleKey(key) then return false, addon:Text("Edit the current class / specialization Appearance.") end
     return self:UpdateSettings({ styles = { [key] = patch } })
 end
 
@@ -484,8 +484,8 @@ local function PositionChanges(patch, entries)
 end
 
 function addon:UpdateSettings(patch)
-    if not self.db then return false, "Settings are not initialized yet." end
-    if type(patch) ~= "table" then return false, "Settings must be supplied as a table." end
+    if not self.db then return false, addon:Text("Settings are not initialized yet.") end
+    if type(patch) ~= "table" then return false, addon:Text("Settings must be supplied as a table.") end
     local optionsOnly = patch.options ~= nil
     for key in pairs(patch) do if key ~= "options" then optionsOnly = false end end
     if optionsOnly then
@@ -518,12 +518,12 @@ function addon:UpdateSettings(patch)
     local valid, message = ValidatePatch(patch, schema, "")
     if not valid then return false, message end
     for key in pairs(patch) do
-        if key ~= "options" and not class then return false, "Player class is not available yet." end
+        if key ~= "options" and not class then return false, addon:Text("Player class is not available yet.") end
     end
     local procContext = self:GetAppearanceContext("proc")
     local writesProc = patch.proc or (procContext and patch.styles and patch.styles[procContext.key])
     if writesProc and (not procContext or not self:GetProcConfig()) then
-        return false, "Proc settings are unavailable until the current specialization module is ready."
+        return false, addon:Text("Proc settings are unavailable until the current specialization module is ready.")
     end
     local changedPositions = PositionChanges(patch, entries)
     local changedStyles, changedColors, stylesOnly = {}, {}, true

@@ -28,7 +28,7 @@ local function CreateGuidance(frame, entry)
     label:SetWidth(240)
     label:SetJustifyH("CENTER")
     label:SetTextColor(0.55, 0.8, 1, 1)
-    label:SetText("TEST: " .. entry.label)
+    label:SetText(addon:Format("TEST: %s", addon:GetEntryDisplayLabel(entry)))
     guide.label = label
     for _, arm in ipairs({ { -15, 0, 6, 1 }, { 15, 0, 6, 1 },
         { 0, -15, 1, 6 }, { 0, 15, 1, 6 } }) do
@@ -47,7 +47,7 @@ function addon:UpdatePreviewGuidance(frame, entry, enabled)
         return
     end
     local guide = frame.guidance or CreateGuidance(frame, entry)
-    guide.label:SetText("TEST: " .. entry.label)
+    guide.label:SetText(self:Format("TEST: %s", self:GetEntryDisplayLabel(entry)))
     -- Typography scaling must not change the size of the stock region guide.
     guide:SetScale(1 / self:GetReminderStyle(frame.styleKey or entry).scale)
     guide:ClearAllPoints()
@@ -124,7 +124,7 @@ function addon:RefreshPreview()
         if state.mode == "all" or state.entryId == entry.id then
             local frame = self:AcquireReminderFrame(entry, "preview")
             self.previewFrames[entry.id] = frame
-            self:RenderReminder(frame, entry, entry.sample, true)
+            self:RenderReminder(frame, entry, self:GetLocalizedPreviewContent(entry), true)
         end
     end
     if self.RenderMobilityState then self:RenderMobilityState() end
@@ -135,23 +135,23 @@ end
 function addon:SetPreview(mode, entryId, styleKey)
     if mode == "off" then self:StopPreview(); return true end
     if InCombatLockdown() then
-        return false, "Test Mode is unavailable in combat. Live reminders remain active."
+        return false, self:Text("Test Mode is unavailable in combat. Live reminders remain active.")
     end
     if mode ~= "single" and mode ~= "all" then
-        return false, "Choose a valid Test Mode."
+        return false, self:Text("Choose a valid Test Mode.")
     end
     if not self.optionsFrame or not self.optionsFrame:IsShown() then
-        return false, "Open Options before starting Test Mode."
+        return false, self:Text("Open Options before starting Test Mode.")
     end
     local entries = self:GetPreviewEntries()
     local entry = entryId and FindEntry(entries, entryId) or entries[1]
     if not entry or (entryId and entry.id ~= entryId) then
-        return false, "No defined sample for this specialization and entry."
+        return false, self:Text("No defined sample for this specialization and entry.")
     end
     if styleKey then
         local styleEntry = self.appearanceByKey[styleKey]
         if mode ~= "single" or not styleEntry or styleEntry.kind ~= entry.kind then
-            return false, "Choose an appearance for this sample entry."
+            return false, self:Text("Choose an appearance for this sample entry.")
         end
     end
     self.previewState.mode, self.previewState.entryId = mode, entry.id
@@ -164,7 +164,7 @@ end
 
 function addon:StartAppearancePreview(key)
     local appearance = self.appearanceByKey[key]
-    if not appearance then return false, "No style context is available." end
+    if not appearance then return false, self:Text("No style context is available.") end
     local entry = appearance.kind == "mobility" and self:GetMobilityEntry()
     if appearance.kind == "proc" then
         local selected = self.optionsFrame and self.optionsFrame.selectedProcEntry
@@ -172,6 +172,6 @@ function addon:StartAppearancePreview(key)
             if candidate.kind == "proc" and (not entry or candidate.id == selected) then entry = candidate end
         end
     end
-    if not entry then return false, "No defined sample for this context." end
+    if not entry then return false, self:Text("No defined sample for this context.") end
     return self:SetPreview("single", entry.id, key)
 end

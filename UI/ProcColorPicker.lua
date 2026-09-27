@@ -36,13 +36,13 @@ function addon:RefreshProcColorControls()
     local entry = self:GetSelectedProcColorEntry()
     local session = self.procColorPickerSession
     if session and not SameRegion(session.entry, entry) then self:CancelProcColorPicker() end
-    panel.procColorSelection:SetText(entry and entry.label or "No configurable Proc region")
+    panel.procColorSelection:SetText(entry and self:GetEntryDisplayLabel(entry) or addon:Text("No configurable Proc region"))
     panel.controls.procColor:SetEnabled(entry ~= nil and not not PickerAvailable())
     panel.controls.procColorReset:SetEnabled(entry ~= nil)
     if entry then
         local color = self:ResolveReminderColor(entry)
         panel.controls.procColor.swatch:SetColorTexture(color.r, color.g, color.b, 1)
-        panel.procColorMode:SetText(self:GetProcRegionColor(entry) and "Custom RGB" or "Class default")
+        panel.procColorMode:SetText(self:GetProcRegionColor(entry) and addon:Text("Custom RGB") or addon:Text("Class default"))
     else
         panel.controls.procColor.swatch:SetColorTexture(0.35, 0.35, 0.35, 1)
         panel.procColorMode:SetText("")
@@ -102,12 +102,12 @@ local function InstallPickerHooks(picker)
 end
 
 function addon:OpenProcColorPicker(entry)
-    if InCombatLockdown() then return false, "The color picker is unavailable in combat." end
+    if InCombatLockdown() then return false, addon:Text("The color picker is unavailable in combat.") end
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() or not SameRegion(entry, self:GetSelectedProcColorEntry()) then
-        return false, "Select a Proc region first."
+        return false, addon:Text("Select a Proc region first.")
     end
-    if not PickerAvailable() then return false, "The native color picker is unavailable." end
+    if not PickerAvailable() then return false, addon:Text("The native color picker is unavailable.") end
     self:CancelProcColorPicker()
     local picker = ColorPickerFrame
     InstallPickerHooks(picker)
@@ -121,7 +121,7 @@ function addon:OpenProcColorPicker(entry)
         -- hide or replace that newer owner while unwinding the older one.
         if self.procColorPickerGeneration ~= previousGeneration or picker.cancelFunc ~= previousCancel
             or picker.swatchFunc ~= previousSwatch or picker.extraInfo ~= previousOwner then
-            return false, "Another color edit opened. Finish it before editing this Proc region."
+            return false, addon:Text("Another color edit opened. Finish it before editing this Proc region.")
         end
         picker:Hide()
     end

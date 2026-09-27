@@ -87,7 +87,7 @@ function addon:CreateOptionsBranding(panel)
     subtitle:SetSize(250, 18)
     subtitle:SetJustifyH("RIGHT")
     subtitle:SetTextColor(0.68, 0.74, 0.78)
-    subtitle:SetText("Options / " .. self.version)
+    subtitle:SetText(self.L.options .. " / " .. self.version)
     header.subtitle = subtitle
 
     local sweep = header:CreateTexture(nil, "OVERLAY")

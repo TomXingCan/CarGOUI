@@ -12,16 +12,16 @@ function addon:AnchorProcReminder(frame, entry, style, guideOnly)
     local root = SpellActivationOverlayFrame
     local location = entry.nativeLocation or entry.location
     if not root or not location or not root.GetEffectiveScale or not UIParent.GetEffectiveScale then
-        return false, "The stock Proc layout root or mapped location is unavailable."
+        return false, self:Text("The stock Proc layout root or mapped location is unavailable.")
     end
     local nativeScale, uiScale = root:GetEffectiveScale(), UIParent:GetEffectiveScale()
     if not Number(nativeScale) or not Number(uiScale) or nativeScale <= 0 or uiScale <= 0 then
-        return false, "The stock Proc layout scale is not available as public geometry."
+        return false, self:Text("The stock Proc layout scale is not available as public geometry.")
     end
     local regionState = self.GetProcRegionOverlayState and self:GetProcRegionOverlayState(entry)
     local scale = regionState and regionState.scale or entry.nativeScale or 1
     if not Number(scale) or scale <= 0 or scale > 10 then
-        return false, "The native Proc region scale is unavailable or unsupported."
+        return false, self:Text("The native Proc region scale is unavailable or unsupported.")
     end
     local half, gap = 128 * 0.8 * scale / 2, 128 * 0.8
     local point, x, y = "CENTER", 0, 0
@@ -33,7 +33,7 @@ function addon:AnchorProcReminder(frame, entry, style, guideOnly)
     elseif location == "Bottom" then point, y = "BOTTOM", -half
     elseif location == "TopLeft" then point, x, y = "TOPLEFT", -half, half
     elseif location == "TopRight" then point, x, y = "TOPRIGHT", half, half
-    elseif location ~= "Center" then return false, "The native Proc region location is not mapped." end
+    elseif location ~= "Center" then return false, self:Text("The native Proc region location is not mapped.") end
     local offset = guideOnly and { x = 0, y = 0 } or self:GetReminderPosition(entry)
     local ratio = nativeScale / uiScale
     frame:ClearAllPoints()
@@ -50,7 +50,7 @@ function addon:AcquireAuraReminder(entry, auraID, textOnly)
     if frame and (frame.auraHandle.auraID ~= auraID or frame.auraHandle.textOnly ~= textOnly
         or frame.reminderEntry.class ~= entry.class or frame.reminderEntry.specID ~= entry.specID) then
         self:DisableAuraReminder(frame)
-        return nil, "A stable reminder region cannot reuse a native slot for another Aura or scope."
+        return nil, self:Text("A stable reminder region cannot reuse a native slot for another Aura or scope.")
     end
     if not frame then
         frame = CreateFrame("Frame", nil, UIParent)

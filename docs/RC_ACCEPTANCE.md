@@ -1,10 +1,10 @@
-# 1.0.0-rc.3 acceptance and release checklist
+# Release acceptance: RC3 baseline and 1.0.0 localization
 
-This candidate is based on RC2 (`b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`). RC3 adds brand/launcher entries and minimap shell preferences; [LAUNCHER_RC3.md](LAUNCHER_RC3.md) gives its focused acceptance matrix and manager limitations. RC2's drag handoff remains intact; [DRAG_RC2.md](DRAG_RC2.md) contains its regression steps and evidence boundary. No formal release, main merge or CurseForge upload is authorized by this delivery. Automated tests and pinned API declarations cannot establish actual client dragging, encoding, rendering, taint or combat behavior.
+RC3 was based on RC2 (`b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`) and added launchers/minimap preferences. The user subsequently reported RC3 working in their test environment, without a complete per-build/class/manager matrix. Version 1.0.0 preserves that baseline and adds automatic localization. [LAUNCHER_RC3.md](LAUNCHER_RC3.md) and [DRAG_RC2.md](DRAG_RC2.md) retain focused checks and evidence boundaries. Publication is authorized for the new task, but authorization/prepared text is not proof of a remote upload; [1.0.0 release notes](RELEASE_1.0.0.md) record current capability limitations. Automated tests/source declarations cannot establish native dragging, encoding, glyphs, taint or combat behavior.
 
 ## Final client regression
 
-Use a copy of your SavedVariables for recovery; do not clear WTF. Install the two folders from the RC ZIP together. Record the exact client version/build, locale, class/spec and UI scale. Enable Lua errors for the session if desired. Restore your previous error-display preference afterwards.
+Use a copy of your SavedVariables for recovery; do not clear WTF. Install the two folders from the delivered ZIP together. Record the exact client version/build, locale, class/spec and UI scale. Enable Lua errors for the session if desired. Restore your previous error-display preference afterwards.
 
 1. Open `/cui` and `/cargoui` out of combat. No drag instruction or Themes category remains. Alternate grabs from Header, root/Body, sidebar and scroll-content blank areas, including different corners and UI scales: pickup must not jump. Inputs, sliders and buttons still receive their own input. Release outside the window, Esc, combat, hiding the source, resolution/UI-scale changes and world transitions must end an active drag cleanly. A later grab and `/reload` must restore sensible behavior and the saved position. Automatic themes continue working; unknown/deleted categories return to General. Screen-edge clamping and normal movement while the button remains held are not themselves failures.
 2. In Import / Export choose **Current class**, export, select all and use Ctrl+C. Paste into a plain text editor and back, including normal line wrapping. Verify that the entire string survives copying and scrolling; selecting text is not an automatic clipboard write. Repeat with **All saved settings** large enough to require scrolling. This specifically exercises native `C_EncodingUtil` and real EditBox behavior, not the offline codec fixture.
@@ -16,10 +16,12 @@ Use a copy of your SavedVariables for recovery; do not clear WTF. Install the tw
 8. Begin a review then enter combat: Options closes, the text and transaction disappear, TEST and owned color drafts stop; live Proc/Mobility/Free move continue. Repeat `/cui` ten times in combat: one message/request; after combat it opens once without old text, confirmation, TEST or picker. Without an in-combat request it must not reopen automatically.
 9. While ordinary reminders and multiple Proc regions are visible, confirm a style/XY/RGB-only import. Digits should continue their real remaining time, with no restarted cooldown, opacity flash, shared XY or changed unrelated region. Repeating the same import must not accumulate subscriptions, native containers or timers. Verify module-enabled changes start/stop only the affected current module.
 10. Check the established gameplay paths: Mage Blink/Shimmer 2→1 stays hidden, 1→0 shows the next recovery, 0→1 hides; different Mobility skills coexist; native Proc trigger/partial consumption/refresh/end and specialization changes clean up correctly; Time Spiral Free move retains its separate position. Options closing and Test Mode stopping leave real monitoring active.
+11. In supported client locales, inspect every current Options page, tooltip, help message, combat feedback, diagnostic label and import summary. Check placeholders, spell names and region directions/sizes. Unknown locale and missing translation/name data must use the documented fallback, without leaked keys or a manual language setting. The imported/exported protocol remains unchanged.
+12. Check CJK, Cyrillic and accented glyphs in Options/live/TEST at several UI scales. Rendering fallback must preserve the requested saved font, size, outline, shadow and Scale; no timer text readback, restarted binding, regional XY/color change or duplicated launcher may result. Record native-speaker feedback separately from glyph/layout and offline checks.
 
 Record native empty-table JSON round trips (the protocol accepts both empty `{}` and empty `[]` for otherwise map-shaped fields), numeric spec-key restoration and localized client font fallback. Report any native API failure with exact build and error. No offline test result substitutes for these steps.
 
-## Evidence shipped with this candidate
+## Evidence shipped with each delivery
 
 - Repository Lua 5.1 tests and static safety checks run against the final ZIP's extracted runtime files; development tools are not installed with the addon.
 - ZIP SHA256, exact source commit/tree and individual test stdout/stderr are in the adjacent `.sha256` and `.tests.txt` files.
@@ -28,10 +30,11 @@ Record native empty-table JSON round trips (the protocol accepts both empty `{}`
 
 ## Before a formal release
 
-- [ ] User accepts this candidate's real-client regression, including native import/export round trips.
+- [x] User reported RC3 working in their test environment; retain the scope of that feedback without inventing individual matrix passes.
+- [ ] Record new localization's native-client and native-speaker acceptance, including fonts/layout and exact locale/build.
 - [ ] Resolve any reported errors and repeat checks on the exact replacement ZIP.
 - [ ] Review supported interface/build metadata against the actual target client.
-- [ ] Confirm distribution rights and choose an explicit project license; `NOTICE.md` records current provenance and does not invent a license grant.
+- [x] Owner selected GPL-3.0-only for project-owned code and All Rights Reserved branding; LICENSE and NOTICE.md record the separate scopes, retaining original third-party terms.
 - [ ] Review the CurseForge description draft and current coverage/known boundaries.
 - [ ] Complete RC3's launcher/collector checks separately for each manager version and verify the embedded-library attribution/relationship requirements before any actual publisher upload.
-- [ ] User separately authorizes main merge, formal release/tag and any upload. None is performed by this RC task.
+- [x] User authorized the 1.0.0 publishing task after successful verification. Record each actual source/merge/tag/Release/asset/CurseForge operation separately; unavailable remote operations remain pending rather than claimed complete.

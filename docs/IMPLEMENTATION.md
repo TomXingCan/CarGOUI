@@ -4,7 +4,7 @@
 
 # Alpha 0.1 — Options, Test Mode, branding and Mage Mobility
 
-This phase extends the existing standalone Options frame and `UpdateSettings` pipeline. All UI remains English, including zhCN clients. `/cui` is primary; `/cargoui` resolves to the same slash handler.
+This historical phase extends the existing standalone Options frame and `UpdateSettings` pipeline. Its UI remained English, including zhCN clients; version 1.0.0 later superseded that policy with automatic client-language localization. `/cui` is primary; `/cargoui` resolves to the same slash handler.
 
 Alpha.7 preserves the user-confirmed Blink/Shimmer combat path and adds [independent appearance](ENTRY_STYLES.md) and [automatic Options themes](THEMES.md). `SpellState.lua` is unchanged; Runtime passes the already-known spell ID to the renderer so Blink/Shimmer styles remain distinct without changing their existing position IDs. This release's client appearance/regression acceptance is still pending.
 

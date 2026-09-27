@@ -21,19 +21,17 @@ function addon:GetPlayerContext()
     return class, specID
 end
 
-local mageSpecNames = { [62] = "Arcane", [63] = "Fire", [64] = "Frost" }
-
 function addon:GetAppearanceContext(kind)
     local class, specID = self:GetPlayerContext()
     if not class then return end
     if kind == "mobility" then
         return { key = "mobility:" .. class, kind = kind, classToken = class,
-            label = class:sub(1, 1) .. class:sub(2):lower() .. " Mobility" }
+            label = self:Format("%s Mobility", self:GetLocalizedClassName()) }
     end
     if kind == "proc" and specID then
-        local specName = class == "MAGE" and mageSpecNames[specID]
+        local specName = self:GetLocalizedSpecName(specID)
         return { key = "proc:" .. class .. ":" .. specID, kind = kind,
-            classToken = class, specID = specID, label = (specName or ("Specialization " .. specID)) .. " Proc" }
+            classToken = class, specID = specID, label = self:Format("%s Proc", specName) }
     end
 end
 

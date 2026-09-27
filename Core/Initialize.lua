@@ -21,7 +21,7 @@ function addon:Enable()
     self:RefreshReminderClassColor()
     self:ApplySettings()
     self.enabled = true
-    self:Print("Alpha 0.1 loaded. Type /cui for Mobility settings and separate Test Mode.")
+    self:Print(self:Format("%s loaded. Type /cui to open Options.", self.version))
 end
 
 local function OnPlayerLogin(self)

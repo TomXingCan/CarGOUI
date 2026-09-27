@@ -92,6 +92,7 @@ local function Label(parent, text, x, y, width, height, template)
     label:SetSize(width, height or 20)
     label:SetJustifyH("LEFT")
     label:SetJustifyV("TOP")
+    label:SetWordWrap(true)
     label:SetText(text)
     return label
 end
@@ -110,6 +111,17 @@ local function Button(parent, text, x, y, width, callback)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     button:SetSize(width, 28)
     button:SetText(text)
+    -- Only owned, ordinary Options labels are measured/wrapped. Native timer
+    -- FontStrings never enter this path. Keep the normal font size and UTF-8.
+    local label = button:GetFontString()
+    if label then
+        label:SetWidth(width - 12)
+        label:SetHeight(26)
+        label:SetWordWrap(true)
+        button:HookScript("OnSizeChanged", function(self)
+            label:SetWidth(math.max(1, self:GetWidth() - 12))
+        end)
+    end
     button:SetScript("OnClick", callback)
     ThemeControl(button, "button")
     return button
@@ -188,7 +200,7 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
     local menu = CreateFrame("Frame", nil, panel, "BackdropTemplate")
     menu:Hide()
     menu:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -3)
-    menu:SetSize(280, #entries * 28 + 12)
+    menu:SetSize(474, #entries * 28 + 12)
     menu:SetFrameLevel(panel:GetFrameLevel() + 20)
     menu:EnableMouse(true)
     Backdrop(menu, 0.07, 0.09, 0.12)
@@ -201,7 +213,7 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
             local value = entry.value
             local choice = self.choices[index]
             if not choice then
-                choice = Button(menu, entry.label, 6, -6 - (index - 1) * 28, 268, nil)
+                choice = Button(menu, entry.label, 6, -6 - (index - 1) * 28, 462, nil)
                 self.choices[index] = choice
             end
             choice.value = value
@@ -259,7 +271,7 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
         end
         menu:SetHeight(math.max(1, count) * 28 + 12)
         self:SetEnabled(count > 0)
-        if count == 0 then self:SetText("No entries"); self.value = nil; menu:Hide() end
+        if count == 0 then self:SetText(addon:Text("No entries")); self.value = nil; menu:Hide() end
     end
     panel.dropdowns[#panel.dropdowns + 1] = dropdown
     return dropdown
@@ -349,7 +361,7 @@ local function RefreshAppearanceControls(panel)
     local context = addon:GetAppearanceContext(panel.appearanceKind or "mobility")
     -- Reuse the existing field as a read-only context label, not a selector.
     controls.appearanceEntry.menu:Hide()
-    controls.appearanceEntry:SetText(key and context.label or "No defined style context")
+    controls.appearanceEntry:SetText(key and context.label or addon:Text("No defined style context"))
     controls.appearanceEntry.value = key
     controls.appearanceEntry:Disable()
     for _, name in ipairs({ "appearanceFont", "appearanceFontSize", "appearanceOutline",
@@ -363,14 +375,20 @@ local function RefreshAppearanceControls(panel)
     if key then
         local style = addon:GetReminderStyle(key)
         controls.appearanceFont:SelectValue(style.font.face)
+        if controls.appearanceFont.value ~= style.font.face then
+            -- A font saved on another text client remains a valid preference.
+            -- It need not add unavailable resources to the local choice menu.
+            controls.appearanceFont:SetText(addon:Text("Client default") .. "  v")
+            controls.appearanceFont.value = style.font.face
+        end
         controls.appearanceOutline:SelectValue(style.font.outline)
         controls.appearanceShadow:SetChecked(style.shadow.enabled)
         SetSlider(controls.appearanceFontSize, style.font.size)
         SetSlider(controls.appearanceScale, style.scale)
     end
     panel.appearanceHint:SetText(panel.appearanceKind == "proc"
-        and "Native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples."
-        or "All Mobility skills and specializations in your current class share these settings. Live uses the detected skill.")
+        and addon:Text("Native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples.")
+        or addon:Text("All Mobility skills and specializations in your current class share these settings. Live uses the detected skill."))
 end
 
 function addon:OpenAppearance(kind, key)
@@ -399,7 +417,7 @@ local function RefreshPreviewControls(panel)
     controls.previewStop:SetEnabled(mode ~= "off")
     SetPublicText(panel.previewStatus, combat and L.previewCombat or (not selected and L.noEntries
         or (mode == "off" and L.previewOff
-        or string.format(L.previewRunning, mode == "all" and "all defined entries for this spec" or "selected entry"))))
+        or string.format(L.previewRunning, mode == "all" and addon:Text("all defined entries for this spec") or addon:Text("selected entry")))))
 end
 
 -- This method is safe to call from a state-change event: it only updates public
@@ -418,11 +436,13 @@ function addon:RefreshMobilityOptions()
         controls.mobilityY:ClearFocus()
     end
     controls.mobilityEnabled:SetChecked(self:GetMobilityConfig().enabled)
-    local spellName = state.spellName or L.mobilityNoSpell
+    local spellName = state.spellName and self:GetLocalizedSpellName(state.spellID, state.spellName) or L.mobilityNoSpell
     local states = self.GetMobilityStatuses and self:GetMobilityStatuses() or { state }
     local names, unavailable = {}, 0
     for _, current in ipairs(states) do
-        if current.entry and current.spellName then names[#names + 1] = current.spellName end
+        if current.entry and current.spellName then
+            names[#names + 1] = self:GetLocalizedSpellName(current.spellID, current.spellName)
+        end
         if current.status == "Restricted" or current.status == "Unsupported" or current.status == "Unknown" then
             unavailable = unavailable + 1
         end
@@ -430,20 +450,27 @@ function addon:RefreshMobilityOptions()
     if #names > 1 then
         local text = names[1] .. ", " .. names[2]
         if #names > 2 then text = text .. " (+" .. (#names - 2) .. ")" end
-        SetPublicText(panel.mobilitySpell, "Detected: " .. text)
+        SetPublicText(panel.mobilitySpell, addon:Text("Detected: ") .. text)
     else SetPublicText(panel.mobilitySpell, string.format(L.mobilitySpell, spellName)) end
     if id and state.spellName then
         local suffix = (state.status == "Unsupported" or state.status == "Restricted")
-            and " - Preview only (live unavailable)" or " - mobility sample"
-        controls.previewEntry:SetEntryLabel(id, state.spellName .. suffix)
+            and addon:Text(" - Preview only (live unavailable)") or addon:Text(" - mobility sample")
+        controls.previewEntry:SetEntryLabel(id, spellName .. suffix)
     end
-    local reason = state.reason or ""
+    -- Keep machine status and detailed API reasons stable in Copy diagnostics.
+    local descriptions = {
+        Ready = "At least one use is available.",
+        Depleted = "No uses remain; tracking the next recovery.",
+        ["Native tracking"] = "Visibility and timing are controlled by the client.",
+        ["Not learned"] = "No supported Mobility skill is currently learned for this specialization.",
+    }
+    local reason = self:Text(descriptions[state.status] or "Details are available in Copy diagnostics.")
     if not self:GetMobilityConfig().enabled then reason = L.mobilityDisabled end
     if #states > 1 and self:GetMobilityConfig().enabled then
-        SetPublicText(panel.mobilityStatus, "Detected " .. #names .. " learned skills."
-            .. "\n" .. (unavailable > 0 and (unavailable .. " unavailable/restricted; see Copy diagnostics.")
-                or "Per-skill details: Copy diagnostics. Samples: Test Mode entry menu."))
-    else SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, state.status or "Unknown") .. "\n" .. reason) end
+        SetPublicText(panel.mobilityStatus, addon:Format("Detected %d learned skills.", #names)
+            .. "\n" .. (unavailable > 0 and addon:Format("%d unavailable/restricted; see Copy diagnostics.", unavailable)
+                or addon:Text("Per-skill details: Copy diagnostics. Samples: Test Mode entry menu.")))
+    else SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, self:Text(state.status or "Unknown")) .. "\n" .. reason) end
     local position = id and self:GetReminderPosition(entry)
     controls.mobilityX:SetEnabled(position ~= nil)
     controls.mobilityY:SetEnabled(position ~= nil)
@@ -454,7 +481,7 @@ function addon:RefreshMobilityOptions()
     local combat = InCombat()
     controls.mobilityPreview:SetEnabled(id ~= nil and state.spellID ~= nil and not combat)
     controls.mobilityStop:SetEnabled(self.previewState and self.previewState.mode ~= "off")
-    SetPublicText(panel.mobilityPreviewNote, combat and L.previewCombat or "TEST uses fixed samples, never live timing.")
+    SetPublicText(panel.mobilityPreviewNote, combat and L.previewCombat or addon:Text("TEST uses fixed samples, never live timing."))
     RefreshPreviewControls(panel)
 end
 
@@ -535,17 +562,17 @@ function addon:RefreshOptions()
     RefreshAppearanceControls(panel)
     local entries, procAllowed, procChoices, previewChoices = self:GetPreviewEntries(), {}, {}, {}
     for _, entry in ipairs(entries) do
-        previewChoices[#previewChoices + 1] = { value = entry.id, label = entry.label }
+        previewChoices[#previewChoices + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
         if entry.kind == "proc" then
             procAllowed[entry.id] = true
-            procChoices[#procChoices + 1] = { value = entry.id, label = entry.label }
+            procChoices[#procChoices + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
         end
     end
     controls.procEnabled:SetEnabled(#procChoices > 0)
     controls.procEnabled:SetChecked(#procChoices > 0 and self:GetProcConfig().enabled or false)
     panel.procStatus:SetText(#procChoices > 0
-        and "Displays countdowns on supported Blizzard Proc graphics. Test Mode shows separate samples."
-        or "No verified timed native Proc regions are available for this specialization / talent selection.")
+        and addon:Text("Displays countdowns on supported Blizzard Proc graphics. Test Mode shows separate samples.")
+        or addon:Text("No verified timed native Proc regions are available for this specialization / talent selection."))
     controls.procEntry:SetEntries(procChoices)
     controls.previewEntry:SetEntries(previewChoices)
     if not procAllowed[panel.selectedProcEntry] then
@@ -692,7 +719,7 @@ end
 function addon:QueueOptionsOpen()
     if not self.pendingOptionsOpen then
         self.pendingOptionsOpen = true -- Session state only, never SavedVariables.
-        self:Print("Options will open when combat ends.")
+        self:Print(addon:Text("Options will open when combat ends."))
     end
     self:RegisterEvent("PLAYER_REGEN_ENABLED", OnPendingOptionsCombatEnded)
 end
@@ -805,12 +832,12 @@ function addon:CreateOptions()
             if userInput and not panel.refreshing then panel.positionDirty = true end
         end)
     end
-    panel.controls.centerPosition = Button(general, "Reset Mobility offsets", 0, -214, 180, function()
+    panel.controls.centerPosition = Button(general, addon:Text("Reset Mobility offsets"), 0, -214, 180, function()
         panel.positionDirty = false
         Submit(panel, { position = { x = 0, y = 0 } })
     end)
     Label(general, L.positionHint, 0, -174, 470, 36)
-    Label(general, "Mobility settings belong to your current class. Proc styles belong to your current class and specialization.", 0, -250, 470, 40)
+    Label(general, addon:Text("Mobility settings belong to your current class. Proc styles belong to your current class and specialization."), 0, -250, 470, 40)
     panel.controls.animatedTitle = CheckBox(panel, general, L.animatedTitle, 0, -332,
         function(value) return { options = { animatedTitle = value } } end)
     panel.controls.centerOptions = Button(general, L.centerOptions, 316, -332, 158, function()
@@ -833,7 +860,7 @@ function addon:CreateOptions()
     for _, entry in ipairs(self.appearanceEntries) do
         appearanceChoices[#appearanceChoices + 1] = { value = entry.key, label = entry.label }
     end
-    panel.controls.appearanceEntry = Dropdown(panel, editor, "Configuration context (automatic)", 0, 0, appearanceChoices, nil, function() end)
+    panel.controls.appearanceEntry = Dropdown(panel, editor, addon:Text("Configuration context (automatic)"), 0, 0, appearanceChoices, nil, function() end)
     panel.controls.appearanceEntry:Disable()
     panel.appearanceHint = Label(editor, "", 0, -64, 438, 44)
     local function StylePatch(patch)
@@ -858,17 +885,17 @@ function addon:CreateOptions()
         slider.editBox:SetPoint("TOPLEFT", editor, "TOPLEFT", 318, slider == panel.controls.appearanceFontSize and -224 or -434)
     end
     Label(editor, L.appearanceHint, 0, -490, 430, 40)
-    panel.controls.appearanceReset = Button(editor, "Reset this context's style", 0, -540, 220, function()
+    panel.controls.appearanceReset = Button(editor, addon:Text("Reset this context's style"), 0, -540, 220, function()
         ClearEdits(panel)
         CancelReset(panel)
         if addon:ResetReminderStyle(panel.selectedAppearanceKey) then Feedback(panel, L.saved) end
     end)
-    panel.controls.appearancePreview = Button(editor, "Preview current reminder", 232, -540, 198, function()
+    panel.controls.appearancePreview = Button(editor, addon:Text("Preview current reminder"), 232, -540, 198, function()
         local ok, message = addon:StartAppearancePreview(panel.selectedAppearanceKey)
         addon:RefreshOptions()
         if not ok then Feedback(panel, message, true) end
     end)
-    panel.controls.appearanceBack = Button(editor, "Back", 0, -592, 140, function()
+    panel.controls.appearanceBack = Button(editor, addon:Text("Back"), 0, -592, 140, function()
         addon:SelectOptionsCategory(panel.appearanceKind or "mobility")
     end)
 
@@ -876,7 +903,7 @@ function addon:CreateOptions()
     Label(page, L.previewHint, 0, -32, 470, 44)
     local previewEntries = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
-        previewEntries[#previewEntries + 1] = { value = entry.id, label = entry.label }
+        previewEntries[#previewEntries + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
     end
     panel.controls.previewEntry = Dropdown(panel, page, L.previewEntry, 0, -86, previewEntries, nil, function(id)
         panel.selectedPreviewEntry = id
@@ -928,14 +955,14 @@ function addon:CreateOptions()
     panel.previewStatus = Label(page, "", 0, -324, 470, 48)
 
     local proc = panel.pages.proc
-    panel.controls.procEnabled = CheckBox(panel, proc, "Enable Proc timers", 0, -32,
+    panel.controls.procEnabled = CheckBox(panel, proc, addon:Text("Enable Proc timers"), 0, -32,
         function(value) return { proc = { enabled = value } } end)
     panel.procStatus = Label(proc, "", 0, -68, 470, 40)
     local procChoices = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
-        if entry.kind == "proc" then procChoices[#procChoices + 1] = { value = entry.id, label = entry.label } end
+        if entry.kind == "proc" then procChoices[#procChoices + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) } end
     end
-    panel.controls.procEntry = Dropdown(panel, proc, "Proc region", 0, -110, procChoices, nil, function(key)
+    panel.controls.procEntry = Dropdown(panel, proc, addon:Text("Proc region"), 0, -110, procChoices, nil, function(key)
         addon:CancelProcColorPicker()
         ClearEdits(panel)
         panel.selectedProcEntry = key
@@ -943,7 +970,7 @@ function addon:CreateOptions()
     end)
     panel.controls.procEntry:SetWidth(474)
     panel.procColorSelection = Label(proc, "", 0, -174, 474, 20, "GameFontHighlight")
-    Label(proc, "Timer color:", 0, -202, 90, 20, "GameFontNormal")
+    Label(proc, addon:Text("Timer color:"), 0, -202, 90, 20, "GameFontNormal")
     panel.controls.procColor = Button(proc, "", 94, -196, 38, function()
         local ok, message = addon:OpenProcColorPicker(addon:GetSelectedProcColorEntry())
         if not ok then Feedback(panel, message, true) end
@@ -953,16 +980,16 @@ function addon:CreateOptions()
     swatch:SetPoint("BOTTOMRIGHT", panel.controls.procColor, "BOTTOMRIGHT", -5, 5)
     panel.controls.procColor.swatch = swatch
     panel.procColorMode = Label(proc, "", 142, -202, 102, 20)
-    panel.controls.procColorReset = Button(proc, "Use class color", 248, -196, 226, function()
+    panel.controls.procColorReset = Button(proc, addon:Text("Use class color"), 248, -196, 226, function()
         addon:CancelProcColorPicker()
         local entry = addon:GetSelectedProcColorEntry()
         if entry and addon:SetProcRegionColor(entry, nil) then Feedback(panel, L.saved) end
         addon:RefreshProcColorControls()
     end)
-    panel.controls.procAppearance = Button(proc, "Appearance", 0, -242, 226, function()
+    panel.controls.procAppearance = Button(proc, L.appearance, 0, -242, 226, function()
         addon:OpenAppearance("proc", panel.selectedProcEntry)
     end)
-    panel.controls.procPreview = Button(proc, "Preview this region", 248, -242, 226, function()
+    panel.controls.procPreview = Button(proc, addon:Text("Preview this region"), 248, -242, 226, function()
         local ok, message = addon:SetPreview("single", panel.selectedProcEntry)
         addon:RefreshOptions()
         if not ok then Feedback(panel, message, true) end
@@ -971,11 +998,11 @@ function addon:CreateOptions()
         addon:StopPreview()
         addon:RefreshOptions()
     end)
-    Button(proc, "Region position / Test Mode", 248, -282, 226, function()
+    Button(proc, addon:Text("Region position / Test Mode"), 248, -282, 226, function()
         panel.selectedPreviewEntry = panel.selectedProcEntry
         addon:SelectOptionsCategory("preview")
     end)
-    Label(proc, "Proc font, size, outline, shadow and scale are shared within this specialization. Each region has its own position and optional timer color.", 0, -326, 470, 44)
+    Label(proc, addon:Text("Proc font, size, outline, shadow and scale are shared within this specialization. Each region has its own position and optional timer color."), 0, -326, 470, 44)
 
     local mobility = panel.pages.mobility
     panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,

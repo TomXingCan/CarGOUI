@@ -1,56 +1,54 @@
-# Phase 2A combat fix — 游戏内验收
+# Phase 2A combat repair — in-game acceptance
 
-> **后续反馈：用户已实测确认 alpha.6 Blink / Shimmer 正常。** 下文保留当时的开发/验收记录与接口边界；alpha.7 仅增加独立样式和自动主题，见 [当前说明与验收](ENTRY_STYLES.md)。用户反馈未提供完整 build/场景矩阵，不扩写为所有边界均已通过。
+> Later user feedback confirmed alpha.6 Blink/Shimmer in tested scenarios, without a complete build/boundary matrix. This historical checklist preserves the original evidence limits; [alpha.7](ENTRY_STYLES.md) subsequently added styling/themes.
 
-目标包为 `0.1.0-alpha.6`。**开发环境没有真实 WoW 客户端，下列项目均为待执行的验收步骤，不是测试通过记录。** API 签名/数据核查与离线结果分别见 [API 核查](Mobility-Combat-API-Audit.md) 和随 ZIP 交付的测试输出。
+Target: `0.1.0-alpha.6`. **No real client was available in development; these are acceptance instructions, not a pass log.** API/data evidence is in [the audit](Mobility-Combat-API-Audit.md); offline output accompanies the ZIP.
 
-## 安装和记录
+## Install and record
 
-退出游戏，把 ZIP 内 `CarGOUI` 文件夹替换到 `_retail_\Interface\AddOns\`；不要删除 `WTF` 或 SavedVariables。保留现有位置、字体、字号和缩放。重新进入游戏，`/cui` → Mobility 确认启用，General 的提醒开关也应启用。
+For this historical single-folder release, exit WoW and replace the ZIP's CarGOUI under `_retail_/Interface/AddOns/`. Keep WTF/SavedVariables, positions, fonts, size and scale. `/cui → Mobility` and General reminders should be enabled. Current releases require both directories; see README.
 
-先复制 Mobility 页的诊断信息，记录插件版本、客户端 version/build/Interface、职业/专精、当前识别技能、Status/Path/Reason。目标数据核查为 Retail **12.1.0 / build 69933**；实际 build 不同必须写下，不能当成相同环境。不要输出或读取受限充能、计时、alpha 或 FontString 内容来诊断；目视观察与插件公开诊断已经足够。
+Copy public diagnostics first: addon version, client version/build/Interface, class/spec, detected spell, Status/Path/Reason. The source target is **Retail 12.1.0 / build 69933**; record any actual build difference. Do not read restricted counts/time/alpha/FontString contents for diagnosis; visible behavior and public diagnostics suffice.
 
-如果战斗内多充能诊断是 `Restricted / blocked: native charge visibility`，先保留完整 Reason。它可能表示原生曲线接口/对象缺失、全局 `GetSpellBaseCooldown` 缺失/受限，或两个支持 ID 的公开 cooldown/GCD 最大值不等于已核查的1500毫秒边界；例如客户端返回完整回复周期时也会阻止此路径。此时将对应战斗项目记录为受阻，不能因为战斗外或单充能成功就标成全部通过。
+`Restricted / blocked: native charge visibility` may mean missing curve APIs/objects, missing/secret global GetSpellBaseCooldown or the public cooldown/GCD maximum for the two supported IDs differing from the audited 1500 ms bound, including a full recharge cycle returned there. Preserve the full Reason and mark the scenario blocked, not passed based on out-of-combat/single-charge success.
 
-关闭 Options 和 Test Mode 后开始真实技能测试，保留暴雪动作条，观察其充能与恢复数字作为人工对照。Blink / Shimmer 分别测试；实际天赋允许的容量一、二以及临时三充能条件分别记录。没有条件获得某容量时标为“未覆盖”，不要修改游戏状态或模拟充能来替代真实验收。低等级/未选专精账号可另测识别与位置，不要求已学不存在的技能。
+Close Options/TEST and compare actual recovery visually with Blizzard's action bar. Test Blink and Shimmer, actual capacities one/two and temporary three separately. Mark unavailable capacities untested; do not modify game state or simulate charges. Low-level/unspecialized characters can test learned/unlearned detection and positions.
 
-## 功能与生命周期
+## Function and lifecycle
 
-| 编号 | 操作 | 应观察到的行为 |
+| # | Action | Expected observation |
 | --- | --- | --- |
-| 1 | 战斗外耗尽 Blink/Shimmer，数字显示期间进入战斗；继续观察直到恢复一次 | 提醒连续、计时沿用已有恢复进度；不在进战斗时消失、重启、冻结或残留 |
-| 2 | 多充能条件下，在真实战斗中依次使用：2→1→0；等待0→1 | 2→1不可见；1→0显示 `No Blink` / `No Shimmer` 和真实下一次恢复数字；恢复一次立即不可见，不等全满 |
-| 3 | 保留最后一次可用，施放触发 GCD 的其他法术；并测试第一次位移后的短暂使用间隔 | GCD和0.5秒技能间隔都不触发耗尽提示；Shimmer虽不吃GCD，也不能因短间隔误报 |
-| 4 | 第一次消耗后等待数秒，再消耗最后一次 | 显示第一轮已进行的恢复剩余时间，不跳回完整冷却；与暴雪动作条下一次恢复一致 |
-| 5 | 耗尽后触发实际可用的冷却重置（例如已学 Time Walk 的 Alter Time 回返）；脱战后再次进战斗 | 重置后立即不可见；重新耗尽按新 API 时间显示；进出战斗不保留旧 alpha 或数字 |
-| 6 | 先在 Options 开启外部 Preview，再停止 Preview、关闭 Options；随后在战斗内耗尽 | TEST退出，真实提醒继续监控；也测试“耗尽时停止 Preview”，应恢复当前 live，不使用样例数字 |
-| 7 | 在真正受限的战斗场景观察诊断；分别覆盖秘密次数与普通可读次数 | 多充能原生显隐路径显示 `Native tracking`；没有 secret value / taint Lua 错误，不把 Native tracking 解释成 Lua 已知耗尽或就绪 |
-| 8 | live 正在显示时打开/关闭 Options，修改字号/字体/缩放；再经历2→1、1→0、0→1 | 原生数字持续正确；样式和 binding 不把原生透明度覆盖为1或0；没有闪一下随后消失 |
-| 9 | 对照当前法师暴雪职业色；先看 live 的技能名称和数字，再看同条目外部 Preview | 名称和倒计时颜色一致，Preview与live一致；TEST辅助文字可保留辅助色 |
-| 10 | `/reload`，重新耗尽；多次重开窗口、复用提醒框体、修改字体和字号；三系切换 | 职业色继续生效，三系同色；原位置、字号、缩放保持；未来换职业不继承法师RGB配置 |
-| 11 | 浏览 Options 各分类 | 没有提醒颜色选择器、自定义RGB或颜色模式下拉；`/cui`、窗口移动、回车生效、滑块实时更新及现有标题仍正常 |
+| 1 | Deplete outside combat, then enter while digits run; wait for one recovery | Continuous true remaining time, no disappearance/restart/freeze/residue on entering combat |
+| 2 | In combat use 2→1→0, then wait for 0→1 | Hidden at 2→1, `No Blink`/`No Shimmer` plus next recovery at 1→0, hidden after the first recovery rather than full refill |
+| 3 | Keep one use, trigger another spell's GCD; test the short interval after first movement use | Neither GCD nor the 0.5-second use interval implies depletion; Shimmer's GCD independence does not excuse interval false positives |
+| 4 | Wait several seconds between first and final use | Show the already-running first recovery, matching the action bar, not a fresh full cooldown |
+| 5 | Trigger an available real reset, e.g. Alter Time return with learned Time Walk; leave/re-enter combat | Hide on reset, use current API time after new depletion, no stale alpha/digits |
+| 6 | Start external Preview, stop/close, then deplete in combat; also stop Preview while empty | TEST ends and live continues from current state, not sample numbers |
+| 7 | Observe both secret-charge and public-charge combat cases | Multicharge native path says Native tracking; no secret/taint errors; status does not mean Lua knows Ready/Depleted |
+| 8 | Open/close Options and edit size/font/Scale while live; repeat transitions | Native digits continue; style/binding does not replace gate alpha with 1/0 or flash then disappear |
+| 9 | Compare Mage Blizzard class color in name, digits and same-entry Preview | Same class color for all; TEST helper text may keep its helper color |
+| 10 | Reload, reuse frames, reopen, edit fonts and switch Mage specs | Class color remains the same across specs, positions/size/scale persist, no account RGB inherited by a future other class |
+| 11 | Inspect Options | At this historical stage no custom reminder RGB/color-mode controls; `/cui`, movement, Enter, sliders and branding remain |
 
-单充能也应执行“可用→耗尽→恢复”的完整战斗流程。临时增加到三充能时，应在3→2、2→1期间隐藏，1→0显示，0→1隐藏；这里只验真实 Blink/Shimmer 状态，不实现额外 Free Move 产品功能。
+Single-capacity cases also run available→empty→recovered in combat. Three-capacity cases hide for 3→2 and 2→1, show at 1→0 and hide at 0→1. This checklist tests actual Blink/Shimmer, without adding a Free Move product feature at that stage. Later Proc regional RGB is separately documented and does not change Mobility's fixed class color.
 
-## 必须验证的原生显隐边界
+## Native visibility boundaries
 
-这些项目决定多充能秘密值路径能否在该客户端被认定为可用，不能只看普通耗尽一次成功。
+A normal depletion alone does not establish the multicount secret path's semantics.
 
-1. **临近第一次恢复才用最后一次。** 多充能时先用一次，等动作条显示下一次恢复剩余少于1.5秒，再用最后一次；另重复小于0.5秒的情况。应短暂显示正确剩余数字并在恢复一次时隐藏。重点记录是否漏报，或被GCD/技能间隔盖住后延迟出现。
-2. **实际冷却缩减/恢复变化。** 分别在可用的 Flow of Time、Improved Blink、Bronze 等条件下测试；可安全触发的战斗内恢复变化也需覆盖。数字必须按引擎恢复时间变化，不能跳到静态周期。没有相应天赋/队友/机制时标记未覆盖。
-3. **即将恢复时的重置和再次使用。** 在数字很小时触发真实重置或一次恢复，立刻再次消耗；旧数字或 alpha 不应闪回、停住或显示第二轮全满时间。
-4. **仅其他不可施法原因。** 仍有可用次数时分别观察低法力、沉默或控制（实际安全可获得的条件）；不得出现“位移耗尽”。Blink能解除部分控制，不能用该特性代替是否还有次数的判定。
-5. **进战斗、脱战、重载。** 跨战斗转换和允许的 `/reload` 后，提示必须反映当前实际状态。不要把只在训练场战斗外或 Preview 成功写成战斗成功；受限数据场景与普通 `inCombat` 场景需分别记录。
+1. **Use the last charge near first recovery:** after the first use, wait until the action bar shows less than 1.5 seconds, then expend the last charge; repeat below 0.5 seconds. Show the correct brief remainder, then hide on first recovery. Record misses or delays masked by GCD/use interval.
+2. **Real cooldown reduction/recovery changes:** test available Flow of Time, Improved Blink and Bronze conditions, including safely available combat changes. Digits follow engine time, not a static cycle. Mark missing talents/teammates/mechanisms untested.
+3. **Reset and reuse just before recovery:** reset or recover at a small remaining value, then spend again. No old digits/alpha flashback, freezing or timer until full refill.
+4. **Other unusability only:** with a charge, inspect safely available low mana, silence or control. No depletion alert. Blink removing some control does not substitute for availability detection.
+5. **Combat boundaries/reload:** current state survives transitions and permitted reloads. Out-of-combat training or Preview success is not combat evidence; record actual secrecy separately from the combat flag.
 
-如果普通 cooldown 的总时长在第1/2项被客户端选成短剩余间隔，而非真实恢复周期，当前原生曲线可能漏报。若有次数时它返回长恢复对象，则可能误报。这两个条件是 API 声明尚不能排除的边界，应附 build、天赋/容量、步骤及目视结果报告；不要关闭秘密值检查或手工计次来规避。
+If the engine chooses a short remaining interval as ordinary cooldown total instead of the real recovery period in checks 1/2, the curve may miss. A long recovery object while a charge remains may falsely show. API declarations alone do not exclude those cases. Report build, talents/capacity, steps and visible results; never bypass guards or count casts.
 
-## 离线测试与提交反馈
+## Offline evidence and feedback
 
-交付前应从**最终 ZIP 解压目录**运行仓库提供的测试命令，测试输出应标明包名、解压路径、版本与结果。mock必须将“战斗标志”和“数据秘密性”分别控制，并覆盖秘密 alpha 只能流向原生显示接口的约束；单纯 `inCombat=true` 加普通次数不算受限路径测试。
+Run tests on the **final extracted ZIP**, recording name/path/version/results. Combat and secrecy must be independently controlled. Secret alpha may flow only into permitted native display APIs; `inCombat=true` with ordinary counts is insufficient.
 
-离线测试还能检查颜色缓存、初始化备用色恢复、框体复用、颜色控件不存在及事件不被 Preview 卸载。这些结果只能证明脚本合约；它们不能证明引擎真实对象选取、secret/taint许可或游戏内视觉。通过数以实际交付测试输出为准。
-
-建议按此格式回报，每项可写通过/失败/未覆盖：
+Offline tests also cover class-color caching/fallback recovery/frame reuse, absent color controls at that stage and Preview retaining event subscriptions. They establish script contracts, not real object selection, secret/taint permission or visuals. Use actual delivered counts.
 
 ```text
 CarGOUI version:
@@ -63,4 +61,4 @@ Observed behavior and timing compared with Blizzard action bar:
 Lua error text, if any:
 ```
 
-截图或短视频可帮助确认闪烁、恢复瞬间与颜色，但不要提供账号敏感信息。不要求安装其他插件或修改 SavedVariables 才能完成验收。
+Screenshots/video can clarify flicker, recovery and color. Exclude account-sensitive information. No extra addon or SavedVariables editing is required for acceptance.

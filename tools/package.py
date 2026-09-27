@@ -37,6 +37,7 @@ def install_files(files):
         result["CarGOUI/" + path] = files[path]
     result["CarGOUI/README.md"] = files["docs/USER_README.md"]
     result["CarGOUI/NOTICE.md"] = files["NOTICE.md"]
+    result["CarGOUI/Media/Branding/LICENSE.txt"] = files["Media/Branding/LICENSE.txt"]
     result["CarGOUI/CHANGELOG.md"] = files["CHANGELOG.md"]
     # Required embedded-library licenses/provenance travel with the runtime.
     # Lua files are already included through the main TOC, without standalone

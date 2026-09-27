@@ -1,49 +1,49 @@
-# RC3：品牌图标、入口与收纳验收
+# RC3: branding, launchers and collector acceptance
 
-基线为 RC2 `b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`。本轮不修改战斗业务、提醒渲染、RC2 拖动函数、自动主题或品牌动画。发布候选仅供安装验收，不创建正式 Release、标签或合并 main。
+Baseline: RC2 `b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`. This historical increment did not change gameplay monitoring, reminder rendering, RC2 drag functions, automatic themes or branding animation. It delivered an installation candidate, without a formal Release, tag or main merge.
 
-## 实现与存储
+## Implementation and storage
 
-- 主 TOC 与 internal Data TOC 的 `IconTexture` 都指向主目录 `Media/Branding/emblem.tga`。主 TOC 独占 `AddonCompartmentFunc`，Data 不注册菜单，LibDBIcon 不开启 compartment 注册。
-- 一个名称为 `CarGOUI`、类型为 `launcher` 的 LDB 对象，一个 `LibDBIcon10_CarGOUI` 按钮。静态 Tooltip 仅含名称、版本和普通左键说明。入口不读取技能、Aura、CPU 或内存。
-- 三种入口均转交既有 `ToggleOptions()`；第三方传入的框体不会成为 Options 目标。接受显式普通左键，忽略缺失/不识别按键、受限输入与修饰键操作。
-- Options 仍按需创建。战斗内只使用现有一次性排队提示与脱战重检，不自动开启 TEST/拾色器。小地图与 Options 不共享拖动代码和位置。
-- General 只新增 **Show minimap icon**。`options.minimap = {hide=false, minimapPos=220}` 独立于 Options XY、Mobility 和 Proc。角度允许有限的 -360..360，标准库拖动写入 0..360 内角度；无 radius、lock、收纳或框体配置导出。
-- Current class 不导出外壳。All saved settings 导出上述两个字段；旧 RC1/RC2 字符串缺少该字段时保留当前图标设置。沿用已有格式前缀、白名单、预算、安全校验、预览确认和原子提交。
-- 导入/恢复/重置后，将校验后的两个值同步回 LibDBIcon 原先持有的表，再令 `db.options.minimap` 引用该表。备份是独立快照。不调用会重置拖动脚本和锚点的 `LibDBIcon:Refresh`，不重复注册。
-- 仅偏好实际变化时更新显示。若按钮已被收纳，仅响应明确显示操作，不重新锚到 Minimap；角度更新要求父级及公开锚点目标都仍属于 Minimap（尚未定位的新按钮除外）。MBB 即使保留父级，其栏锚点也能排除。不会反复 Show 已被管理器隐藏的按钮。
-- 保留库标准拖动；它只在拖动期间挂载 `OnUpdate`，结束时移除。本插件不增加轮询。隐藏一个仍由库掌管且正在拖动的按钮时，委托原停止处理器结束它；不替换收纳工具的处理器。
+- Main and internal Data TOCs both use `IconTexture` pointing to the main addon's `Media/Branding/emblem.tga`. Only the main TOC declares `AddonCompartmentFunc`; Data has no menu entry and LibDBIcon compartment registration is not enabled.
+- One LDB object named `CarGOUI`, type `launcher`, and one `LibDBIcon10_CarGOUI` button. The static tooltip contains only name, version and plain-left-click guidance. Entries query no skills, Auras, CPU or memory.
+- All three entries call the existing `ToggleOptions()`. A third-party frame never becomes the Options target. Only explicit unmodified left-clicks are accepted; absent/unrecognized buttons, secret inputs and modified gestures are ignored.
+- Options remains lazy. Combat uses the existing one-request queue, feedback and post-combat recheck, without automatically starting TEST or a color picker. Minimap and Options movement code/positions remain separate.
+- General adds only **Show minimap icon**. `options.minimap = {hide=false, minimapPos=220}` is separate from Options XY, Mobility and Proc. Finite angles from -360 to 360 are accepted; standard dragging writes angles within 0..360. Radius, lock, collector and frame state are not exported.
+- Current class excludes shell settings. All saved settings includes those two minimap fields; RC1/RC2 strings without them preserve current preferences. Existing prefix, whitelist, budgets, validation, review, confirmation and atomic commit remain.
+- Import/restore/reset copies the two validated values into the original LibDBIcon-bound table and reconnects `db.options.minimap` to it. Backups are independent snapshots. No repeat registration or `LibDBIcon:Refresh`, which would replace drag scripts and anchors.
+- Visibility updates only when the preference changes. Collected buttons respond to explicit display changes without being anchored back to Minimap. Angle changes require both parent and public anchor target to belong to Minimap, except a new unplaced button. This excludes MBB bar anchors even when MBB retains the parent. Manager-hidden buttons are not repeatedly shown.
+- Standard library dragging installs OnUpdate only during interaction and removes it at termination. CarGOUI adds no polling. Hiding a still library-owned active drag delegates to its existing Stop handler without replacing collector handlers.
 
-## 图标检查
+## Icon inspection
 
-复用现有 128×128 32-bit 透明 TGA，alpha 范围 0..255，非透明边界为 `[4,4,124,124]`。没有重新制作品牌或引入新图片。离线按 16/20/32 像素缩小检查了轮廓、透明边缘与中央蓝金徽记：可辨认；这不是游戏截图。
+The existing 128x128, 32-bit transparent TGA is reused: alpha 0..255, nontransparent bounds `[4,4,124,124]`. No new artwork was made. Offline 16/20/32-pixel inspection found recognizable outlines, transparent edges and the central blue/gold emblem. These are not game screenshots.
 
-LibDBIcon 的普通状态会将 UV 范围向内缩 5%。LDB 的标准 `iconCoords` 扩到 `-1/18..19/18`，经该缩进后恰好采样 0..1，避免裁掉四个尖角。按下及采用完整坐标的 broker 使用透明外围留白。实际客户端采样、边缘过滤及收纳管理器的圆形/方形遮罩仍需实机检查；没有改写库或管理器的图标方法。
+LibDBIcon normally insets UV coordinates by 5%. Standard LDB `iconCoords` of `-1/18..19/18` cancel that inset to sample 0..1 and preserve all four tips. Pressed-state and full-coordinate broker rendering use the transparent outer padding. Client filtering and collectors' round/square masks still require visual checks. No library/manager icon method is replaced.
 
-## 兼容结论的边界
+## Compatibility evidence
 
-库来源/许可及管理器固定版本见 [API 核查](LAUNCHER_RC3_API.md) 与 [随包第三方说明](../Libs/THIRD_PARTY_NOTICES.md)。库文件原样嵌入，仅需安装 CarGOUI 与 CarGOUI_Data；这不等于没有内部第三方依赖。
+Pinned library sources/licenses and manager versions are in the [API review](LAUNCHER_RC3_API.md) and [bundled notices](../Libs/THIRD_PARTY_NOTICES.md). Libraries are embedded unchanged. Users install only CarGOUI and CarGOUI_Data; that does not mean the addon has no internal third-party dependencies.
 
-| 场景 | 已有证据 | 实机状态 |
+| Scenario | Evidence | Client status at RC3 delivery |
 | --- | --- | --- |
-| 无管理器：标准按钮、LDB、TOC compartment | 原库执行的离线注册/点击/生命周期测试；原生 TOC 源码签名核查 | 待用户验收 |
-| HidingBar 默认设置 | 默认仅启用小地图来源；不会同时创建本插件的 LDB 表示；源码核查 | 待用户验收 |
-| HidingBar 用户开启小地图和 LDB 双来源 | 源码没有通用同名去重；可能有两个表示，请在管理器中排除一个来源。本插件不擅改其配置 | 明确限制，不声称自动去重 |
-| WindTools Minimap Buttons Bar | 标准 LibDBIcon 名称、Show/Hide 接管与拖动禁用接口已核查；离线模拟收纳所有权 | 待指定版本客户端验收 |
-| MBB Reborn / 原 MBB | 标准按钮扫描与 Ctrl+右键转交规则已核查；原 MBB 已归档 | 待维护分支客户端验收；不修复旧 MBB 自身问题 |
+| No manager: standard button, LDB, TOC compartment | Actual library execution in offline registration/click/lifecycle tests; native TOC signature review | Pending user acceptance |
+| HidingBar defaults | Source review: only minimap input is enabled by default, so a second LDB representation is not added | Pending user acceptance |
+| HidingBar with both minimap and LDB sources enabled by the user | No universal same-name deduplication in source; two representations are possible. Exclude one source in the manager; CarGOUI does not edit its settings | Explicit limitation; no automatic-deduplication claim |
+| WindTools Minimap Buttons Bar | Standard LibDBIcon name, Show/Hide takeover and drag-disable interfaces reviewed; offline collector-ownership simulation | Pending acceptance with a recorded manager version |
+| MBB Reborn / original MBB | Standard button scan and Ctrl-right-click forwarding reviewed; original MBB is archived | Pending maintained-fork acceptance; no claim to fix old MBB itself |
 
-以上工具分别测试。不能承诺多个管理器同时争抢同一按钮时正常。其他插件已加载的更新版共享库可能替代嵌入版本，应记录真实组合。没有 WoW 环境，不提供虚构 CPU/内存数据或“全部兼容实测通过”。
+Test managers separately. Multiple managers competing for one button are not guaranteed compatible. An already-loaded newer shared library may supersede the embedded version; record the actual combination. Without WoW, no measured CPU/memory numbers or universal compatibility claim is made.
 
-## 安装与游戏内步骤
+## Installation and in-game checks
 
-退出 WoW，替换 ZIP 内 `CarGOUI`、`CarGOUI_Data` 两个程序目录，保留 WTF/SavedVariables。记录客户端 build、管理器版本、UI 缩放及小地图形状。
+Exit WoW, replace `CarGOUI` and `CarGOUI_Data`, and keep WTF/SavedVariables. Record client build, manager versions, UI scale and minimap shape.
 
-1. 暂不启用收纳管理器。插件列表两项显示同一徽记；登录只出现一个小地图按钮和一个原生 CarGOUI 菜单项。未经打开设置时无完整 Options 窗口。
-2. 分别普通左键点击小地图、LDB 显示器、compartment，确认打开/关闭同一窗口；Tooltip 只含名称、版本、操作说明。右键/Ctrl+右键等不触发 Options。
-3. 在战斗中交替点击上述三个入口与输入 `/cui`、`/cargoui` 共十次：不闪出设置、不开始 TEST/拾色器，仅提示一次；脱战重检后打开一次，下次普通脱战不再自动打开。已有窗口进战斗时仍清理未提交编辑，真实提醒继续。
-4. 关闭 **Show minimap icon**：仅标准按钮隐藏，原生菜单与 `/cui` 可重新打开设置并恢复。拖动未收纳按钮只改变自身环绕角度；拖 Options 不改变该角度及游戏提醒。尝试 ROUND/SQUARE/常见形状与不同 UI 缩放，检查徽记透明尖角和位置。
-5. 各管理器分别启用：收纳后测试点击、Tooltip、隐藏/恢复、位置、排除设置与 `/reload`。HidingBar fresh 默认只能看到一个入口；双来源配置按上表处理。WindTools/MBB 收纳后，导入相同或不同图标偏好、恢复备份、重置，均不抢回其锚点或拖动脚本。
-6. 导出 Current class 后修改图标偏好并导回：图标偏好保持。All saved settings 往返恢复显示与角度。导入旧 RC1/RC2 字符串不改变当前图标偏好。未确认/损坏输入无更改。拖动图标后 `/reload` 恢复新角度，验证仍写入活动存档表。
-7. 重复开关设置、切专精、载入 Data、显示/隐藏图标，没有额外按钮、菜单、回调、计时器或隐藏的持续拖动更新。保留 RC2 起拖与释放回归；真实 Mobility、Proc、Free move 的计时/显隐、字体、独立 XY/RGB 不受影响。
+1. Disable collectors initially. Both AddOns rows show the emblem; login creates one minimap button and one native CarGOUI menu item. The full Options UI is not created before it is opened.
+2. Left-click minimap, broker display and compartment separately. All toggle the same window; tooltip contains only name/version/instructions. Right-click and Ctrl-right-click do not open Options.
+3. In combat, alternate those entries with `/cui` and `/cargoui` ten times: no settings flash, TEST or picker; one message and one pending request. After unlocking, open once. Later ordinary combat exits do not reopen. Entering combat with Options open still discards drafts while live reminders continue.
+4. Disable **Show minimap icon**. Only the standard button hides; `/cui` and the compartment can reopen settings to restore it. Dragging an uncollected icon changes only its angle. Options dragging changes neither angle nor reminder positions. Check ROUND/SQUARE/common shapes and UI scales, including transparent tips.
+5. Enable each collector separately. Test clicks, tooltip, hide/restore, placement, exclusion and `/reload`. Fresh HidingBar defaults show one entry; dual-source behavior follows the table. Imports of identical or changed icon preferences, restore and reset must not take back WindTools/MBB anchors or drag handlers.
+6. Current-class export/import preserves current icon preferences. All-settings round trips restore visibility/angle. RC1/RC2 strings preserve them. Canceled or corrupt imports change nothing. Drag and `/reload` verify writes reach the active saved table.
+7. Reopen Options, switch specs, load Data and toggle visibility repeatedly: no extra buttons, menu items, callbacks, timers or hidden permanent drag updates. Retest RC2 pickup/release and real Mobility/Proc/Free move timing, visibility, fonts and independent XY/RGB.
 
-最终解压安装包的离线输出与 SHA256 同 ZIP 交付。离线模拟不替代上述原生视觉、鼠标事件、秘密数据安全和收纳管理器实机验收。
+Final extracted-installer offline output and SHA256 accompany the ZIP. Offline simulation does not replace native visual, pointer-event, secret-data or manager acceptance. Subsequent user-reported RC3 success is recorded in [1.0.0 release notes](RELEASE_1.0.0.md), without retroactively claiming every matrix row was individually tested.

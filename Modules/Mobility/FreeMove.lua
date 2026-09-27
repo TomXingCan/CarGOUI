@@ -34,7 +34,7 @@ function addon:RenderFreeMoveState()
         self:StopFreeMove()
         return
     end
-    local frame, reason = self:AcquireAuraReminder(entry, entry.auraID, "Free move")
+    local frame, reason = self:AcquireAuraReminder(entry, entry.auraID, self:Text("Free move"))
     if not frame then
         self:StopFreeMove()
         self.freeMoveStatusReason = reason

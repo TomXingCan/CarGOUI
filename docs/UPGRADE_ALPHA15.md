@@ -1,43 +1,43 @@
-# alpha.15 升级与验收
+# alpha.15 upgrade and acceptance
 
-本增量以 alpha.14 `bd96dbc46dd2c79f294bb35fcbce0dc8863677ab` 为基线，按要求分三批提交其余 12 职业的真实原生 Proc。审查 37 个非 Mage 专精，其中 33 个有纳入条目，共 63 个按专精归属的定义、81 个区域。Enhancement、Destruction、Arms、Fury 当前没有符合准入条件的计时，页面提供空状态。完整 ID、图形、条件及排除理由见 [PROC_COVERAGE.md](PROC_COVERAGE.md)。这不是“所有专精都有计时器”的承诺。
+Baseline: alpha.14 `bd96dbc46dd2c79f294bb35fcbce0dc8863677ab`. This historical increment delivered native Proc monitoring for the other 12 classes in three batches. Of 37 non-Mage specs reviewed, 33 have admitted entries: 63 spec-owned definitions and 81 regions. Enhancement, Destruction, Arms and Fury have no currently admitted timer and show an explicit empty state. See [PROC_COVERAGE.md](PROC_COVERAGE.md) for IDs, graphics, conditions and exclusions. This does not mean every spec has a timer.
 
-## 安装
+## Installation
 
-1. 完全退出 WoW，备份当前两个 AddOns 程序目录和 SavedVariables。
-2. 用本 ZIP 的 `CarGOUI`、`CarGOUI_Data` 替换 AddOns 中同名程序目录；同时安装两个目录，不额外嵌套一层。
-3. 若仍残留 alpha.8 的 `AddOns/CarGOUI_Mage`，只移除该旧程序目录。不要删除 WTF 或任何角色/账号 SavedVariables。
-4. 登录用 `/cui` 打开设置，确认版本 `0.1.0-alpha.15`。原 `/cargoui`、Enter 提交、即时滑块和整窗空白拖动保持不变。目标数据为 Retail **12.1.0.69933 / Interface 120100**；诊断记录实际客户端 build 供对照。
+1. Exit WoW; back up both program directories and SavedVariables.
+2. Replace AddOns/CarGOUI and AddOns/CarGOUI_Data together using the ZIP. Do not add a nesting layer.
+3. Remove only an old alpha.8 AddOns/CarGOUI_Mage program directory. Keep WTF and character/account SavedVariables.
+4. `/cui` should report `0.1.0-alpha.15`. `/cargoui`, Enter submission, immediate sliders and whole-window blank-area dragging remain. Audited target: Retail **12.1.0.69933 / Interface 120100**; diagnostics record the actual build for comparison.
 
-Schema 5 不变，无重置或跨职业复制。Mobility 按职业保存全部设置，Proc 字体按职业+专精保存，区域 RGB/XY 按稳定区域 ID 保存。没有新选择器或新配置页面。旧法师映射/区域 ID、颜色确认/取消、alpha.14 战斗锁、Mobility、Free move、主题与品牌素材保留；共享 Proc 引擎仅扩展能力接口、映射索引与定向分发。
+Schema 5 remains without resets/cross-class copying. Mobility settings are class-wide; Proc fonts are class+spec; RGB/XY belong to stable region IDs. No new selector/page. Mage mappings/IDs, color confirmation/cancellation, alpha.14 combat lock, Mobility, Free move, themes and branding remain. The shared Proc engine adds capability interfaces, indexes and targeted dispatch only.
 
-## 实现与加载边界
+## Implementation and loading
 
-每个新条目使用已核查的真实计时 Aura，交给原生 `AuraContainer` 的自身 `HELPFUL + includeSpellIDs` 筛选和 DurationTextBinding。图形来源与计时来源分离；公开 SHOW/HIDE 控制对应区域，不在 Lua 读取 Aura、层数、剩余秒数或受限子框体。界面只增加原生图形上的数字，不替换图形。
+Each new entry uses an audited finite timer Aura, passed to native AuraContainer `HELPFUL + includeSpellIDs` filtering and DurationTextBinding. Graphic and timer sources are separate. Public SHOW/HIDE gates the region; Lua does not read Auras, stacks, seconds or secret child frames. Only digits are added over native graphics.
 
-数据固定于 69933 图形表及同版本 SimulationCraft 源码/数据转储，证据、补充 DB2 查询与排除项分别见三个批次文档。资料中的持续时间只用于准入核查，运行时不使用固定秒数。不符合范围或资料不足的候选不进入菜单，也不列为必须继续开发的任务。
+Evidence pins the 69933 graphic table and matching SimulationCraft source/data. Three batch documents contain evidence, supplemental DB2 queries and exclusions. Source durations serve admission review, never runtime fixed timing. Out-of-scope or inadequately sourced candidates are neither menu entries nor mandatory future tasks.
 
-统一 Data 包仍整体执行其 TOC，所有职业工厂的代码都会加载；账号级 SavedVariables 也可能整体恢复已有其他职业记录。不能称为其他职业文件/配置零加载。只运行当前专精工厂及当前条件筛选；不实例化其他职业的条目，不为其创建提醒或业务监听。三个通用学习/天赋变化回调不依赖 Mobility，空 Proc 范围不启动 Proc 业务监控。已分配槽位以稳定键有界复用，旧专精槽位停用，不声称原生对象或代码彻底卸载。无新增逐帧扫描、周期计时器或强制 GC。
+The unified Data TOC still executes all class factory code, and account SavedVariables may restore other saved class records. Neither is zero-loading. Only current-spec factories/conditions execute; other classes get no instances/reminders/business listeners. Three generic learning/talent-change callbacks work independently of Mobility; an empty Proc scope starts no Proc monitoring. Stable-key slots are reused with bounded counts; old spec slots deactivate rather than claiming code/native objects fully unload. No new per-frame scan, periodic timer or forced GC.
 
-## 离线结果与证据范围
+## Offline results and evidence limits
 
-- 保留 alpha.14 原有 163 项测试，扩展到 **175 项 Lua 5.1 测试**，另有 Mobility、样式/主题、Proc 三套静态检查。最终交付的 `.tests.txt` 是最终解压包运行结果，ZIP 同时附 SHA256。
-- 新矩阵逐一覆盖 63 条定义、81 个区域，分别组合战斗标志与数据秘密性：触发、真实绑定刷新、部分/全部消费、自然到期、多 Proc 并行和停止 Preview。
-- 逐区域经过实际 Options 下拉、拾色器 Okay、Preview、RGB/XY、同专精字体控件；验证 Mobility 关闭/技能未学独立运行、天赋重新发现、空专精、未确认条目无菜单、反复切专精有界。
-- 保留 Clearcasting 多阶段、Mage 其他 Proc、Mobility/Free move、颜色/窗口生命周期回归。另测左右不同 Aura/owner、Precise Shots 拆分来源/旧 HIDE、显式共享 owner 与冲突拒绝、不同 provider 禁止复用、无关事件零全量刷新。
-- 数据核查与模拟分开：测试使用的非运行时来源夹具记录 52 个图形来源键、51 个有限 Aura 及版本/来源/指纹。模拟中注入 Aura 不构成真实游戏映射证明。
+- Retain 163 alpha.14 tests and expand to **175 Lua 5.1 tests**, plus Mobility, style/theme and Proc static suites. The final `.tests.txt` records extracted-installer execution; SHA256 accompanies the ZIP.
+- The matrix covers all 63 definitions/81 regions, independently combining combat flag and data secrecy for trigger, native binding refresh, partial/full consumption, expiry, concurrency and stop Preview.
+- Each region goes through actual Options dropdown, picker Okay, Preview, RGB/XY and shared-spec font controls. Check Mobility-disabled/unlearned independence, talent rediscovery, empty specs, no unverified menu candidates and bounded repeated spec changes.
+- Retain Clearcasting stages, other Mage Procs, Mobility/Free move and color/window lifecycle tests. Add separate left/right Auras/owners, Precise Shots transitions and old HIDE, explicit shared-owner support/conflict rejection, no reuse across providers and zero full refresh for unrelated events.
+- Source verification is separate from simulation. A nonruntime fixture records 52 graphic source keys, 51 finite Auras, versions/sources/fingerprints. Injecting an Aura in a mock is not proof of a game mapping.
 
-**此开发环境没有真实 WoW 客户端。** 新职业的受限 Aura 匹配、战斗安全性、图形中点及资源开销均待用户实机验收。用户对原法师、区域颜色和 alpha.14 窗口行为的实测反馈保留为其已测场景，不扩写为本包所有条目验收通过。
+**No real WoW client was available.** New-class secret Aura matching, combat safety, graphic midpoints and resource use required client acceptance. Existing user feedback on Mage, regional color and alpha.14 Options applies only to tested scenarios.
 
-## 游戏内验收
+## In-game acceptance
 
-1. 记录 build、职业、专精、相关天赋。打开 Proc 页，菜单应只有覆盖表中当前条件合格的区域；未触发时可改颜色、字体、坐标并 Preview。四个空范围显示说明，不出现假样例或可用拾色器。关闭 Mobility 后此菜单与真实 Proc 应继续工作。
-2. 关闭 Options/TEST 后触发该 Proc，数字位于实际原生图形自身中点。分别验证左右/上下/Outside、图形缩放、UI 缩放和保存的区域偏移。不同 Proc 同时触发应各自计时，不能互相清空。
-3. 分别在战斗内外测试自然到期、完全消耗、部分层数消耗和持续时间刷新。数字应跟随真实效果，不因一次消耗把仍有效区域全部抹除。额外核查覆盖表中的隐藏右侧 Aura 是否被目标客户端原生过滤器正确提供。
-4. 对 Precise Shots 等多阶段来源，验证后阶段出现后前阶段 HIDE 不会清掉新阶段。对 Harsh Discipline / Celestial Might 等 E 型条目，额外要求实际原生 SHOW；已存在增益时重载没有通用图形重放，可能需要下一次真实 SHOW 才显示，不能拿离线结果承诺历史图形重建。
-5. 关闭暴雪原生 Proc 提示、将原生透明度设零再恢复，附加数字应遵守现有显隐偏好。重新启用偏好不制造历史 SHOW；已有增益重载/切专精的启动与原生图形实际一致性需单独记录。
-6. 切专精、改天赋、`/reload`、换角色再返回：样式、RGB、XY 应恢复到原范围，旧专精数字/测试不得残留。同一专精的所有区域共用字体，颜色/偏移互不影响。
-7. 保持某个真实 Proc、Mobility 和 Time Spiral Free move 活动时，打开设置再进入战斗：窗口自动关闭且真实提醒继续。战斗中连续输入 `/cui` 与 `/cargoui` 应只提示一次，脱战只打开一次，不启动 TEST 或拾色器；普通后续脱战不弹窗。
-8. 反复触发及切专精 20 次，按需复制诊断，比较活动与已分配槽位、回调数量、内存与启用 scriptProfile 时的 CPU。Lua 的 `Native tracking` 仅表示请求原生监控，不代表读取到可见 Buff 数。没有客户端测量前不提供推测 CPU/内存数字。
+1. Record build/class/spec/talents. Proc menu contains only coverage-table regions admitted under current conditions. Inactive effects remain configurable/previewable. The four empty specs show explanations without fake samples or active pickers. Disabling Mobility leaves Proc menu/runtime functional.
+2. Close Options/TEST and trigger the Proc. Digits sit at each actual graphic's midpoint plus saved offsets. Check side/top/bottom/outside regions, graphic/UI scale and concurrency without one Proc clearing another.
+3. In/out of combat, verify expiry, full/partial consumption and refresh. Remaining regions must survive partial consumption. Verify hidden right-side Auras are actually supplied by the target native filter.
+4. For Precise Shots and other stages, old-stage HIDE must not clear the new stage. E-type Harsh Discipline/Celestial Might entries require actual native SHOW. Reload with an existing buff may await the next SHOW because no universal graphic replay exists; offline results do not promise history reconstruction.
+5. Disable native alerts or set opacity zero, then restore. Digits respect those preferences; re-enabling does not invent historical SHOW. Record reload/spec-change initial matching against actual graphics separately.
+6. Switch spec/talents, `/reload`, change characters and return. Style/RGB/XY restores within scope; old digits/TEST do not linger. Same-spec regions share typography but retain independent colors/offsets.
+7. With Proc, Mobility and Time Spiral Free move active, open Options then enter combat. Options closes, live reminders continue. Repeated `/cui` and `/cargoui` produce one message/open-after-combat, without TEST/picker or later unsolicited reopening.
+8. Trigger/change spec 20 times. Take on-demand diagnostics for active/allocated slots, callbacks, memory and scriptProfile-enabled CPU. `Native tracking` means requested native monitoring, not a readback of visible buff count. No guessed CPU/memory numbers before measurement.
 
-若失败，提供实际 build/专精/天赋、覆盖表条目或区域名、发生步骤和错误文本/诊断。无需为了本任务验收已排除的特殊 Mobility 或没有可靠来源的候选。
+For failures, report build/spec/talents, coverage entry/region, exact steps and error/diagnostics. Excluded special Mobility and unsourced candidates are not required acceptance tasks.

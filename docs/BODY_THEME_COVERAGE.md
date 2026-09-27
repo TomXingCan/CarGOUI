@@ -1,114 +1,106 @@
-# Body 自动主题覆盖表
+# Automatic Body theme coverage
 
-本轮扩展的是 **Options 外观**：13 个职业基础主题、40 个职业／专精主题，以及未知身份的中性回退。职业与专精只决定 Body；Header 继续只根据阵营使用联盟蓝、部落红或中性色。
+This table records the alpha.10 **Options appearance** increment: 13 class bases, 40 class/spec themes and neutral fallback. Class/spec determines Body only; Header remains Alliance blue, Horde red or neutral.
 
-**这不等于全职业 Mobility 支持。** 真实位移监控仍只有已实现的法师 Blink / Shimmer；本轮没有加入其他职业技能监控、真实 Proc、技能映射或提醒配置。提醒职业色、独立配置范围、坐标和真实计时逻辑均不在此主题数据文件内。
+**Theme coverage is not Mobility or Proc coverage.** At alpha.10 only Mage Blink/Shimmer had real monitoring and Proc was Preview-only. Later implementations are recorded separately in [Mobility coverage](MOBILITY_COVERAGE.md) and [Proc coverage](PROC_COVERAGE.md); those later changes do not turn a theme table into gameplay evidence. Reminder colors, configuration scopes, coordinates and timing are not theme data.
 
-以下所有新增职业配色与几何图案都是本轮的原创设计提案，不是用户逐项指定的艺术方案。法师奥术／火焰／冰霜的配色和水印端点数据保持 alpha.9 原样。用户此前确认了 alpha.9 的法师界面；**本次交付包尚须真实客户端回归，不能把旧版本验收当成本包已经验收。**
+New non-Mage palettes/geometries were original design proposals, not individually user-specified art. Mage Arcane/Fire/Frost palettes and watermark endpoints remain exactly the alpha.9 design the user had approved. That prior feedback is not per-theme visual acceptance of a newer package.
 
-## 职业基础主题：未选择专精或专精未覆盖时
+## Class bases: no selected or covered specialization
 
-每个已知职业都有自己的可见基础主题，不套用其他职业或错误专精。表中的“待实测”指真实客户端视觉与交互验收；代码和离线验证状态应结合随包测试结果阅读。
+Each known class has a visible base instead of another class's or a guessed spec's theme. Pending means client visual/interaction acceptance; implementation/offline results are separate.
 
-| 职业 | Body key | 深色渐变／强调方向 | 基础水印 | 实现状态 | 实机验收状态 |
+| Class | Body key | Dark gradient / accent | Base watermark | Implementation | Client acceptance |
 | --- | --- | --- | --- | --- | --- |
-| 死亡骑士 | `deathknight` | 深暗红铁色 → 符文紫红 | 符文长剑、两侧菱形印记 | 已实现 | 待实测 |
-| 恶魔猎手 | `demonhunter` | 深墨绿 → 邪能翡翠 | 成对战刃、眼罩式横线、中央印记 | 已实现 | 待实测 |
-| 德鲁伊 | `druid` | 深林绿 → 草木琥珀 | 鹿角、叶片、树脉 | 已实现 | 待实测 |
-| 唤魔师 | `evoker` | 深青黑 → 龙族翡翠 | 龙翼、龙首、弯曲尾线 | 已实现 | 待实测 |
-| 猎人 | `hunter` | 深森林色 → 橄榄绿 | 弓弦、箭矢、菱形狩猎印记 | 已实现 | 待实测 |
-| 法师 | `mage` | 保留深色法师蓝灰 | 通用法球、光芒与法杖；不是任意专精图案 | 已实现 | 待实测 |
-| 武僧 | `monk` | 深青绿 → 翡翠 | 相交圆环、中央菱形气印 | 已实现 | 待实测 |
-| 圣骑士 | `paladin` | 深暖棕 → 克制金色 | 护盾、战锤、中央印记 | 已实现 | 待实测 |
-| 牧师 | `priest` | 深暖灰 → 象牙暗金 | 光环、权杖、两侧衣褶线 | 已实现 | 待实测 |
-| 潜行者 | `rogue` | 炭黑 → 黄铜 | 交叉匕首、中央印记 | 已实现 | 待实测 |
-| 萨满祭司 | `shaman` | 深风暴蓝 → 钴蓝 | 圆环、闪电、外侧菱形图腾 | 已实现 | 待实测 |
-| 术士 | `warlock` | 深紫黑 → 邪能紫晶 | 传送环、弯角、中央符印 | 已实现 | 待实测 |
-| 战士 | `warrior` | 深铁灰 → 锈铜 | 交叉长剑、中央军徽 | 已实现 | 待实测 |
+| Death Knight | `deathknight` | Dark red iron → runic magenta | Rune sword, side diamond seals | Implemented | Pending |
+| Demon Hunter | `demonhunter` | Dark ink green → fel emerald | Paired glaives, blindfold bar, central seal | Implemented | Pending |
+| Druid | `druid` | Deep forest green → botanical amber | Antlers, leaves, tree veins | Implemented | Pending |
+| Evoker | `evoker` | Dark teal → draconic emerald | Wings, dragon head, curved tail | Implemented | Pending |
+| Hunter | `hunter` | Deep forest → olive | Bow, arrow, diamond hunting seal | Implemented | Pending |
+| Mage | `mage` | Retained dark blue-gray | Generic orb, rays and staff; no assumed spec | Implemented | Pending |
+| Monk | `monk` | Deep teal → jade | Intersecting rings, central chi diamond | Implemented | Pending |
+| Paladin | `paladin` | Deep warm brown → restrained gold | Shield, hammer, central seal | Implemented | Pending |
+| Priest | `priest` | Deep warm gray → ivory dark gold | Halo, staff, side robe folds | Implemented | Pending |
+| Rogue | `rogue` | Charcoal → brass | Crossed daggers, central seal | Implemented | Pending |
+| Shaman | `shaman` | Deep storm blue → cobalt | Ring, lightning, outer diamond totems | Implemented | Pending |
+| Warlock | `warlock` | Deep purple-black → fel amethyst | Portal ring, curved horns, central sigil | Implemented | Pending |
+| Warrior | `warrior` | Deep iron gray → rusty copper | Crossed swords, central military emblem | Implemented | Pending |
 
-## 逐专精覆盖
+## Specialization coverage
 
-同职业的专精不只改变标签：每条记录都有独立配色和不同的水印线段组合。相同职业保留基础识别轮廓，再加入对应专精的图案变化。所有图案都是抽象主题符号，不代表实时技能、Buff、冷却或可用状态。
+Each spec has a distinct palette and line composition, retaining its class silhouette while adding spec detail. These abstract symbols never represent active spells, buffs, cooldowns or availability.
 
-| 职业 | specID／专精 | Body key | 深色渐变／强调方向 | 水印变化 | 实现状态 | 实机验收状态 |
+| Class | specID / specialization | Body key | Dark gradient / accent | Watermark variation | Implementation | Client acceptance |
 | --- | --- | --- | --- | --- | --- | --- |
-| 死亡骑士 | 250 Blood | `deathknight_blood` | 暗血红 → 深绯红 | 剑身血滴形符印 | 已实现 | 待实测 |
-| 死亡骑士 | 251 Frost | `deathknight_frost` | 深冰钢蓝 → 霜蓝 | 两侧六向冰芒 | 已实现 | 待实测 |
-| 死亡骑士 | 252 Unholy | `deathknight_unholy` | 暗苔绿 → 瘟疫绿 | 两侧骸骨式角面符印 | 已实现 | 待实测 |
-| 恶魔猎手 | 577 Havoc | `demonhunter_havoc` | 暗绿 → 酸性邪能绿 | 战刃上方裂焰、下方四向气芒 | 已实现 | 待实测 |
-| 恶魔猎手 | 581 Vengeance | `demonhunter_vengeance` | 焦褐 → 灼热铜金 | 战刃中央护盾 | 已实现 | 待实测 |
-| 恶魔猎手 | 1480 Devourer | `demonhunter_devourer` | 深虚空蓝紫 → 紫罗兰 | 战刃中央虚空圆环与菱形核心 | 已实现 | 待实测 |
-| 德鲁伊 | 102 Balance | `druid_balance` | 月夜靛蓝 → 星紫 | 鹿角间新月轮廓 | 已实现 | 待实测 |
-| 德鲁伊 | 103 Feral | `druid_feral` | 树皮暗棕 → 野性锈橙 | 双侧三重爪痕 | 已实现 | 待实测 |
-| 德鲁伊 | 104 Guardian | `druid_guardian` | 深土棕 → 古铜金 | 中央兽掌印 | 已实现 | 待实测 |
-| 德鲁伊 | 105 Restoration | `druid_restoration` | 深树叶绿 → 新生翡翠 | 双侧新叶 | 已实现 | 待实测 |
-| 唤魔师 | 1467 Devastation | `evoker_devastation` | 暗宝石红 → 深龙翼蓝 | 龙翼下方双重裂焰 | 已实现 | 待实测 |
-| 唤魔师 | 1468 Preservation | `evoker_preservation` | 深翡翠 → 青铜绿 | 双侧生命叶片 | 已实现 | 待实测 |
-| 唤魔师 | 1473 Augmentation | `evoker_augmentation` | 黑曜石棕 → 青铜金 | 双侧带切面的菱形晶体 | 已实现 | 待实测 |
-| 猎人 | 253 Beast Mastery | `hunter_beastmastery` | 深蕨绿 → 草木琥珀 | 弓箭下方兽掌印 | 已实现 | 待实测 |
-| 猎人 | 254 Marksmanship | `hunter_marksmanship` | 深林钢蓝 → 青蓝 | 箭矢前方瞄准环和刻度 | 已实现 | 待实测 |
-| 猎人 | 255 Survival | `hunter_survival` | 暗苔绿 → 锈铜 | 斜向长矛与陷阱式菱形 | 已实现 | 待实测 |
-| 法师 | 62 Arcane | `arcane` | 深紫 → 奥术紫 | 原有双圆环、中央符印、四向符文；60 条线 | 已实现，保留 alpha.9 | 用户确认 alpha.9；本包待回归 |
-| 法师 | 63 Fire | `fire` | 深红棕 → 暗琥珀 | 原有外焰和内焰；27 条线 | 已实现，保留 alpha.9 | 用户确认 alpha.9；本包待回归 |
-| 法师 | 64 Frost | `frost` | 深蓝 → 冰青 | 原有中心晶体、六向冰枝；36 条线 | 已实现，保留 alpha.9 | 用户确认 alpha.9；本包待回归 |
-| 武僧 | 268 Brewmaster | `monk_brewmaster` | 暗琥珀 → 金翡翠 | 相交气环中的酒桶轮廓 | 已实现 | 待实测 |
-| 武僧 | 269 Windwalker | `monk_windwalker` | 深天青 → 青蓝 | 外侧流转气弧与箭尾 | 已实现 | 待实测 |
-| 武僧 | 270 Mistweaver | `monk_mistweaver` | 深海绿 → 翡翠绿 | 气环上下的雾浪 | 已实现 | 待实测 |
-| 圣骑士 | 65 Holy | `paladin_holy` | 暖暗金 → 光辉琥珀 | 盾上日轮与放射光芒 | 已实现 | 待实测 |
-| 圣骑士 | 66 Protection | `paladin_protection` | 深蓝钢 → 淡金灰蓝 | 双层护盾 | 已实现 | 待实测 |
-| 圣骑士 | 70 Retribution | `paladin_retribution` | 暗绯红 → 复仇金铜 | 护盾两侧交叉审判剑 | 已实现 | 待实测 |
-| 牧师 | 256 Discipline | `priest_discipline` | 暗蓝 → 金紫灰 | 权杖旁的成对菱形和秩序横线 | 已实现 | 待实测 |
-| 牧师 | 257 Holy | `priest_holy` | 深象牙棕 → 温暖暗金 | 光环外放射光芒 | 已实现 | 待实测 |
-| 牧师 | 258 Shadow | `priest_shadow` | 深紫黑 → 暗影紫 | 权杖两侧虚空弧线 | 已实现 | 待实测 |
-| 潜行者 | 259 Assassination | `rogue_assassination` | 深毒草绿 → 酸性橄榄绿 | 三枚毒滴形符印 | 已实现 | 待实测 |
-| 潜行者 | 260 Outlaw | `rogue_outlaw` | 暗黄铜 → 深海青 | 匕首中央航向罗盘 | 已实现 | 待实测 |
-| 潜行者 | 261 Subtlety | `rogue_subtlety` | 午夜蓝 → 隐秘紫 | 中央暗眼轮廓 | 已实现 | 待实测 |
-| 萨满祭司 | 262 Elemental | `shaman_elemental` | 暗熔岩红 → 风暴靛蓝 | 闪电旁的火焰与岩石印记 | 已实现 | 待实测 |
-| 萨满祭司 | 263 Enhancement | `shaman_enhancement` | 深钢蓝 → 闪电青 | 双侧附加闪电 | 已实现 | 待实测 |
-| 萨满祭司 | 264 Restoration | `shaman_restoration` | 深潮蓝 → 海水青 | 三层潮汐波纹 | 已实现 | 待实测 |
-| 术士 | 265 Affliction | `warlock_affliction` | 暗病绿灰 → 诅咒紫 | 门环中的相连锁印 | 已实现 | 待实测 |
-| 术士 | 266 Demonology | `warlock_demonology` | 深紫晶 → 邪能紫红 | 角面内印和上方符核 | 已实现 | 待实测 |
-| 术士 | 267 Destruction | `warlock_destruction` | 暗余烬红 → 焦灼铜金 | 门环中央烈焰 | 已实现 | 待实测 |
-| 战士 | 71 Arms | `warrior_arms` | 暗绯红 → 武器青铜 | 交叉剑中央的竖直长剑 | 已实现 | 待实测 |
-| 战士 | 72 Fury | `warrior_fury` | 深赤红 → 暴怒余烬 | 剑间裂焰 | 已实现 | 待实测 |
-| 战士 | 73 Protection | `warrior_protection` | 深铁蓝 → 淬火钢蓝 | 剑间护盾 | 已实现 | 待实测 |
+| Death Knight | 250 Blood | `deathknight_blood` | Dark blood red → crimson | Blood-drop sword sigil | Implemented | Pending |
+| Death Knight | 251 Frost | `deathknight_frost` | Deep ice steel → frost blue | Six-point ice rays at each side | Implemented | Pending |
+| Death Knight | 252 Unholy | `deathknight_unholy` | Dark moss → plague green | Angular bone-like side seals | Implemented | Pending |
+| Demon Hunter | 577 Havoc | `demonhunter_havoc` | Dark green → acidic fel green | Split flame over glaives, four-point lower rays | Implemented | Pending |
+| Demon Hunter | 581 Vengeance | `demonhunter_vengeance` | Charred brown → hot copper-gold | Central glaive shield | Implemented | Pending |
+| Demon Hunter | 1480 Devourer | `demonhunter_devourer` | Deep void blue-purple → violet | Void ring and diamond core between glaives | Implemented | Pending |
+| Druid | 102 Balance | `druid_balance` | Moonlit indigo → star violet | Crescent between antlers | Implemented | Pending |
+| Druid | 103 Feral | `druid_feral` | Dark bark → rusty wild orange | Triple claw marks on both sides | Implemented | Pending |
+| Druid | 104 Guardian | `druid_guardian` | Deep earth brown → bronze gold | Central paw print | Implemented | Pending |
+| Druid | 105 Restoration | `druid_restoration` | Deep leaf green → new-growth emerald | Fresh side leaves | Implemented | Pending |
+| Evoker | 1467 Devastation | `evoker_devastation` | Dark ruby → deep wing blue | Double split flames beneath wings | Implemented | Pending |
+| Evoker | 1468 Preservation | `evoker_preservation` | Deep emerald → bronze-green | Side life leaves | Implemented | Pending |
+| Evoker | 1473 Augmentation | `evoker_augmentation` | Obsidian brown → bronze gold | Faceted side diamond crystals | Implemented | Pending |
+| Hunter | 253 Beast Mastery | `hunter_beastmastery` | Deep fern → botanical amber | Paw print beneath bow/arrow | Implemented | Pending |
+| Hunter | 254 Marksmanship | `hunter_marksmanship` | Forest steel blue → cyan-blue | Sight ring and ticks ahead of arrow | Implemented | Pending |
+| Hunter | 255 Survival | `hunter_survival` | Dark moss → rusty copper | Diagonal spear and trap diamond | Implemented | Pending |
+| Mage | 62 Arcane | `arcane` | Deep purple → arcane purple | Original double rings, central seal, four-way runes; 60 lines | Implemented; alpha.9 retained | User approved alpha.9; newer package regression pending |
+| Mage | 63 Fire | `fire` | Deep red-brown → dark amber | Original outer/inner flames; 27 lines | Implemented; alpha.9 retained | User approved alpha.9; newer package regression pending |
+| Mage | 64 Frost | `frost` | Deep blue → ice cyan | Original central crystal and six ice branches; 36 lines | Implemented; alpha.9 retained | User approved alpha.9; newer package regression pending |
+| Monk | 268 Brewmaster | `monk_brewmaster` | Dark amber → gold-jade | Barrel within intersecting chi rings | Implemented | Pending |
+| Monk | 269 Windwalker | `monk_windwalker` | Deep azure → cyan-blue | Outer flowing chi arcs and arrow tails | Implemented | Pending |
+| Monk | 270 Mistweaver | `monk_mistweaver` | Deep sea green → jade | Mist waves above/below rings | Implemented | Pending |
+| Paladin | 65 Holy | `paladin_holy` | Warm dark gold → radiant amber | Sun disk and rays above shield | Implemented | Pending |
+| Paladin | 66 Protection | `paladin_protection` | Deep blue steel → pale gold-gray-blue | Double shield | Implemented | Pending |
+| Paladin | 70 Retribution | `paladin_retribution` | Dark crimson → copper-gold | Crossed judgment swords at shield sides | Implemented | Pending |
+| Priest | 256 Discipline | `priest_discipline` | Dark blue → gold-purple-gray | Paired staff diamonds and order bars | Implemented | Pending |
+| Priest | 257 Holy | `priest_holy` | Deep ivory-brown → warm dark gold | Rays outside halo | Implemented | Pending |
+| Priest | 258 Shadow | `priest_shadow` | Deep purple-black → shadow violet | Void arcs at staff sides | Implemented | Pending |
+| Rogue | 259 Assassination | `rogue_assassination` | Deep poison green → acidic olive | Three poison-drop seals | Implemented | Pending |
+| Rogue | 260 Outlaw | `rogue_outlaw` | Dark brass → deep sea teal | Compass between daggers | Implemented | Pending |
+| Rogue | 261 Subtlety | `rogue_subtlety` | Midnight blue → covert purple | Central dark eye | Implemented | Pending |
+| Shaman | 262 Elemental | `shaman_elemental` | Dark lava red → storm indigo | Flame and stone marks beside lightning | Implemented | Pending |
+| Shaman | 263 Enhancement | `shaman_enhancement` | Deep steel blue → lightning cyan | Extra side lightning | Implemented | Pending |
+| Shaman | 264 Restoration | `shaman_restoration` | Deep tide blue → seawater cyan | Three tidal waves | Implemented | Pending |
+| Warlock | 265 Affliction | `warlock_affliction` | Sickly dark green-gray → curse purple | Linked chain seals in portal ring | Implemented | Pending |
+| Warlock | 266 Demonology | `warlock_demonology` | Deep amethyst → fel magenta | Horned inner seal and upper core | Implemented | Pending |
+| Warlock | 267 Destruction | `warlock_destruction` | Dark ember red → scorched copper-gold | Central portal flame | Implemented | Pending |
+| Warrior | 71 Arms | `warrior_arms` | Dark crimson → weapon bronze | Upright sword between crossed swords | Implemented | Pending |
+| Warrior | 72 Fury | `warrior_fury` | Deep scarlet → raging ember | Split flame between swords | Implemented | Pending |
+| Warrior | 73 Protection | `warrior_protection` | Deep iron blue → tempered steel blue | Shield between swords | Implemented | Pending |
 
-## 回退与边界
+## Acceptance and boundaries
 
-主题覆盖与真实监控分别记录：
+At the alpha.10 theme increment, Mage had implemented Blink/Shimmer requiring package regression and Preview-only Proc; other classes had no real Mobility/Proc yet. That historical gap is now tracked by the separate live-coverage documents linked above, never inferred from theme completion.
 
-| 范围 | Body 主题 | 真实 Mobility | 真实 Proc |
-| --- | --- | --- | --- |
-| 法师三系 | 已实现，保留已确认的原设计 | 现有 Blink / Shimmer；本包仍需战斗回归 | 未实现，仅已有预览 |
-| 其余 12 职业／37 专精 | 全部已实现，逐项待实机视觉验收 | 当前源码尚未实现 | 未实现 |
+1. Keep WTF/SavedVariables and replace both program directories. Open `/cui` and inspect faction Header and class/spec Body. Alpha.10 had a read-only Theme page; it was removed in RC1 without removing automatic themes.
+2. Inspect every palette: broad gradient, sidebar/footer hierarchy, recognizable watermark, clear text/controls. Record exact build and results.
+3. Same-faction spec changes update Body only, preserving Header/branding-animation rules. Switching characters must not leave another class's pattern.
+4. Mobility/Preview off, an unlearned movement skill or inactive gameplay adapter must not affect themes. Unspecialized characters use their class base.
+5. Repeated changes/reopening must not stack patterns. Check bounds at different UI scales/resolutions and retain blank-area dragging, Enter and sliders.
+6. Return to Mage and compare original fonts/coordinates/class color and both movement skills' depletion/first-recovery behavior. Theme changes must not restart timing.
+7. Use existing diagnostics for actual resource changes. Offline object counts are not measured CPU/memory.
 
-### 游戏内验收顺序
+Fallback/runtime rules:
 
-1. 保留 WTF / SavedVariables，用本包替换两个程序目录。打开 `/cui`，在已有 Theme 页核对职业、专精、Header、Body 名称。
-2. 逐项检查表内新增主题：主体大面积渐变、侧栏／底部层级、水印身份、普通文字和控件可读性；分别记录实际客户端 build 与验收结果。
-3. 同阵营切专精，Body 配色／图案应变化，Header 与原品牌动画规则保持不变；换职业角色后不得残留前一职业图案。
-4. 关闭 Mobility 和 Preview，或使用未学位移／尚无真实监控适配器的角色，主题仍正确。未选专精角色显示本职业基础主题。
-5. 反复切换、关闭／打开窗口，检查图案不叠加；在不同 UI 缩放和分辨率下检查边界。验证拖动空白区域、输入 Enter 和滑块操作。
-6. 回到法师，核对原有字体、坐标、职业色及两种位移的战斗耗尽／恢复一次即隐藏。主题变化不能重启计时。
-7. 使用原有诊断快照记录实际客户端资源变化；离线对象计数不是 CPU／内存实测。
+- Known class without spec uses its class base. Unknown/uncovered/secret/wrong-class specID also uses that base with a fallback reason, never a guessed spec.
+- Unknown/secret class uses `neutral`, without a misleading class/spec watermark.
+- Unknown faction affects only Header. Faction changes do not change Body; spec changes do not change Header.
+- Reuse the existing pool of 64 native Lines. Only selected-pattern endpoints are generated; no 40-spec frame/pool/image precaching. All endpoints fit within center ±100; the largest pattern remains 60 lines.
+- The 13/40 maps are lightweight UI identity data loaded with the theme file. Other-class theme definitions are not claimed unloaded. Generating a current pattern and activating gameplay monitoring are separate tasks.
+- Options palettes are not SavedVariables and query no skills/charges/buffs. They change no reminder class color, style, position, alpha or DurationTextBinding.
 
-### 自动回退与运行边界
+## Roster and API evidence
 
-- 已知职业没有选择专精：使用该职业的基础 Body，而不是中性空白或某个假定专精。
-- 已知职业遇到未知、未覆盖、受限或不属于该职业的 specID：使用该职业基础 Body，并显示回退说明。
-- 职业未知或受限：使用 `neutral`；不显示误导性的职业／专精水印。
-- 阵营未知只影响 Header。阵营切换不更改 Body；专精切换不更改 Header。
-- 原有 64 个原生 Line 对象继续复用。选中的图案才生成端点列表，没有为 40 个专精预建框体、Line 池或图片缓存。所有端点位于中心 ±100 的设计范围内，本轮最大图案仍为 60 条线。
-- 13／40 的表是轻量外观身份数据，集中随主题文件载入；不把它描述成“其他职业主题数据完全未加载”。生成当前图案和激活实际技能监控是不同职责。
-- 配色表只供 Options 使用，不写入 SavedVariables，不查询技能、充能或 Buff，也不改变职业色、提醒样式、位置、透明度和 DurationTextBinding。
+The 40-spec roster includes Demon Hunter **Devourer 1480**, not an inferred old 39-spec list. Review pins Retail **12.1.0 / build 69933** source `09b9db7948abc9b9648dedaab51eb0cf3ee67b31`:
 
-## 名单与接口依据
+- [Blizzard_ClassSpecializationsFrame.lua roster](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_PlayerSpells/ClassSpecializations/Blizzard_ClassSpecializationsFrame.lua)
+- [Blizzard_ClassTalentUtil.lua SpecializationVisuals cross-check](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_PlayerSpells/ClassTalents/Blizzard_ClassTalentUtil.lua)
 
-40 项名单包含 Demon Hunter **Devourer = 1480**，不是按旧版 39 专精名单推测补齐。名单核查使用 Retail **12.1.0 / build 69933** 的固定源码版本 `09b9db7948abc9b9648dedaab51eb0cf3ee67b31`：
+Static gradients/Lines retain the reviewed path in [THEMES.md](THEMES.md). New shapes are original project geometry, not copies of those client icons/textures or third-party art.
 
-- [Blizzard_ClassSpecializationsFrame.lua：职业专精展示名单](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_PlayerSpells/ClassSpecializations/Blizzard_ClassSpecializationsFrame.lua)
-- [Blizzard_ClassTalentUtil.lua：SpecializationVisuals 交叉核对](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_PlayerSpells/ClassTalents/Blizzard_ClassTalentUtil.lua)
-
-静态渐变和原生 Line 接口沿用已核查路径，见 [THEMES.md](THEMES.md)。新增几何轮廓是本项目代码原创图形；没有复制以上客户端的图标、纹理或艺术资源，也没有引用第三方插件美术。
-
-开发目录已通过 102 项离线测试与主题静态检查，覆盖名单、显式职业／专精归属、独立配色与几何、端点范围、64 Line 上限，以及法师三系原数据不变；160 次主题切换后仍复用同一 Line 池。最终安装包的解压测试结果以随包测试报告为准。真实客户端需继续验收各职业主题的辨识度、字体可读性、不同 UI 缩放下的水印、切换专精和反复开关窗口后的对象复用；这些离线检查不能代替实际显示验收。
+The theme increment passed 102 offline groups plus theme static checks: roster/ownership, distinct palettes/geometry, endpoint bounds, 64-Line cap and unchanged Mage data. After 160 switches, it reused the same pool. Final extracted-package results remain authoritative for each delivery. Recognition, readability, watermark scaling, spec transitions and reuse still need actual visuals; offline mapping checks cannot establish those results.

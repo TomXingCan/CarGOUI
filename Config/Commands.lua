@@ -1,16 +1,16 @@
 local _, addon = ...
 
 local function PrintHelp()
-    addon:Print("/cui opens or closes Options. All display settings are available there. /cargoui remains an alias.")
-    addon:Print("Optional commands: /cui help | status | show | hide | reset")
-    addon:Print("/cui position <x> <y>  (-10000 to 10000; right/up are positive)")
-    addon:Print("Mobility Appearance is per class; Proc Appearance is per current class and specialization.")
+    addon:Print(addon:Text("/cui opens or closes Options. All display settings are available there. /cargoui remains an alias."))
+    addon:Print(addon:Text("Optional commands: /cui help | status | show | hide | reset"))
+    addon:Print(addon:Text("/cui position <x> <y>  (-10000 to 10000; right/up are positive)"))
+    addon:Print(addon:Text("Mobility Appearance is per class; Proc Appearance is per current class and specialization."))
 end
 
 local function PrintStatus()
     local db = addon:GetMobilityConfig()
-    addon:Print(string.format("%s | %s | CENTER (%g, %g) | current class Mobility",
-        addon.version, db.enabled and "shown" or "hidden",
+    addon:Print(string.format(addon:Text("%s | %s | CENTER (%g, %g) | current class Mobility"),
+        addon.version, db.enabled and addon:Text("shown") or addon:Text("hidden"),
         db.position.x, db.position.y))
 end
 
@@ -38,20 +38,20 @@ function addon:HandleSlashCommand(message)
         patch = { position = { x = tonumber(args[2]) or args[2], y = tonumber(args[3]) or args[3] } }
     elseif command == "font" or command == "fontsize" or command == "outline"
         or command == "scale" or command == "shadow" then
-        self:Print("Global reminder style commands are retired. Open /cui, open Mobility or Proc, and edit Appearance.")
+        self:Print(addon:Text("Global reminder style commands are retired. Open /cui, open Mobility or Proc, and edit Appearance."))
         return
     elseif command == "reset" and #args == 1 then
         self:ResetDatabase()
-        self:Print("Current class and Options settings reset to defaults.")
+        self:Print(addon:Text("Current class and Options settings reset to defaults."))
         return
     else
-        self:Print("Invalid command. Type /cui help for help.")
+        self:Print(addon:Text("Invalid command. Type /cui help for help."))
         return
     end
 
     local valid, errorMessage = self:UpdateSettings(patch)
     if not valid then
-        self:Print(errorMessage .. " Type /cui help for help.")
+        self:Print(errorMessage .. addon:Text(" Type /cui help for help."))
         return
     end
     PrintStatus()

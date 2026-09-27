@@ -2,7 +2,7 @@
 
 # Increment A — artwork title with glyph-masked light
 
-This is an incremental change on the existing Options branch. It preserves `/cui`, Enter-to-apply, header-only window dragging, shared SavedVariables, English UI, and external Test Mode cleanup. It does not produce Curse promotional content.
+This historical branding increment preserved `/cui`, Enter-to-apply, the then-header-only dragging, shared SavedVariables, the then-English UI and external Test Mode cleanup. Later releases added whole-window background dragging and automatic client-language UI; see README. It did not produce Curse promotional content.
 
 ## Art and layout
 
@@ -65,7 +65,7 @@ These support API names and structure. They do not expose the renderer's exact m
 
 37 Lua 5.1 tests pass, retaining all previous interaction/preview coverage and adding packed TGA/art/mask checks, 20 open/close cycles with stable object counts, visibility/combat gating, no decorative panel/preview refresh, no animation restarts on routine edits, stable artwork dimensions, and explicit fallback/theme tests. Production conversion checks validate transparent edges, exact wordmark/mask alpha identity, dimensions, hashes, budget and decoding. Resized art was visually inspected on dark/light backgrounds.
 
-**游戏内视觉未实测 — in-game visuals have not been tested.** The asset proof is not a game screenshot. Retail acceptance must still check:
+**In-game visuals were not tested in the development environment.** The asset proof is not a game screenshot. Retail acceptance must still check:
 
 1. Real TGA loading, transparent edges and exact readable CarGOUI lettering at multiple UI scales.
 2. Highlight confined to glyphs: no rectangular backing, mask drift, doubled glyphs, residue or jump during the 5-second rest.

@@ -7,7 +7,7 @@ function addon:CreateDisplay()
 end
 
 function addon:ApplyFontSettings(text, style, entry)
-    if not text:SetFont(style.font.face, style.font.size, style.font.outline) then
+    if text:SetFont(self:ResolveReminderFont(style.font.face), style.font.size, style.font.outline) == false then
         -- Localized clients may need their standard font as a fallback.
         text:SetFont(STANDARD_TEXT_FONT or self.factoryReminderStyle.font.face,
             style.font.size, style.font.outline)
@@ -162,9 +162,8 @@ function addon:RenderLiveMobility(entry, spellName, duration, visibility, spellI
     end
     local binding = frame.durationBinding
     binding:SetFontString(frame.text)
-    binding:SetTextFormat("No " .. spellName .. "\n{}", {
-        { property = Enum.DurationTextBindingProperty.RemainingDuration, formatter = self.mobilityFormatter },
-    })
+    frame.mobilityDisplaySpellID, frame.mobilityDisplayFallback = spellID, spellName
+    self:UpdateMobilityTextFormat(frame)
     binding:SetTimeModifier(Enum.DurationTimeModifier.RealTime)
     binding:SetUpdateInterval(0.1)
     binding:SetExpiredText("")
@@ -185,6 +184,14 @@ function addon:RenderLiveMobility(entry, spellName, duration, visibility, spellI
     end
     frame:Show()
     return frame
+end
+
+-- Replacing metadata text must not reset the bound native duration or alpha.
+function addon:UpdateMobilityTextFormat(frame)
+    frame.durationBinding:SetTextFormat(self:FormatMobilityLabel(
+        frame.mobilityDisplaySpellID, frame.mobilityDisplayFallback) .. "\n{}", {
+        { property = Enum.DurationTextBindingProperty.RemainingDuration, formatter = self.mobilityFormatter },
+    })
 end
 
 function addon:HideLiveMobility(except)

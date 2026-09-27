@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0
+
+- Automatically select the client-language UI for English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian and Russian; retain English fallback without a manual language setting or new saved scope.
+- Use bounded public spell-name localization and rendering-only font fallback while preserving requested fonts, stable IDs, native timer ownership and all existing settings.
+- Make maintained project documentation English, retaining historical evidence, coverage limitations, pinned references and original third-party notices.
+- Preserve the user-reported working RC3 baseline, including Options dragging, combat-deferred opening, standard launchers, Mobility, native Proc, Time Spiral Free move and separate regional positions/colors.
+- Retain all 234 RC3 Lua 5.1 groups and extend localization/static checks; exact final extracted-installer results and SHA256 accompany delivery. New translations still require native-client and native-speaker acceptance.
+- Apply the owner's license choice: GPL-3.0-only for project-owned code, separate All Rights Reserved branding assets, and unchanged original third-party licenses. Publication text is prepared; remote Release/asset/CurseForge publication is not implied by this changelog.
+
 ## 1.0.0-rc.3
 
 - Reuse the existing transparent emblem for both AddOns list entries, one standard LDB launcher/minimap button, and the main addon's TOC-registered native compartment entry.

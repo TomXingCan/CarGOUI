@@ -1,76 +1,20 @@
 local _, addon = ...
 
-local english = {
-    options = "Options", general = "General", appearance = "Appearance",
-    preview = "Test Mode", mobility = "Mobility", proc = "Proc",
-    importExport = "Import / Export",
-    showMinimapIcon = "Show minimap icon",
-    generalHint = "Current class Mobility settings. Appearance is in Mobility / Proc.",
-    transferHint = "Export saved settings or review an import before confirming changes.",
-    transferScope = "Export scope", transferClass = "Current class", transferAll = "All saved settings",
-    transferExport = "Export", transferSelectAll = "Select all", transferImport = "Import / review",
-    transferInput = "Paste settings to import", transferRestore = "Restore last import backup",
-    transferReview = "Review changes", transferConfirm = "Confirm changes", transferCancel = "Cancel",
-    transferCopy = "Export ready. Select the text and press Ctrl+C to copy.",
-    transferPending = "Review the summary. No settings change until you confirm.",
-    transferCanceled = "Import canceled. Current settings are unchanged.",
-    transferDone = "Settings updated.",
-    transferBlocked = "Import / Export is only available while Options is open outside combat.",
-    enabled = "Show Mobility (current class)", x = "Mobility X offset", y = "Mobility Y offset",
-    apply = "Apply", center = "Center position", scale = "Scale",
-    positionHint = "Press Enter in either box to save both axes (-10000 to 10000). Offsets move this class's preset Mobility slots together.",
-    appearanceHint = "Only this font context changes. Proc timer colors are set per region on the Proc page; Mobility keeps class color.",
-    font = "Font", fontSize = "Font size", outline = "Outline", shadow = "Text shadow",
-    none = "None", normal = "Outline", thick = "Thick outline", openPreview = "Test Mode",
-    previewHint = "Simulated reminders appear in game space and are marked TEST. Combat stops Test Mode; live reminders continue independently.",
-    previewHidden = "Samples are hidden by General > Show Mobility (current class).",
-    immediate = "Sliders and selections apply immediately. Press Enter to save typed numbers.",
-    animatedTitle = "Animated title", centerOptions = "Center window",
-    previewEntry = "Reminder / indicator region", previewSingle = "Test selected", previewAll = "Test current spec",
-    previewStop = "Stop test", entryX = "Region X offset", entryY = "Region Y offset", entryReset = "Reset region offsets",
-    entryHint = "Enter saves X/Y. Free move and each Proc region are independent. Ordinary Mobility entries share class offsets.",
-    noEntries = "No preview entries defined for this specialization.",
-    previewCombat = "Test Mode is unavailable in combat. Live reminders continue.",
-    previewOff = "Test Mode is off. Samples stop when this window closes.",
-    previewRunning = "SIMULATED: %s. Fixed sample values; no live detection.",
-    mobilityEnabled = "Enable Mobility", mobilitySpell = "Detected spell: %s",
-    mobilityStatus = "Status: %s", mobilityPosition = "Current class Mobility position: Enter saves both axes.",
-    mobilityGeneral = "Class position", mobilityTypography = "Appearance",
-    mobilityPreview = "Test current spell", mobilityDiagnostics = "Copy diagnostics",
-    mobilityNoSpell = "No supported spell detected", mobilityDisabled = "Mobility is disabled for this class.",
-    diagnosticsTitle = "Mobility diagnostics", diagnosticsHint = "Public state only. Select all, then Ctrl+C to copy this snapshot.",
-    diagnosticsRefresh = "Refresh snapshot", diagnosticsSelect = "Select all", diagnosticsUnavailable = "Mobility diagnostics are unavailable.",
-    saved = "Settings applied.", invalidPosition = "Enter X and Y from -10000 to 10000.",
-    invalidFontSize = "Enter a font size from 8 to 72.", invalidScale = "Enter a scale from 0.5 to 3.",
-    invalid = "Invalid setting. Check the allowed values.",
-    reset = "Reset class + Options", confirmReset = "Confirm reset",
-    resetHint = "Click Confirm reset to restore the current class and Options defaults. Other classes and migration backups are preserved.", resetDone = "Default settings restored.",
-    close = "Close",
-}
-
--- Retained for a future explicit language choice; inactive in this release.
-local chinese = {
-    options = "设置", general = "常规", typography = "字体与外观",
-    preview = "预览", mobility = "位移提醒", proc = "触发提醒",
-    importExport = "导入 / 导出",
-    generalHint = "调整显示开关，以及相对屏幕中心的位置。",
-    enabled = "显示 CarGOUI 文字", x = "X 偏移", y = "Y 偏移",
-    apply = "应用", center = "恢复居中", scale = "缩放",
-    positionHint = "范围：-10000 至 10000。X 正数向右，Y 正数向上。偏移使用界面坐标单位。",
-    appearanceHint = "选择游戏内置字体，调整字号、描边与阴影。",
-    font = "字体", fontSize = "字号", outline = "描边", shadow = "文字阴影",
-    none = "无描边", normal = "普通描边", thick = "加粗描边", openPreview = "查看预览",
-    previewHint = "按当前设置显示静态文字，不模拟技能或增益效果。",
-    previewFit = "过大的文字会缩小以适应预览区域；实际显示仍使用设置的缩放与偏移。",
-    previewHidden = "实际显示已隐藏；此处仍可查看字体样例。",
-    immediate = "设置立即生效；输入数值后请按 Enter 或点击应用。",
-    saved = "设置已应用。", invalidPosition = "请输入 -10000 至 10000 的 X 和 Y 偏移。",
-    invalidFontSize = "请输入 8 至 72 的字号。", invalidScale = "请输入 0.5 至 3 的缩放。",
-    invalid = "设置无效，请检查允许的范围。",
-    reset = "重置全部设置", confirmReset = "确认重置",
-    resetHint = "再次点击确认重置，将恢复 CarGOUI 的全部默认设置。", resetDone = "已恢复默认设置。",
-    close = "关闭",
-}
-
--- This release uses English on every client; never infer UI language from GetLocale().
-addon.L = english
+-- Select once from the client's text language. No saved preference or polling.
+local supported = { enUS=true, zhCN=true, zhTW=true, deDE=true, frFR=true, esES=true, itIT=true, ruRU=true }
+local requested = GetLocale and GetLocale() or "enUS"
+addon.clientLocale = requested
+if requested == "enGB" then requested = "enUS" elseif requested == "esMX" then requested = "esES" end
+addon.locale = supported[requested] and requested or "enUS"
+local english, current
+function addon:RegisterLocale(locale, strings)
+    if locale == "enUS" then english = strings
+    elseif locale == self.locale then current = strings end
+end
+function addon:Text(source)
+    return (current and current[source]) or (english and english[source]) or source
+end
+function addon:Format(source, ...)
+    -- Only public names/static labels enter this method, never native timing.
+    return string.format(self:Text(source), ...)
+end

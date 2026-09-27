@@ -565,6 +565,14 @@ local function setup(saved, loggedIn, client)
         assert(not self.nativeAuraRestricted, "Addon must not read secure native aura text")
         return self.textValue
     end
+    function object:GetFontString()
+        assert(self.kind == "Button", "GetFontString is a native Button API")
+        if not self.buttonLabel then
+            self.buttonLabel = self:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+            self.buttonLabel:SetText(self.textValue or "")
+        end
+        return self.buttonLabel
+    end
     function object:GetStringWidth()
         if self.nativeDurationText then
             state.liveMeasurements = state.liveMeasurements + 1
@@ -1537,7 +1545,7 @@ test("interactive controls stay inside their pages and panel fits small screens"
     truthy(panel:GetHeight() * panel:GetScale() <= 480, "panel fits short viewport")
 end)
 
-test("zhCN clients retain English Options and saved appearance on reload", function()
+test("zhCN clients use automatic localization and retain saved appearance on reload", function()
     local saved
     for pass = 1, 2 do
         local env, addon = login(saved, false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
@@ -1550,20 +1558,20 @@ test("zhCN clients retain English Options and saved appearance on reload", funct
         local panel, controls = addon.optionsFrame, addon.optionsFrame.controls
         local categories = {}
         for _, category in ipairs(panel.categories) do categories[category.key] = category end
-        equal(categories.general:GetText(), "> General", "active category is English")
-        equal(categories.mobility:GetText(), "Mobility", "appearance category is English")
-        equal(controls.close:GetText(), "Close", "close button is English")
+        equal(categories.general:GetText(), "> " .. addon.L.general, "active category follows locale")
+        equal(categories.mobility:GetText(), addon.L.mobility, "Mobility category follows locale")
+        equal(controls.close:GetText(), "关闭", "close button uses Simplified Chinese")
         truthy(panel.feedback:GetText():find("Enter", 1, true), "opening guidance teaches Enter")
         truthy(not panel.feedback:GetText():find("Apply", 1, true), "obsolete Apply instruction gone")
         enter(controls.x, "invalid")
         truthy(panel.feedback:GetText():find("X", 1, true), "coordinate error is readable")
         enter(controls.x, "37")
-        equal(panel.feedback:GetText(), "Settings applied.", "success feedback is English")
+        equal(panel.feedback:GetText(), addon.L.saved, "success feedback follows locale")
         addon:OpenAppearance("mobility", "mobility:MAGE")
-        equal(controls.appearanceOutline.choices[1]:GetText(), "None", "dropdown choice is English")
+        equal(controls.appearanceOutline.choices[1]:GetText(), addon.L.none, "dropdown choice follows locale")
         enter(controls.appearanceFontSize.editBox, "32")
         controls.reset:Click()
-        equal(controls.reset:GetText(), "Confirm reset", "reset confirmation button is English")
+        equal(controls.reset:GetText(), addon.L.confirmReset, "reset confirmation follows locale")
         controls.close:Click()
         saved = copy(addon.db)
     end
@@ -6784,15 +6792,15 @@ test("RC historical coordinates and unavailable fonts round-trip with explicit f
     same(addon.db.classes.MAGE, original, "all valid historical +/-20000 coordinates remain portable without double scaling")
     local packet = unpackSettings(env, text)
     packet.classes.MAGE.mobility.style.font.face = "morpheus"
-    local supported = addon.IsSupportedFont
-    addon.IsSupportedFont = function(self, face)
-        if type(face) == "string" and face:lower():find("morpheus", 1, true) then return false end
-        return supported(self, face)
-    end
+    -- Resource availability differs from the stable configuration whitelist.
+    -- A missing local file must not permanently replace a valid saved choice.
+    local saved = copy(addon.db)
+    env, addon = login(saved, false, { specID = 62, proc = {},
+        unavailableFonts = { ["fonts\\morpheus.ttf"] = true } })
     local transaction = prepareSettings(addon, packSettings(env, packet))
     truthy(transaction.summary:lower():find("font", 1, true), "unavailable font replacement is shown before confirmation")
     truthy(addon:ConfirmSettingsImport(transaction))
-    truthy(addon:IsSupportedFont(addon:GetMobilityConfig().style.font.face), "fallback is a supported local font")
+    equal(addon:GetMobilityConfig().style.font.face, "Fonts\\MORPHEUS.TTF", "recognized requested font is retained separately from render fallback")
     equal(addon:GetMobilityConfig().position.x, 19999, "font fallback does not reset historic coordinates")
 end)
 
@@ -7039,7 +7047,7 @@ test("RC font availability accepts documented nil SetFont success and warns on a
     local transaction = prepareSettings(missing, text)
     truthy(transaction.summary:lower():find("font", 1, true), "unavailable resource is explained during review")
     truthy(missing:ConfirmSettingsImport(transaction))
-    equal(missing:GetMobilityConfig().style.font.face:lower():find("morpheus", 1, true), nil, "unavailable font cannot silently remain configured")
+    truthy(missing:GetMobilityConfig().style.font.face:lower():find("morpheus", 1, true), "requested font remains configured after an explicit fallback warning")
 end)
 
 test("RC appearance import preserves opaque live timing providers gates and business subscriptions", function()
@@ -7620,6 +7628,10 @@ assert(loadfile(testRoot .. "/launcher_smoke.lua"))(setmetatable({ test = test, 
     prepareSettings = prepareSettings, packSettings = packSettings, unpackSettings = unpackSettings,
     transferMetrics = transferMetrics, mobilityLogin = mobilityLogin, putAura = putAura,
     showProc = showProc, procFrame = procFrame, counts = counts }, { __index = launcherHarness }))
+
+assert(loadfile(testRoot .. "/localization_smoke.lua"))(setmetatable({ test = test, equal = equal, truthy = truthy,
+    same = same, copy = copy, secret = secret, root = root, login = login, setup = setup,
+    options = options, putAura = putAura }, { __index = launcherHarness }))
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")

@@ -1,58 +1,58 @@
-# alpha.12 安装、范围与游戏内验收
+# alpha.12 installation, scope and in-game acceptance
 
-历史版本记录：Clearcasting 映射和 Proc 颜色要求已由 [alpha.13](UPGRADE_ALPHA13.md) 修订，请按新说明安装验收。
+Historical record: [alpha.13](UPGRADE_ALPHA13.md) supersedes the Clearcasting mapping and Proc color requirements. Use the newer instructions for those features.
 
-目标：Retail 12.1.0 build 69933，Interface 120100。此包基于 alpha.11，只新增法师原生 Proc 数字和用户确认的 Time Spiral Free move。已有普通 Mobility 与全职业 Body 主题保留。此文不是实机通过记录。
+Target: Retail 12.1.0 build 69933, Interface 120100. Built on alpha.11, this package added Mage native Proc digits and user-confirmed Time Spiral Free move, retaining ordinary Mobility and all-class Body themes. This is not a live-client pass record.
 
-## 安装和存档
+## Installation and saved data
 
-1. 完全退出游戏。备份现有两个 AddOns 程序目录后，用 ZIP 中的 `CarGOUI` 与 `CarGOUI_Data` 替换。TOC 必须直接位于各目录内。
-2. 若仍有 alpha.8 的 `AddOns/CarGOUI_Mage`，仅移除该旧程序目录。不要删除 WTF 或 CarGOUIDB。新包不含这个旧目录，不自动删除任何存档。
-3. 本轮不升级 Schema 5、不重置配置。Mobility 仍按职业共用，Proc 字体/开关按职业+专精，各区域偏移独立；七个原有 Proc 区域 ID 保持不变。新增区域只补工厂默认，已有区域偏移不重算、不重复乘 Scale。
-4. 登录用 `/cui` 打开 Options，Proc 页可启停真实数字，Appearance 和原有区域位置入口保持原操作。数字输入 Enter，滑块即时生效。默认英文。
-5. 开启暴雪原生 Spell Alert 图形并选择非零透明度。CarGOUI 数字服从这个图形开关/透明度；没有原生图形的普通 Buff 不会进入本模块。
+1. Exit WoW, back up both program directories and replace them with the ZIP's `CarGOUI` and `CarGOUI_Data`. TOCs belong directly inside each folder.
+2. Remove only obsolete alpha.8 `AddOns/CarGOUI_Mage`, if present. Keep WTF/CarGOUIDB. The new package omits that old folder and deletes no saved data.
+3. Schema 5 remains. No reset: Mobility stays class-wide, Proc style/enabled belongs to class+spec, and region offsets stay independent. Seven original Proc IDs remain. New regions receive factory defaults; old offsets are neither recalculated nor multiplied by Scale again.
+4. `/cui` opens Options. Proc controls live digits; Appearance and region-position controls retain Enter-to-save and immediate sliders. This historical version defaulted to English.
+5. Enable Blizzard Spell Alert graphics with nonzero opacity. CarGOUI digits respect those preferences; ordinary buffs without native graphics are outside this module.
 
-## 已实现路径与限制
+## Implemented paths and limitations at alpha.12
 
-- 正式 Proc 使用原生 `AuraContainer` 的 `HELPFUL + includeSpellIDs` 匹配，复制的原生 DurationTextBinding 输出数字。没有 Lua Buff 扫描、受限比较、手工消耗计数、固定持续时间或战斗日志重建。
-- Aura 存在/消耗/刷新由原生容器负责；公开的图形 SHOW/HIDE 决定各区域的图形生命周期。收到关闭图形时的 SHOW 不会在后续打开开关时重放成孤立数字。
-- 登录/重载的启动路径按已核查图形所属 Aura 原生匹配，不能通过公开 API 枚举已经出现的图形。其真实初始同步、隐藏 Aura 暴露情况、客户端是否发送初始图形事件，必须实机确认。代码不将 `IsSpellOverlayed` 的动作条发光误当成中央图形重放。
-- **Clearcasting：图形 276743 只匹配 276743。** 不把主要增益 263725 或隐藏 277726 当作已证明的等价计时来源。若原生过滤器无法匹配持续时间，本区域不会显示数字，属于该映射的客户端阻塞。
-- **冰指右侧：图形/隐藏 Aura 126084 只匹配 126084。** 不根据 44544 的秘密层数猜右侧，也不把左侧的 Aura 直接复制过去。若客户端不暴露该 Aura 的原生持续时间，则右侧计时受限，不能宣称覆盖完成。
-- Fury of the Sun King 383883 仅保留实际 SHOW 事件接入，当前天赋可达性未证明，不出现在可用 Preview。Pyroclasm 269651 则是独立、核查后的当前读条增益。
-- Time Spiral 已由用户确认。374968 是施放技能；实际匹配各职业独立接收 Aura（例如 Mage 375240）。仅显示 `Free move`，不显示倒计时，不将 Hover 358267 当作该效果。
-- 原生接口缺失时诊断报告具体条件，停用该原生槽位路径，不退回伪造样例。所有新路径目前只有源码/API/离线验证，**没有真实客户端战斗、视觉或性能通过结论**。
+- Native AuraContainer matches `HELPFUL + includeSpellIDs`; copied native DurationTextBinding renders digits. No Lua buff scan, secret comparison, manual consumption count, fixed duration or combat-log reconstruction.
+- The native container handles Aura presence/consumption/refresh. Public graphic SHOW/HIDE handles each graphic region's lifecycle. SHOW ignored while graphics are disabled is not replayed as orphan digits when preferences are re-enabled.
+- Login/reload starts native matching from audited graphic-owned Auras. No public API enumerates graphic history. Initial synchronization, hidden-Aura exposure and initial graphic-event delivery require client verification. `IsSpellOverlayed` action-bar glow is not treated as central-graphic replay.
+- **Historical Clearcasting: graphic 276743 matched only 276743.** Main buff 263725 and hidden 277726 were not assumed equivalent. An unmatched native duration meant no digits and a mapping blocker. This mapping was subsequently corrected in alpha.13.
+- **Fingers of Frost right: graphic/hidden Aura 126084 matches only 126084.** Never infer the right side from secret 44544 stacks or duplicate its left-side Aura. If native duration is unavailable, right-side timing remains restricted rather than complete.
+- Fury of the Sun King 383883 is actual-SHOW-only; current talent reachability was unproven, so no available Preview entry. Pyroclasm 269651 is the separate audited hard-cast buff.
+- Time Spiral was user-confirmed. 374968 is the cast spell; native matching uses class-specific receiving Auras, such as Mage 375240. Show only `Free move`, no countdown; Hover 358267 is not this effect.
+- Missing native interfaces produce precise diagnostics and disable that slot, never fabricated samples. New paths had source/API/offline evidence only: **no live combat, visual or performance pass**.
 
-## 法师 Proc 游戏内步骤
+## Mage Proc in-game checks
 
-以下每步都要同时检查技能自然到期、完全消耗、刷新以及战斗内外；记录 `/dump GetBuildInfo()` 的 build 和专精/天赋。
+For each step, check natural expiry, full consumption and refresh both in/out of combat. Record `/dump GetBuildInfo()` and spec/talents.
 
-1. 奥法触发 Clearcasting，左右数字应位于对应原生图形中点；若图形有而数字无，分别记录，不按已有样例宣称通过。选择相应当前天赋后检查 Arcane Soul 外侧大区域和 Overpowered Missiles 顶部。
-2. 火法先触发 Heating Up 的小区域，再 Hot Streak 的大区域；检查小/大区域独立位置及状态转换无旧数字。触发 Pyroclasm，确认其顶部计时属于需读条的炎爆/烈焰风暴增益，不能由 Hot Streak 代替。选择 Sunfury 对应天赋后检查 Hyperthermia 外侧区域。
-3. 冰法验证冰指一层/两层、消耗其中一层、完全消耗与 Brain Freeze 同时存在。左/右/上互不清除；右側隐藏 Aura 匹配单独记录为通过或阻塞。
-4. 两个或更多 Proc 同时存在时，各自数字更新。刷新其中一个不重启其他计时。自然结束、消耗后数字消失，重复触发不会把旧计时带入复用图形。
-5. 提示存在时 `/reload`、进出世界和切换专精，观察原生初始同步；切回原专精字体及偏移恢复。没有原生图形时不得留下数字。
-6. 修改当前专精 Proc 字体/字号/描边/阴影/Scale，再调整某一区域 XY。各区域字体共用、偏移独立，中心按原生根框体/缩放定位；提醒始终职业色。确认现有 Mobility 外观和计时不变。
-7. 在几个 UI 缩放、原生图形缩放/透明度下检查视觉中点。大小区域、左右、顶部均需逐项观察；纯静态几何测试不等于像素视觉验收。
-8. 打开和关闭 Options、停止 Test Mode、进入战斗，真实提示继续。Preview 只抑制正在测试的同一区域，不修改原生 Aura 状态。Proc 开关关闭后数字消失，Mobility/Free move 继续；重新开启用真实当前状态同步。
-9. 关闭暴雪图形、期间触发 Proc，再打开图形开关：此前被暴雪忽略的 SHOW 不应变成孤立数字。等待下一次实际 SHOW 验证恢复。开关初始/重载组合仍需记录客户端事件行为。
+1. Trigger Arcane Clearcasting. Each side's digits belong at its graphic midpoint. If graphics exist without digits, record that separately rather than counting Preview as success. With relevant talents, check Arcane Soul outer regions and Overpowered Missiles top.
+2. Trigger Heating Up small regions, then Hot Streak large regions. Positions remain separate and transitions leave no stale digits. Trigger Pyroclasm top and confirm its hard-cast Pyroblast/Flamestrike buff, not Hot Streak. Check Sunfury Hyperthermia outer regions with its talent.
+3. Check one/two Fingers of Frost stacks, partial/full consumption and concurrent Brain Freeze. Left/right/top do not clear each other. Record right hidden-Aura matching independently as passed or blocked.
+4. Concurrent Procs retain independent progress. Refresh one without restarting another; expiry/consumption removes digits; recycled graphics must not retain old bindings.
+5. `/reload`, world entry and spec changes with an effect active test initial native synchronization. Returning restores style/offsets. No digits remain without their graphic.
+6. Edit current-spec Proc font/size/outline/shadow/Scale and one region's XY. Typography is shared, offsets separate; centers follow native root/scale. At this stage digits use class color. Mobility appearance/timing remains unchanged.
+7. Inspect multiple UI scales and native graphic scale/opacity. Small/large, side and top regions each need visual inspection; static geometry tests are not pixel acceptance.
+8. Close Options, stop TEST and enter combat: live output continues. Preview suppresses only its tested region and does not change Aura state. Disabling Proc removes its digits while Mobility/Free move continue; re-enabling uses current state.
+9. Disable native graphics, trigger during that interval, then re-enable. Previously ignored SHOW must not become orphan digits. Wait for the next actual SHOW to verify recovery; record initial/reload preference-event combinations.
 
-## Free move 游戏内步骤
+## Free move in-game checks
 
-1. 由 Evoker 对具有位移的队友授予 Time Spiral，检查对应接收职业出现 `Free move`，没有 10.0 等倒计时；普通 Mobility 耗尽提醒继续独立存在。
-2. 使用实际消耗该效果的机动技能，文字应随增益消耗消失；不消耗时应随自然到期消失；再次授予应正常恢复。程序不通过施法记录推断消耗。
-3. 在战斗中重复，开启/停止 Free move 的单项 Preview、关闭 Options 后检查真实文字继续。关闭 Mobility 时全部 Mobility（包括 Free move）关闭，Proc 不受影响。
-4. 切换职业登录确认只匹配该职业接收 Aura，颜色和样式读取新职业，不继承上一角色。默认 Free move 在本职业第一条普通 Mobility 上方 84 UI 单位，跟随本职业 XY/锚点，未引入布局编辑器。
+1. Have an Evoker grant Time Spiral to a teammate with a movement ability. Show `Free move` for the receiving class, without a 10.0-style timer. Ordinary depletion reminders stay independent.
+2. Consume the effect with its actual movement ability: text disappears with the buff. Without consumption, it disappears on expiry; a new grant works again. No cast-record inference.
+3. Repeat in combat, during individual Free move Preview, after stopping Preview and closing Options. Disabling Mobility also disables Free move, leaving Proc unchanged.
+4. Change characters: match only the new class's receiving Aura and use its style/color. At alpha.12 the default was 84 UI units above the first ordinary Mobility slot, following class XY/anchor, without an editor. **Alpha.16 later separated Free move XY; see [position isolation](POSITION_ISOLATION_XYFIX1.md).**
 
-## 回归与性能记录
+## Regression and resource records
 
-- 已获用户确认的是此前 Blink/Shimmer 路径；本包应再次验证 2→1 隐藏、1→0 显示正在进行的恢复时间、0→1 立即隐藏，Options/Test Mode 不干扰。主判断代码保持 alpha.11 字节一致。
-- 原普通 Mobility 多技能并行、职业配置隔离、Proc 专精字体、主题、拖动、输入和滑块继续保留。范围外的返回、其他免费重施、传送门等不列为新增开发阻塞或必验任务；已有安全降级不删除。
-- 通过原有 Mobility → Copy diagnostics / Refresh snapshot 记录登录、打开 Options、Preview、战斗、停止 Preview、反复三系切换后的模块、核心事件、普通绑定及原生 Aura 槽位分配/请求启用数。
-- 请求启用槽位数不是可见 Buff 数；原生复制绑定的当前状态不反读。停用容器先注销 UNIT_AURA，保持透明但显示的容器完成一次原生清理；缓存容器仍有暴雪的静态数据提供器切换监听，不宣称所有原生监听为零。
-- 核心账号 SavedVariables 和同一 Data TOC 静态文件仍可能整体载入；仅当前职业/专精监控活跃。不会把未访问说成未加载。预热三系后反复切换应不再持续增长槽位/字体/绑定对象。
-- 使用客户端按需内存/CPU 快照记录实测数值；离线对象计数不等于客户端 KB/ms。没有后台轮询或强制 GC。
+- Earlier user confirmation covered Blink/Shimmer. Retest 2→1 hidden, 1→0 showing the existing next-recovery time, 0→1 hidden; Options/TEST must not interfere. Its main detection code was byte-identical to alpha.11.
+- Keep parallel ordinary Mobility, class isolation, spec Proc fonts, themes, dragging and controls. Excluded returns, other free recasts and portals are not development blockers or required new acceptance; retain existing safe fallback.
+- Use Mobility → Copy diagnostics / Refresh snapshot at login, Options, Preview, combat, stop and repeated three-spec changes. Record module/core events, ordinary bindings and native Aura slot allocation/requested activation.
+- Requested slots are not visible buffs; copied native binding state is never read back. Deactivation unregisters UNIT_AURA and keeps a transparent shown container for one native cleanup. Cached containers retain Blizzard's static data-provider listener; do not claim every native listener is gone.
+- Core account SavedVariables and the Data TOC's static files may load together, while only current class/spec monitoring runs. Unaccessed is not unloaded. After warming all three specs, repeated changes should not keep growing slot/font/binding counts.
+- Measure client memory/CPU on demand. Offline object counts are not client KB/ms. No background polling or forced GC.
 
-## 交付验证
+## Delivery verification
 
-仓库的 `tests/run_tests.py`、`check_mobility_static.py`、`check_styles_theme_static.py`、`check_proc_static.py` 必须全部通过。打包工具从提交内容生成两个顶级目录，检查 TOC、CRC、文件内容及 SHA256，并在最终 ZIP 解压目录运行这些测试。外部 `.tests.txt` 给出实际结果、提交/树及归档哈希，不以仓库测试代替交付包测试。
+`tests/run_tests.py`, `check_mobility_static.py`, `check_styles_theme_static.py` and `check_proc_static.py` must all pass. Packaging from committed content produces two top-level directories, verifies TOCs/CRC/bytes/SHA256 and runs those tests against the final extracted ZIP. The external `.tests.txt` records actual results, commit/tree and archive checksum; repository-only tests are insufficient.

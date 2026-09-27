@@ -1,7 +1,12 @@
 local _, addon = ...
+local defaultFace = "Fonts\\FRIZQT__.ttf"
+if (addon.clientLocale == "zhCN" or addon.clientLocale == "zhTW" or addon.clientLocale == "ruRU"
+    or addon.clientLocale == "koKR") and type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT ~= "" then
+    defaultFace = STANDARD_TEXT_FONT
+end
 
 addon.factoryReminderStyle = {
-    font = { face = "Fonts\\FRIZQT__.ttf", size = 24, outline = "OUTLINE" },
+    font = { face = defaultFace, size = 24, outline = "OUTLINE" },
     scale = 1,
     shadow = { enabled = true },
 }
@@ -56,6 +61,11 @@ addon.fonts = {
     { value = "Fonts\\skurri.ttf", label = "Skurri" },
 }
 
+-- Saved resource identifiers remain valid across client languages. This small
+-- whitelist is independent of the local font menu and never loads font files.
+addon.clientFontPaths = { "Fonts\\ARKai_T.ttf", "Fonts\\blei00d.TTF",
+    "Fonts\\FRIZQT___CYR.TTF", "Fonts\\2002.TTF" }
+
 function addon:IsSupportedFont(face)
     if type(face) ~= "string" then
         return false
@@ -65,13 +75,16 @@ function addon:IsSupportedFont(face)
             return true, font.value
         end
     end
+    for _, path in ipairs(self.clientFontPaths) do
+        if string.lower(face) == string.lower(path) then return true, path end
+    end
     return false
 end
 
 -- Localized clients can expose an additional font suitable for their alphabet.
 if type(STANDARD_TEXT_FONT) == "string" and STANDARD_TEXT_FONT ~= ""
-    and not addon:IsSupportedFont(STANDARD_TEXT_FONT) then
-    addon.fonts[#addon.fonts + 1] = { value = STANDARD_TEXT_FONT, label = "Client default" }
+    and string.lower(STANDARD_TEXT_FONT) ~= "fonts\\frizqt__.ttf" then
+    addon.fonts[#addon.fonts + 1] = { value = STANDARD_TEXT_FONT, label = addon:Text("Client default") }
 end
 
 function addon:IsNumberInRange(value, range)
