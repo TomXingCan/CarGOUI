@@ -73,6 +73,57 @@ Time Spiral **374968** grants class-specific receiving Auras. Confirmed Free mov
 
 Options closing, TEST stopping and combat do not stop live monitoring. Proc disable stops only its slots/callbacks; Mobility disable stops Mobility/Free move only. Native-container shutdown retains a transparent shown public parent for one native cleanup pass, avoiding hidden-parent cleanup freezes.
 
+## Supported Proc Timers
+
+Implemented native Proc timers are listed below by specialization. Availability depends on the character's learned talents and passives. The detailed coverage record describes conditions and client-validation limits.
+
+| Class | Specialization | Implemented Proc timers |
+| --- | --- | --- |
+| Death Knight | Blood | Crimson Scourge; Dance of Midnight |
+| Death Knight | Frost | Rime; Killing Machine |
+| Death Knight | Unholy | Sudden Doom |
+| Demon Hunter | Havoc | Chaos Theory |
+| Demon Hunter | Vengeance | Untethered Rage |
+| Demon Hunter | Devourer | Moment of Craving |
+| Druid | Balance | Owlkin Frenzy |
+| Druid | Feral | Clearcasting |
+| Druid | Guardian | Gore; Galactic Guardian; Celestial Might |
+| Druid | Restoration | Clearcasting |
+| Evoker | Devastation | Essence Burst |
+| Evoker | Preservation | Essence Burst; Lifespark |
+| Evoker | Augmentation | Essence Burst |
+| Hunter | Beast Mastery | Deathblow; Howl of the Pack Leader: Wyvern; Howl of the Pack Leader: Boar; Howl of the Pack Leader: Bear |
+| Hunter | Marksmanship | Lock and Load; Precise Shots; Deathblow |
+| Hunter | Survival | Howl of the Pack Leader: Wyvern; Howl of the Pack Leader: Boar; Howl of the Pack Leader: Bear |
+| Mage | Arcane | Clearcasting; Arcane Soul; Overpowered Missiles |
+| Mage | Fire | Hot Streak; Heating Up; Pyroclasm; Hyperthermia |
+| Mage | Frost | Fingers of Frost; Brain Freeze |
+| Monk | Brewmaster | Potential Energy |
+| Monk | Windwalker | Blackout Kick!; Strength of the Black Ox |
+| Monk | Mistweaver | Strength of the Black Ox; Zen Pulse; Potential Energy |
+| Paladin | Holy | Infusion of Light; Divine Purpose |
+| Paladin | Protection | Divine Purpose |
+| Paladin | Retribution | Divine Purpose; Art of War; Righteous Cause |
+| Priest | Discipline | Surge of Light; Power of the Dark Side; Harsh Discipline |
+| Priest | Holy | Surge of Light; Benediction |
+| Priest | Shadow | Surge of Light; Shadowy Insight; Mind Flay: Insanity |
+| Rogue | Assassination | Blindside |
+| Rogue | Outlaw | Opportunity |
+| Rogue | Subtlety | Ancient Arts |
+| Shaman | Elemental | Lava Surge |
+| Shaman | Enhancement | No eligible finite native Proc timer currently included. |
+| Shaman | Restoration | Lava Surge; High Tide |
+| Warlock | Affliction | Nightfall |
+| Warlock | Demonology | Demonic Core |
+| Warlock | Destruction | No eligible finite native Proc timer currently included. |
+| Warrior | Arms | No eligible finite native Proc timer currently included. |
+| Warrior | Fury | No eligible finite native Proc timer currently included. |
+| Warrior | Protection | Revenge! |
+
+CarGOUI only adds timers where a verified Blizzard native screen indicator can be mapped to a verified finite-duration effect. Action-bar glows, resource thresholds, cooldown-ready flashes and ordinary buffs are outside this Proc table.
+
+See [the detailed Proc coverage record](docs/PROC_COVERAGE.md).
+
 ## Test Mode and themes
 
 External TEST uses clearly marked fixed `8.0` samples; Free move is text-only. Proc choices include only audited regions for current class/spec/talents, even without an active effect, independently of Mobility. Samples never enter native Aura/live state. Closing, Stop test, combat or spec change clears temporary samples; live resynchronizes. Reminders/guides cannot be dragged.
