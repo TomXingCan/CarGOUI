@@ -1,0 +1,101 @@
+{
+  "wordmark": {
+    "source": "source/wordmark-generated.png",
+    "source_sha256": "dc9739800b9f4c87e8c0eca9b13afc274eb17a608c435ee6d87b80805a2b2f21",
+    "source_alpha_crop": [
+      52,
+      207,
+      1863,
+      603
+    ],
+    "fitted_size": [
+      500,
+      109
+    ],
+    "fitted_offset": [
+      6,
+      9
+    ]
+  },
+  "emblem": {
+    "source": "source/emblem-generated.png",
+    "source_sha256": "4c16e8f48193eb8fbcd6826c8f3c0dabeb7f7edbdd27bb7df7d93580aa1e77c6",
+    "source_alpha_crop": [
+      62,
+      42,
+      1190,
+      1171
+    ],
+    "fitted_size": [
+      120,
+      120
+    ],
+    "fitted_offset": [
+      4,
+      4
+    ]
+  },
+  "wordmark_uv_pixels": [
+    4,
+    7,
+    508,
+    120
+  ],
+  "wordmark_texcoord": [
+    0.0078125,
+    0.9921875,
+    0.0546875,
+    0.9375
+  ],
+  "wordmark_display_size": [
+    196.24778761061947,
+    44
+  ],
+  "wordmark_alpha_bounds": [
+    6,
+    9,
+    506,
+    118
+  ],
+  "emblem_alpha_bounds": [
+    4,
+    4,
+    124,
+    124
+  ],
+  "runtime_files": {
+    "wordmark.tga": {
+      "size": [
+        512,
+        128
+      ],
+      "bytes": 262162,
+      "sha256": "44df7a500a97dc9a7680d3d659761a14638e7dfee6d58bfb90a18fe1d894ef37"
+    },
+    "wordmark-mask.tga": {
+      "size": [
+        512,
+        128
+      ],
+      "bytes": 262162,
+      "sha256": "50f5f308cd1ee2957e085bf0beae2e07713ff402aa7ffa7c6dfcbe33d07e9f0b"
+    },
+    "emblem.tga": {
+      "size": [
+        128,
+        128
+      ],
+      "bytes": 65554,
+      "sha256": "66c109dd1833770d42fcba6cc6d1346b5e45262b8d39f202bb0ee5f8d2d611ed"
+    },
+    "sweep.tga": {
+      "size": [
+        32,
+        128
+      ],
+      "bytes": 16402,
+      "sha256": "dde6ef63c0af354707c8107c530bfb7e92a424562ef8b0af041f561d45a67760"
+    }
+  },
+  "runtime_total_bytes": 606280
+}

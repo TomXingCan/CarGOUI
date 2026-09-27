@@ -3,5 +3,8 @@
 *.toc text eol=lf
 *.py text eol=lf
 *.md text eol=lf
+*.svg text eol=lf
+*.tga binary
+*.png binary
 .gitignore text eol=lf
 .gitattributes text eol=lf

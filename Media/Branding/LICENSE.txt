@@ -1,0 +1,16 @@
+CarGOUI branding assets
+All Rights Reserved.
+
+The CarGOUI emblem, logo, wordmark, branding artwork and their source/derived
+art files in Media/Branding are excluded from the GPL-3.0-only license for the
+project-owned code. The project owner retains all rights in these assets.
+
+Their inclusion in the official CarGOUI package permits their ordinary display
+as part of using that package. It does not grant a separate right to reuse,
+modify or redistribute the branding in another project or to imply endorsement.
+Contact the project owner for additional permission. Rights permitted by
+applicable law are unaffected.
+
+This notice does not restrict the separately licensed CarGOUI source code or
+change the original licenses of third-party libraries or Blizzard assets.
+Project owner: https://github.com/TomXingCan/CarGOUI

@@ -1,14 +1,52 @@
 ## Interface: 120100
 ## Title: CarGOUI
-## Notes: Lightweight CarGOUI Alpha 0.1 framework (Phase 1).
+## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.1
+## Version: 1.0.0
 ## SavedVariables: CarGOUIDB
+## IconTexture: Interface\AddOns\CarGOUI\Media\Branding\emblem.tga
+## AddonCompartmentFunc: CarGOUI_OnAddonCompartmentClick
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
 Core\Addon.lua
 Core\Events.lua
+Config\Locale.lua
+Locales\enUS.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+Locales\deDE.lua
+Locales\frFR.lua
+Locales\esES.lua
+Locales\itIT.lua
+Locales\ruRU.lua
+Config\LocaleFinalize.lua
+Core\LocalizedNames.lua
+Core\Modules.lua
+Database\AppearanceEntries.lua
+Database\Themes.lua
 Config\Defaults.lua
 Core\Database.lua
+Database\SettingsMetadata.lua
+Core\SettingsTransfer.lua
+UI\ReminderStyle.lua
 UI\Display.lua
+Modules\Proc\AuraState.lua
+UI\ProcDisplay.lua
+Modules\Proc\Definitions.lua
+Modules\Proc\Runtime.lua
+Modules\Mobility\Runtime.lua
+Modules\Mobility\FreeMove.lua
+Core\Diagnostics.lua
+UI\Preview.lua
+UI\Branding.lua
+UI\Theme.lua
+UI\ProcColorPicker.lua
+UI\SettingsTransfer.lua
+UI\Options.lua
+UI\Launcher.lua
 Config\Commands.lua
 Core\Initialize.lua

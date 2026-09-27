@@ -1,140 +1,110 @@
-# CarGOUI Alpha 0.1 — Phase 1
+# CarGOUI
 
-已实现可独立安装的 AddOn 基础框架。目标客户端为 WoW Retail 12.1.0，TOC Interface 为 `120100`。无需 Ace3、LibSharedMedia 或其他插件。
+**CarGOUI 1.0.0** is a World of Warcraft Retail addon for real Mobility depletion reminders, timed digits over supported Blizzard Proc graphics, and Time Spiral's **Free move** effect. It targets Retail 12.1 / Interface 120100; existing skill/API audits pin build **69933**. It keeps the working RC3 gameplay, Options drag safeguards, standard launchers, themes and saved settings.
 
-默认在屏幕中央显示 `CarGOUI` 文本：Friz Quadrata、24 号、普通描边、阴影开启。通过命令调整位置和字体，立即生效。框体不接受鼠标操作，不支持拖动。
+Version 1.0.0 adds automatic client-language UI and public spell-name localization, rendering-safe font fallback, and English project documentation. The user reported RC3 working in their test environment; that feedback does not certify every class/talent/collector/locale combination. New translations still require native-client and native-speaker review. See [release notes](docs/RELEASE_1.0.0.md), [localization](docs/LOCALIZATION.md) and the separate [Mobility](docs/MOBILITY_COVERAGE.md), [Proc](docs/PROC_COVERAGE.md) and [Body-theme](docs/BODY_THEME_COVERAGE.md) coverage records.
 
-## 文件结构
+## Install or upgrade
 
-```text
-CarGOUI/
-├── CarGOUI.toc             # 插件元数据、SavedVariables 和加载顺序
-├── Core/
-│   ├── Addon.lua           # 私有命名空间、版本和聊天输出
-│   ├── Events.lua          # 单一事件框体、多订阅者事件分发
-│   ├── Database.lua        # 默认值合并、设置校验和重置
-│   └── Initialize.lua      # ADDON_LOADED / PLAYER_LOGIN 生命周期
-├── Config/
-│   ├── Defaults.lua        # 默认设置和允许的数值范围
-│   └── Commands.lua        # /cargoui 设置命令
-├── UI/
-│   └── Display.lua         # CENTER 文本框体、位置和字体应用
-├── Modules/
-│   ├── Mobility/           # 预留目录
-│   └── Proc/               # 预留目录
-├── Database/               # 预留目录
-├── Media/
-│   └── Fonts/              # 预留目录；使用游戏自带字体
-├── tests/
-│   ├── smoke.lua           # 10 项离线测试
-│   └── run_tests.py        # 可选本地测试运行器
-└── README.md
-```
+1. Exit WoW and place **both `CarGOUI` and `CarGOUI_Data`** directly in `_retail_/Interface/AddOns/`. Replace their program directories together; each TOC must sit directly inside its matching folder. Data loads automatically—no class package selection.
+2. Keep WTF and all SavedVariables. If an old alpha.8 `AddOns/CarGOUI_Mage` directory remains, remove only that obsolete program directory. CarGOUI does not delete files or saved data automatically.
+3. Open/close settings with `/cui` or `/cargoui`, or plain left-click the minimap emblem, LDB launcher or native AddOn Compartment entry.
+4. For a source checkout, use the repository as `CarGOUI` and copy `Modules/CarGOUI_Data` to a sibling AddOns/CarGOUI_Data directory. Prefer the installation ZIP to avoid omitting the internal module.
 
-预留目录内的 `.gitkeep` 用于保留目录结构，不会被 WoW 加载。TOC 只加载列出的 7 个运行时 Lua 文件；README 和 tests 也不会被加载。
+LibStub, CallbackHandler-1.0, LibDataBroker-1.1 and LibDBIcon-1.0 are embedded inside CarGOUI. No separately installed library addon is required; no full Ace3/AceGUI is bundled. See [third-party notices](Libs/THIRD_PARTY_NOTICES.md).
 
-## 安装
+## Language and fonts
 
-1. 完全退出 WoW。
-2. 解压交付的 ZIP，将其中的整个 `CarGOUI` 文件夹复制到正式服安装目录的 `_retail_\Interface\AddOns\` 下。
-3. 确认最终路径是 `_retail_\Interface\AddOns\CarGOUI\CarGOUI.toc`，不要多套一层同名文件夹，也不要放进 Classic 目录。
-4. 启动 WoW，在角色选择界面的插件列表中启用 `CarGOUI`，然后进入游戏。
+The interface automatically follows the client locale: **English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian and Russian** (`enUS`, `zhCN`, `zhTW`, `deDE`, `frFR`, `esES`, `itIT`, `ruRU`). `enGB` uses English, `esMX` uses Spanish, and unknown locales fall back to English. English is the complete fallback catalog. There is no language selector, slash language command or saved language profile. This intentionally supersedes the historical English-only policy.
 
-登录后应看到一条 CarGOUI 加载提示，以及屏幕中央的 `CarGOUI` 文本。
+Only English plus the active locale's overlay is retained. Other locale files may execute from the TOC but return before constructing their translation tables; that is not a claim that their files never load. Public spell IDs remain stable, while available display names come from the client's public spell-name API. Missing names use the defined safe fallback and bounded event-driven retry. Localization neither scans Auras nor changes skill recognition, timing, visibility or stored IDs.
 
-## 命令
+Existing requested font choices remain saved. If a requested resource is unavailable or unsuitable for the active script, rendering can use the client's appropriate default without rewriting the preference. Reused live/Preview frames share the same rules; secret timer text is never read or measured to choose a font. See [the API audit](docs/LOCALIZATION_API.md) for exact name/font boundaries. Translations and fallback behavior are implemented and tested offline; native glyph coverage, clipping and language quality remain client/native-speaker acceptance.
 
-| 命令 | 效果 |
+## Settings and interaction
+
+| Setting | Ownership |
 | --- | --- |
-| `/cargoui` 或 `/cargoui help` | 显示命令帮助 |
-| `/cargoui status` | 显示当前设置 |
-| `/cargoui position 100 -80` | 相对屏幕中央向右 100、向下 80 |
-| `/cargoui fontsize 30` | 设置字号，允许 8–72 |
-| `/cargoui outline none` | 关闭描边 |
-| `/cargoui outline outline` | 普通描边 |
-| `/cargoui outline thickoutline` | 加粗描边 |
-| `/cargoui scale 1.2` | 设置缩放，允许 0.5–3 |
-| `/cargoui shadow off` 或 `/cargoui shadow on` | 关闭或开启阴影 |
-| `/cargoui hide` 或 `/cargoui show` | 隐藏或显示文本 |
-| `/cargoui reset` | 将本插件全部设置重置为默认值，并显示文本 |
+| Mobility enabled, font/size/outline/shadow/Scale, anchor, XY and preferences | Current classToken; all Mage specs and Blink/Shimmer share one Mage scope |
+| Free move anchor and XY | Separate `mobility.freeMovePosition` within that class; independent of ordinary Mobility XY |
+| Proc font/size/outline/shadow/text Scale and enabled | Current classToken + specID; shared by all regions in that spec |
+| Proc region anchor, XY and optional RGB | Independent stable region ID within class/spec; absent RGB uses dynamic class color |
+| Options placement, branding animation, minimap visibility/angle | Independent shell records, separate from class settings and from one another |
 
-X/Y 范围为 -10000–10000，单位为 UIParent 的界面坐标单位，并非固定物理像素。X 正数向右，Y 正数向上。缩放不会改变设置的视觉偏移；如果将框体移出屏幕，可用 `/cargoui reset` 恢复。
+No class/spec/Profile/manual-theme selector. Appearance shows the automatically selected configuration context. The Proc region menu selects position/Preview/color targets, never separate regional fonts. Mobility and Free move always use Blizzard's player class color. Proc defaults to class color and permits per-region RGB, without opacity editing. Options themes do not alter reminder style or native state.
 
-本阶段使用命令设置，没有图形选项面板。显示的是固定占位文本，没有倒计时或模拟战斗事件。
+Options retains a left category list and right controls. Header, Body, sidebar blank areas, borders and static explanations drag the whole window; interactive controls keep their input. No modifier, capture overlay or Unlock Mode. Release, close and Esc end movement; placement persists and stays screen-constrained. [RC2's drag record](docs/DRAG_RC2.md) explains source ownership and native current-pointer pickup.
 
-## 游戏内验收
+Dropdowns, checkboxes and sliders update immediately. Numeric fields save on Enter, without Apply. Context/page changes and closing discard unsubmitted drafts. Appearance's Font, Font Size, Outline, Shadow and Scale share the appropriate class/spec scope; reset affects only that style, not positions or other scopes. Built-in choices include Friz Quadrata, Arial Narrow, Morpheus, Skurri and available Client default. Factory typography is Friz Quadrata 24, OUTLINE, shadow on, Scale 1, with runtime language fallback where needed. Size range is 8–72, Scale 0.5–3 and new XY edits -10000..10000. Scaling does not multiply saved offsets.
 
-建议先仅启用 CarGOUI，以便定位本插件的错误。逐条执行命令，不要把下面多行一次性粘贴到聊天框。
+Proc's **Timer color** uses the selected ability/region, previews native-picker changes, and saves only on Okay. Cancel/close/region/spec changes discard drafts without closing another addon's subsequently owned picker. **Use class color** removes only that region's override. Color changes update existing text objects without Aura queries, timer rebuilds or native gate-alpha changes. See [regional colors](docs/PROC_COLORS.md).
 
-1. 输入 `/console scriptErrors 1`，再输入 `/reload`。应出现加载提示和居中文本，且没有 Lua 错误弹窗。
-2. 输入 `/dump select(4, GetBuildInfo())` 检查当前客户端 Interface。此版本面向 `120100`；若结果不同，应针对实际客户端复核兼容性。
-3. 输入 `/cargoui` 和 `/cargoui status`，确认帮助和初始设置正常。
-4. 输入 `/cargoui position 100 -80`，确认文本向右下方移动；输入 `/cargoui fontsize 30`，确认字号变大。
-5. 依次输入 `/cargoui outline none`、`/cargoui outline outline`、`/cargoui outline thickoutline`，确认描边变化。
-6. 输入 `/cargoui scale 1.2` 和 `/cargoui shadow off`，确认缩放和阴影变化，位置仍保持相同偏移。
-7. 输入 `/reload`，再输入 `/cargoui status`。应保留 X=100、Y=-80、字号 30、加粗描边、缩放 1.2、阴影关闭。
-8. 输入 `/cargoui hide`，再 `/reload`；文本应保持隐藏。输入 `/cargoui show` 后应恢复显示。
-9. 输入 `/cargoui fontsize nope`、`/cargoui position 10` 或 `/cargoui outline bogus`。应仅显示参数提示，不报错也不改变设置。
-10. 输入 `/cargoui reset`。文本应恢复居中、24 号、普通描边、缩放 1、阴影开启。
+General/Mobility switches and XY edit the same current-class Mobility record. Disabling Mobility also stops Free move and Mobility samples, leaving Proc independent. Proc can disable its own current-spec digits. Reset Mobility offsets affects only that class group; Reset region offsets affects only the selected region. Reset class + Options requires confirmation and preserves other classes/migration backups; the existing `reset` slash command immediately applies the same reset scope.
 
-可用 `/dump CarGOUIDB` 查看内存中的配置。完成测试后，如需关闭错误弹窗，可输入 `/console scriptErrors 0`。
+## Launchers and combat
 
-如出现错误，请保留完整错误文本、触发命令、客户端版本及 `/cargoui status` 的输出，以便复现。
+General → **Show minimap icon** defaults on. Hiding it affects only the standard button; `/cui`, LDB and the native compartment remain available. Standard library dragging positions an uncollected button. Collector-owned layouts are respected; modified/right clicks remain available to collectors. All entries use the same combat-safe Options logic and never start TEST or a picker automatically.
 
-## SavedVariables 与生命周期
+In combat, opening requests queue once and report once; no Options controls are created or flashed. On combat exit, the lock is rechecked and one explicit open consumes the request. Ordinary later combat exits do not reopen. Entering combat with Options open closes it, ends drag/focus, cancels unconfirmed edits and stops TEST without stopping real reminders. Auto-close alone creates no reopening request. The request is session-only, not saved across reload/logout. Read-only help/status commands remain available. See [combat lifecycle](docs/OPTIONS_COMBAT_LOCK.md).
 
-配置为账号级共享，变量名为 `CarGOUIDB`。WoW 会在 `/reload`、登出或正常退出时保存；不要在游戏运行期间手动编辑磁盘上的 SavedVariables。
+HidingBar defaults collect the standard button only. Enabling both its minimap and LDB sources may show two representations; its exclusion settings can select one. WindTools/MBB standard interfaces were reviewed, not universally client-certified. Test exact manager versions separately; competing managers are not guaranteed compatible. See [launcher acceptance](docs/LAUNCHER_RC3.md) and [source review](docs/LAUNCHER_RC3_API.md).
 
-正常保存位置为 `_retail_\WTF\Account\<账号目录>\SavedVariables\CarGOUI.lua`。
+## Live Mobility
 
-```lua
-CarGOUIDB = {
-    schemaVersion = 1,
-    enabled = true,
-    position = { x = 0, y = 0 },
-    font = {
-        face = "Fonts\\FRIZQT__.ttf",
-        size = 24,
-        outline = "OUTLINE",
-    },
-    scale = 1,
-    shadow = { enabled = true },
-}
-```
+The current-class adapter filters current spec, actual learning and effective overrides. Replacements share a family and do not double-monitor. Each simultaneous skill has independent state/frame/native binding; one ready skill does not clear another. Ordinary cooldown uses native duration excluding GCD. Charge digits use the **existing next-recovery object**, not a new timer from the final cast. Secret multicount visibility uses individually audited native rules, never a universal Mage threshold.
 
-仅在本插件的 `ADDON_LOADED` 事件中初始化配置，并在 `PLAYER_LOGIN` 后创建显示框体。若加载时已经登录，则直接创建框体。缺失字段会补默认值；已知字段的类型、范围或描边值无效时会恢复为默认值；其他未知字段会保留。`enabled` 只控制占位文本显示，不会卸载插件。
+Hide with at least one use; show a localized depletion label and true recovery time when empty; hide immediately when one use returns. Mana, range, target, silence/control and generic unusability do not imply depletion. The user-tested Blink 1953/Shimmer 212653 path remains. [Mobility API audit](docs/MOBILITY_API_AUDIT.md) and [historical Mage audit](docs/Mobility-Combat-API-Audit.md) distinguish evidence and limits.
 
-Lua 文件通过 WoW 提供的 `local addonName, addon = ...` 共享私有命名空间。事件接口为 `addon:RegisterEvent(event, callback)` 和 `addon:UnregisterEvent(event, callback)`；回调参数为 `(addon, event, ...)`。同一回调不会重复订阅，订阅变化从下次事件开始生效；回调错误会交给 WoW 错误处理器，其他订阅者继续执行。这里订阅的是游戏事件。
+`Native tracking` means native visibility owns the result, not Lua knowledge of Ready/Depleted. `Tracking` delegates zero/expiry text to native timing. Excluded conditional-return mechanics retain Unsupported safeguards; failed metadata/native guards retain Restricted. No samples, fixed cooldowns, cast counts or secret-value readback fill gaps.
 
-运行时代码没有 `OnUpdate`、轮询计时器、职业技能逻辑、Mobility/Proc 数据库或外部依赖。字体来自游戏客户端；若 Friz 无法加载，会尝试客户端标准字体。
+Each family has a stable preset slot: the first at the saved class anchor, others 84 UI units downward per slot. Unavailable slots do not make others jump. Class XY moves the group; original Mage IDs/positions remain. All skills share class style. Preview can select an active entry or several; a single test suppresses only that entry's live output. [Coverage](docs/MOBILITY_COVERAGE.md) records admitted paths and excluded mechanisms; exclusions are not future development blockers.
 
-## 已完成的验证
+## Native Proc and Free move
 
-已使用 Lua 5.1 执行 10 项离线测试，全部通过：
+Live Proc shows only digits at the visual midpoint of its own Blizzard graphic region, plus saved region XY. Audited geometry, native graphic-root layout/scale and SHOW-event scale determine placement. CarGOUI neither reads restricted graphic children nor replaces Blizzard art. Saved offsets remain; old fixed Preview positions do not substitute for real layout.
 
-- TOC 元数据、文件存在性和实际加载顺序。
-- 首次加载、无关插件事件过滤及重复事件处理。
-- 已保存设置在模拟重载后保留。
-- 已登录状态下的插件加载。
-- 异常 SavedVariables、NaN 和无限大数值的恢复。
-- 命令对位置、字体、缩放、阴影和重置的应用，以及无效参数拒绝。
-- 隐藏状态在模拟重载后保留。
-- 事件订阅快照与重复订阅处理。
-- 事件参数中 nil 的保留。
-- 单个监听器出错后其他监听器继续执行。
+Mage coverage includes Clearcasting, Arcane Soul, Overpowered Missiles; Hot Streak, Heating Up, **Pyroclasm's hard-cast Pyroblast/Flamestrike buff**, Hyperthermia; and Fingers of Frost sides plus Brain Freeze. Historical Fury of the Sun King is actual-SHOW-only, not a currently verified selectable talent Preview. [Mage coverage](docs/MAGE_PROC_COVERAGE.md) separates graphic IDs, timer Auras, textures and regions. [Clearcasting's repair](docs/CLEARCASTING_ALPHA13.md) preserves the later source-supported finite-Aura association.
 
-这些测试使用 WoW API 模拟对象，验证 Lua 语法及框架行为。尚未在真实 WoW Retail 客户端中运行，不能代替上面的游戏内验收，尤其是字体渲染、界面缩放和客户端加载行为。
+The non-Mage increment adds **63 spec-owned definitions / 81 regions**, based on 52 graphic source keys and 51 finite Auras. Of 37 reviewed non-Mage specs, 33 have eligible timers. Enhancement, Destruction, Arms and Fury have explicit empty states; this is not a timer for every spec. Examples include Rime, Infusion/Surge of Light, Nightfall, Clearcasting, Lava Surge, Essence Burst, Opportunity, Lock and Load, Blackout Kick!, Revenge! and Chaos Theory. [Proc coverage](docs/PROC_COVERAGE.md) is authoritative for conditions, separate same-name Aura IDs, stages and exclusions; [alpha.15 acceptance](docs/UPGRADE_ALPHA15.md) preserves delivery evidence.
 
-开发者可在已安装 Lua 5.1/LuaJIT 的环境中，从插件目录执行：
+Native CustomAuraContainerTemplate matches player `HELPFUL + includeSpellIDs` and owns presence, consumption, refresh and expiry. Copied native DurationTextBinding supplies digits; Lua does not compare secret buffs/time/stacks. Missing native interfaces/Auras produce no invented timer. There is no universal graphic-history replay API: reload uses explicitly mapped native timer-Aura matching, which may differ from the graphic owner; actual initial-graphic correspondence remains a client check.
 
-```text
-lua5.1 tests/smoke.lua .
-```
+Time Spiral **374968** grants class-specific receiving Auras. Confirmed Free move is that free use, not Hover moving-cast. Native matching displays only **Free move** while the receiving effect exists, clearing on consumption/expiry without a timer or cast count. It shares class Mobility style/Scale/enabled/color, with independent `mobility.freeMovePosition`. Default base is 84 UI units above screen center; its XY no longer adds ordinary Mobility XY. Other reminders remain independent. See [alpha.16 position isolation](docs/POSITION_ISOLATION_XYFIX1.md).
 
-也可运行 `python tests/run_tests.py`，它会查找 Lua 5.1/LuaJIT，或使用当前 Python 环境中的 `lupa.lua51`。测试运行器不会自动安装依赖。普通玩家不需要 Python 或 Lua 运行时，WoW 自身负责执行插件。
+Options closing, TEST stopping and combat do not stop live monitoring. Proc disable stops only its slots/callbacks; Mobility disable stops Mobility/Free move only. Native-container shutdown retains a transparent shown public parent for one native cleanup pass, avoiding hidden-parent cleanup freezes.
 
-## API 核查来源
+## Test Mode and themes
 
-- [Blizzard 12.1.0 AddOn API 源码镜像](https://github.com/Gethe/wow-ui-source/blob/12.1.0/Interface/AddOns/Blizzard_APIDocumentationGenerated/AddOnsDocumentation.lua)：`ADDON_LOADED` 事件。
-- [Blizzard 命令注册源码镜像](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_ChatFrameBase/Shared/SlashCommandsRegistry.lua)：SlashCmdList 命令注册方式。
-- [Blizzard 字体定义源码镜像](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_Fonts_Shared/Mainline/GameFonts.xml)：Friz Quadrata 游戏字体路径。
+External TEST uses clearly marked fixed `8.0` samples; Free move is text-only. Proc choices include only audited regions for current class/spec/talents, even without an active effect, independently of Mobility. Samples never enter native Aura/live state. Closing, Stop test, combat or spec change clears temporary samples; live resynchronizes. Reminders/guides cannot be dragged.
+
+Header expresses faction only: Alliance blue, Horde red, neutral fallback; same-faction spec changes retain it and original full-color branding. Body expresses class/spec over main/sidebar/footer surfaces, with complete 13-class/40-spec mappings and distinct palettes/static geometry. Mage Arcane purple runes, Fire red-brown/amber flames and Frost blue/cyan crystals retain alpha.9 definitions. No Themes page or manual theme control.
+
+No spec uses the class base; unavailable identity uses neutral and recovers on identity events. Opening resolves identity; hidden windows stop theme listeners. Gameplay-disabled/unlearned states do not affect themes. Lightweight maps are core UI data, not an excuse to initialize business adapters. The shared bounded Line pool draws only the current lower-right watermark behind readable content; no promotional backgrounds, particles, rotations or per-frame color changes. [Theme sources](docs/THEMES.md) and [coverage](docs/BODY_THEME_COVERAGE.md) distinguish implemented mappings from client visual acceptance.
+
+## Loading, diagnostics and migration
+
+The native load-on-demand CarGOUI_Data TOC executes all listed class adapter definitions together. Only the current class factory and active skill/spec paths run. Class subdirectories are not separate load-on-demand boundaries. The account CarGOUIDB may restore all saved classes; accessing/initializing only one is not the same as other records being unloaded. The two-folder design intentionally does not promise strict per-class code/config zero-loading. No deletion, compression or forced GC conceals this tradeoff.
+
+The adapter registry rejects duplicates rather than letting class files overwrite core methods. Other classes receive no business listeners, cooldown queries, reminders or bindings. Old CarGOUI_Mage bridge writes are quarantined; users should still remove its obsolete program folder. Cached frames/code are not claimed unloaded.
+
+Existing Copy diagnostics / Refresh snapshot distinguishes loaded modules, instantiated entries, loaded/accessed config and listener/active/allocated binding counts. Runtime memory KB and cumulative CPU ms are read on demand; CPU is unavailable without scriptProfile. Native requested-active slots are not visible buff counts, and copied binding state is not read back. No background sampling or whole-library scan. [Loading boundaries](docs/LOAD_BOUNDARIES.md) explains client measurement.
+
+Schema 5 uses `classes[classToken].mobility` and `classes[classToken].proc[specID]`. Legacy Mage values migrate only to Mage using effective skill/current-position rules; conflicts and choice rules remain in migrations.scope5. New classes receive independent factory copies. Only missing/invalid fields migrate, without overwriting later valid settings on login. [Configuration scopes](docs/CONFIG_SCOPES.md) records details.
+
+## Import / Export
+
+Current class is the default, including its already-saved Proc specs without initializing others. All saved settings includes saved classes and shell placement/animation/minimap preferences. Exports contain only whitelisted user data, never identity/theme/skills/runtime/migration/import backups. Select text and Ctrl+C; no unsupported direct-clipboard claim.
+
+Import validates before review, then Confirm commits atomically. Source class/spec remains unchanged; omitted classes/specs/regions survive. An included region without RGB clears its old override. A single pre-import snapshot can be restored with review/confirmation. Close/combat cancels drafts/transactions; unlock never auto-submits. Existing pure-coordinate/color changes stay targeted. Minimap settings use the stable library-bound table after import/restore/reset; older RC1/RC2 strings without minimap fields preserve current preferences. Locale/font rendering fallback does not add translated data or locale settings to format 1. See [transfer specification](docs/SETTINGS_TRANSFER_FORMAT.md).
+
+## Development and verification
+
+`Core/`: initialization/events/config/migration/loading/diagnostics; `Config/`: defaults/locales/commands; `Database/`: shared appearance context/themes; `UI/`: rendering/Preview/Options/branding/launchers; `Modules/Mobility/`: active-skill engine/Free move; `Modules/Proc/`: native Aura/overlay lifecycle; `UI/ProcDisplay.lua`: native positioning/style boundary; `Modules/CarGOUI_Data/`: LoD manifest, registry, shared state engine and class-private definitions; `tests/`: Lua 5.1 and static checks.
+
+`python tests/run_tests.py` requires existing lupa.lua51 and uses clearly identified Python JSON/Base64 mocks; it does not install dependencies. RC3 retained all 219 RC2 groups and added 15 actual-library launcher groups. Current delivery output records the expanded suite and final extracted-package results, rather than treating an old count as current evidence. No real WoW client or native-speaker review is available in development. Prior user reports remain scenario-specific; new localization, native glyph/layout behavior, exact collector versions, secret API behavior and real CPU/memory require appropriate acceptance.
+
+`python tools/package.py --output <directory>` builds from a clean commit. Repository tools then test `--addon-root <extracted/CarGOUI>`, recording tree/commit/SHA256. The runtime installer has only the two addon directories, TOC files, required TGA assets, embedded libraries/licenses and concise notices. Tests, review records, art sources and scripts remain in the repository. Preserve SavedVariables; addon version 1.0.0, schema 5 and transfer format 1 are distinct.
+
+## License
+
+Project-owned code is **GPL-3.0-only**: [full license](LICENSE). Branding assets under Media/Branding are **All Rights Reserved**, separately described in [their notice](Media/Branding/LICENSE.txt). Embedded libraries retain their original licenses. See [NOTICE.md](NOTICE.md) for scope, asset provenance and client-resource attribution.

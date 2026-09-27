@@ -1,0 +1,21 @@
+LibDataBroker-1.1 by Tekkub
+
+Upstream repository:
+https://github.com/tekkub/libdatabroker-1-1
+Pinned original revision:
+1a63ede0248c11aa1ee415187c1f9c9489ce3e02
+The upstream Lua file has no separate copyright/license header, and the
+repository has no LICENSE file. The publisher labels the project
+"All Rights Reserved"; CarGOUI does not relabel it MIT, BSD or public domain.
+
+The author's own distribution instructions explicitly authorize embedding:
+"Instead you should hard-embed LDB in your addon and add a “tools used” entry for “libdatabroker-1-1”."
+
+Source, checked 2026-09-27:
+https://www.curseforge.com/wow/addons/libdatabroker-1-1/source
+This RC hard-embeds the unmodified library as directed, and records the
+tools-used relationship libdatabroker-1-1 in THIRD_PARTY_NOTICES.md.
+Before a future CurseForge upload, add that relationship to the project's
+default relationships or package metadata as directed by the author.
+This RC does not configure or invoke a CurseForge upload. It is not a
+standalone LDB redistribution or a claim of a broader open-source license.

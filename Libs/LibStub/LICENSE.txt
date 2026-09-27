@@ -1,0 +1,7 @@
+LibStub is hereby placed in the Public Domain.
+
+Credits: Kaelten, Cladhaire, ckknight, Mikk, Ammo, Nevcairiel, joshborke
+
+This dedication and credits are retained verbatim from the embedded
+LibStub.lua header. CarGOUI does not claim authorship of LibStub.
+
