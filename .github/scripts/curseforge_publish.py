@@ -21,8 +21,10 @@ from curseforge_validation import (
 REPOSITORY = "TomXingCan/CarGOUI"
 PROJECT_ID = "1712424"
 CF_ORIGIN = "https://wow.curseforge.com"
+CF_PUBLIC_ORIGIN = "https://www.curseforge.com"
 GH_ORIGIN = "https://api.github.com"
 MAX_BYTES = 64 * 1024 * 1024
+MANUAL_BASELINE_SHA256 = "84fb669b285c8cafb78507a35adf4ee300dd1be1e09c85f81969fbfbf6035ad1"
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -41,6 +43,16 @@ class AssetRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+class BaselineRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        target = urllib.parse.urlsplit(newurl)
+        if (target.scheme != "https" or target.hostname not in {
+                "www.curseforge.com", "edge.forgecdn.net", "mediafilez.forgecdn.net"}
+                or target.username or target.password):
+            raise ValidationError("Manual baseline download redirect rejected.")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class Client:
     def __init__(self, cf_token, github_token=""):
         if not cf_token or not cf_token.strip():
@@ -49,14 +61,20 @@ class Client:
         self._github_token = github_token
         self._opener = urllib.request.build_opener(NoRedirect)
         self._asset_opener = urllib.request.build_opener(AssetRedirect)
+        self._baseline_opener = urllib.request.build_opener(BaselineRedirect)
         self.upload_attempts = 0
 
-    def _request(self, url, *, data=None, content_type=None, asset=False):
+    def _request(self, url, *, data=None, content_type=None, asset=False, baseline=False):
         headers = {"User-Agent": "CarGOUI-release-publisher", "Accept": "application/json"}
         origin = urllib.parse.urlsplit(url)
         if origin.scheme != "https" or origin.username or origin.password:
             raise ValidationError("HTTP destination rejected.")
-        if asset:
+        if baseline:
+            if (url != f"{CF_PUBLIC_ORIGIN}/api/v1/mods/{PROJECT_ID}/files/8990958/download"
+                    or data is not None or asset):
+                raise ValidationError("Manual baseline URL rejected.")
+            headers["Accept"] = "application/octet-stream"
+        elif asset:
             if not url.startswith(f"https://github.com/{REPOSITORY}/releases/download/"):
                 raise ValidationError("Release asset URL rejected.")
             headers["Accept"] = "application/octet-stream"
@@ -66,6 +84,10 @@ class Client:
             if self._github_token:
                 headers["Authorization"] = "Bearer " + self._github_token
             headers["X-GitHub-Api-Version"] = "2022-11-28"
+        elif (origin.netloc == "www.curseforge.com"
+              and origin.path == f"/api/v1/mods/{PROJECT_ID}/files" and data is None):
+            # The official website's public listing needs no author credentials.
+            pass
         else:
             raise ValidationError("HTTP destination rejected.")
         if content_type:
@@ -74,7 +96,7 @@ class Client:
                                          method="POST" if data is not None else "GET")
         try:
             # Deliberately one attempt, with no retry middleware or POST redirects.
-            opener = self._asset_opener if asset else self._opener
+            opener = self._baseline_opener if baseline else self._asset_opener if asset else self._opener
             with opener.open(request, timeout=60) as response:
                 body = response.read(MAX_BYTES + 1)
                 if len(body) > MAX_BYTES:
@@ -103,6 +125,42 @@ class Client:
         if digest and digest != "sha256:" + hashlib.sha256(payload).hexdigest():
             raise ValidationError("Release asset digest does not match GitHub metadata.")
         return payload
+
+    def project_files(self):
+        files = []
+        seen = set()
+        total = None
+        for page in range(100):
+            payload = self.get_json(
+                f"{CF_PUBLIC_ORIGIN}/api/v1/mods/{PROJECT_ID}/files?pageIndex={page}&pageSize=50"
+            )
+            if not isinstance(payload, dict):
+                raise ValidationError("Unexpected public CurseForge file listing schema.")
+            pagination = payload.get("pagination", {})
+            if not isinstance(pagination, dict):
+                raise ValidationError("Unexpected CurseForge pagination schema.")
+            current_total = pagination.get("totalCount")
+            if (type(current_total) is not int or current_total < 0
+                    or pagination.get("index") != page or pagination.get("pageSize") != 50
+                    or (total is not None and current_total != total)):
+                raise ValidationError("CurseForge file pagination is inconsistent.")
+            total = current_total
+            batch = file_snapshot(payload.get("data"))
+            if len(batch) != min(50, total - len(files)):
+                raise ValidationError("CurseForge file listing is incomplete.")
+            for item in batch:
+                if item["id"] in seen or item.get("projectId") != int(PROJECT_ID):
+                    raise ValidationError("CurseForge file listing contains duplicates or another project.")
+                seen.add(item["id"])
+            files.extend(batch)
+            if len(files) == total:
+                return files
+        raise ValidationError("CurseForge file listing exceeds the safe pagination limit.")
+
+    def manual_baseline_archive(self):
+        return self._request(
+            f"{CF_PUBLIC_ORIGIN}/api/v1/mods/{PROJECT_ID}/files/8990958/download", baseline=True,
+        )
 
     def upload_once(self, version, run_attempt, archive, metadata):
         ensure_upload_allowed(version, run_attempt)
@@ -150,10 +208,25 @@ def validate_project_id(project_id):
 
 
 def confirm_project(payload):
-    matches = [item for item in records(payload, "projects") if str(item.get("id")) == PROJECT_ID]
-    if len(matches) != 1 or matches[0].get("name") != "CarGOUI" or matches[0].get("slug") != "cargoui":
-        raise ValidationError("CurseForge project 1712424 could not be uniquely confirmed as CarGOUI (cargoui).")
+    # The author API has no project-list endpoint. Anchor identity to the owner's
+    # existing manual release, as returned by the official website's public API.
+    # If that baseline is removed/changed, stop for review rather than weakening
+    # identity verification or uploading to an unconfirmed project.
+    files = file_snapshot(payload)
+    if any(item.get("projectId") != int(PROJECT_ID) for item in files):
+        raise ValidationError("The file listing belongs to a different CurseForge project.")
+    matches = [item for item in files if item.get("id") == 8990958]
+    if (len(matches) != 1 or matches[0].get("fileName") != "CarGOUI-1.0.0.zip"
+            or matches[0].get("displayName") != "CarGOUI 1.0.0"
+            or matches[0].get("fileLength") != 388040):
+        raise ValidationError("Project 1712424 could not be confirmed against the existing manual CarGOUI 1.0.0 file.")
     return matches[0]
+
+
+def verify_manual_baseline(archive):
+    if hashlib.sha256(archive).hexdigest() != MANUAL_BASELINE_SHA256:
+        raise ValidationError("The existing manual CurseForge 1.0.0 ZIP differs from the approved baseline.")
+    inspect_zip(archive, "1.0.0")
 
 
 def resolve_game_version(versions_payload, types_payload, target):
@@ -244,16 +317,18 @@ def execute(client, *, tag, mode, project_id, run_attempt="1", run_id="", report
     types = client.get_json(f"{CF_ORIGIN}/api/game/version-types")
     version_id, type_id = resolve_game_version(versions, types, package["game_version"])
     report.update(game_version_id=version_id, game_version_type_id=type_id)
-    confirm_project(client.get_json(f"{CF_ORIGIN}/api/projects"))
-    report["curseforge_project"] = "CarGOUI (cargoui)"
-    files_url = f"{CF_ORIGIN}/api/projects/{PROJECT_ID}/files"
-    before = file_snapshot(client.get_json(files_url))
+    before = client.project_files()
+    confirm_project(before)
+    verify_manual_baseline(client.manual_baseline_archive())
+    report["curseforge_project"] = "CarGOUI"
+    report["project_identity_basis"] = "Official project 1712424 file listing and exact approved CarGOUI 1.0.0 ZIP (file 8990958)"
+    report["manual_baseline_sha256"] = MANUAL_BASELINE_SHA256
     report["curseforge_files_before"] = sorted(item["id"] for item in before)
     metadata = build_metadata(version, release.get("body"), version_id)
     json.loads(json.dumps(metadata, ensure_ascii=False))
     report["metadata_json"] = "valid"
     if mode == "validate":
-        after = file_snapshot(client.get_json(files_url))
+        after = client.project_files()
         report["curseforge_files_after"] = sorted(item["id"] for item in after)
         if report["curseforge_files_before"] != report["curseforge_files_after"]:
             raise ValidationError("CurseForge file list changed during validation; investigate external activity.")
