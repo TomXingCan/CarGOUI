@@ -214,6 +214,7 @@ local function OnThemeIdentityChanged(self, event, unit)
     if event == "UNIT_FACTION" or event == "PLAYER_SPECIALIZATION_CHANGED" then
         if not IsPublic(unit) or (unit ~= nil and unit ~= "player") then return end
     end
+    if self.RefreshSettingsTransferPage then self:RefreshSettingsTransferPage() end
     self:RefreshOptionsTheme()
 end
 
@@ -254,7 +255,6 @@ function addon:RefreshOptionsTheme()
             self:ApplyOptionsCategoryTheme(button, IsSelectedCategory(panel, button))
         end
     end
-    if self.RefreshOptionsThemeLabels then self:RefreshOptionsThemeLabels(info) end
     return true
 end
 

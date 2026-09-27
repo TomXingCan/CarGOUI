@@ -90,14 +90,6 @@ function addon:CreateOptionsBranding(panel)
     subtitle:SetText("Options / " .. self.version)
     header.subtitle = subtitle
 
-    local hint = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    hint:SetPoint("TOPRIGHT", header, "TOPRIGHT", -24, -44)
-    hint:SetSize(310, 18)
-    hint:SetJustifyH("RIGHT")
-    hint:SetTextColor(0.46, 0.56, 0.62)
-    hint:SetText("Drag any empty area to move")
-    header.hint = hint
-
     local sweep = header:CreateTexture(nil, "OVERLAY")
     sweep:SetAlpha(0)
     sweep:SetBlendMode("ADD")
@@ -142,7 +134,6 @@ function addon:CreateOptionsBranding(panel)
         sweep:SetSize(wordmarkWidth, wordmarkHeight)
         Alpha(group, 0, 0.12, 2.4)
         Alpha(group, 0.12, 0, 2.4, 2.4)
-        hint:SetText("Glyph pulse fallback / drag empty area")
     end
     panel.titleAnimation = group
     self:UpdateBrandingTheme(accent)

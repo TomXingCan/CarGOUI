@@ -1,6 +1,7 @@
 -- Offline Lua 5.1 smoke tests. These mocks do not replace an in-game Retail test.
--- Run: lua5.1 tests/smoke.lua /path/to/CarGOUI
+-- Run: python tests/run_tests.py --addon-root /path/to/CarGOUI
 local root = assert(arg and arg[1], "Pass the CarGOUI AddOn directory as argument 1.")
+local testRoot = arg[2] or root .. "/tests"
 local files, metadata = {}, {}
 local toc = assert(io.open(root .. "/CarGOUI.toc", "r"))
 for line in toc:lines() do
@@ -111,7 +112,8 @@ local function setup(saved, loggedIn, client)
         spellReads = {}, knownReads = {}, overrideReads = {}, liveMeasurements = 0, alphaReads = 0, classColorReads = 0,
         loadedModules = {}, moduleNamespaces = {}, loadedFiles = {}, moduleLoads = 0,
         auraSlots = {}, auraFonts = {}, nativeAuraUpdates = 0, auraReads = 0,
-        procKnown = client.procKnown or {}, procKnownReads = {} }
+        procKnown = client.procKnown or {}, procKnownReads = {},
+        codecCalls = {}, codecFailures = {}, codecEmptyArrays = client.codecEmptyArrays == true }
     if client.specID == false then state.specID = nil end
     env.print = function(...) state.messages[#state.messages + 1] = { ... } end
     env.DEFAULT_CHAT_FRAME = { AddMessage = function(_, message)
@@ -126,6 +128,27 @@ local function setup(saved, loggedIn, client)
     env.GetLocale = function() return client.locale or "enUS" end
     env.GetTime = function() return state.clock end
     env.issecretvalue = isSecret
+    if not client.encodingUnavailable then
+        local bridge = assert(_CAR_GO_UI_TEST_CODEC, "Run the complete suite with run_tests.py and lupa.lua51 encoding fixtures")
+        env.C_EncodingUtil = {}
+        for api, method in pairs({ SerializeJSON = "serialize", DeserializeJSON = "deserialize",
+            EncodeBase64 = "encode", DecodeBase64 = "decode" }) do
+            env.C_EncodingUtil[api] = function(value, argument)
+                state.codecCalls[api] = (state.codecCalls[api] or 0) + 1
+                if state.codecFailures[api] == "error" then error("offline native-shaped codec error") end
+                if state.codecFailures[api] == "nil" then return nil end
+                if api == "SerializeJSON" then
+                    if argument then
+                        for key in pairs(argument) do equal(key, "ignoreSerializationErrors", "only documented JSON option is accepted") end
+                        equal(argument.ignoreSerializationErrors, false, "normal codec must not silently ignore invalid values")
+                    end
+                    return bridge[method](value, state.codecEmptyArrays)
+                end
+                if api == "DeserializeJSON" then return bridge[method](value) end
+                return bridge[method](value, argument)
+            end
+        end
+    end
     env.UnitFactionGroup = function(unit)
         equal(unit, "player", "automatic theme uses player faction")
         state.factionReads = state.factionReads + 1
@@ -219,7 +242,8 @@ local function setup(saved, loggedIn, client)
     env.Enum = { DurationTextBindingProperty = { RemainingDuration = 0 },
         DurationTimeModifier = { RealTime = 0, BaseTime = 1 },
         NumericRuleFormatRounding = { Nearest = 0, Up = 1, Down = 2 },
-        SpellBookSpellBank = { Player = 0, Pet = 1 }, LuaCurveType = { Step = 0 } }
+        SpellBookSpellBank = { Player = 0, Pet = 1 }, LuaCurveType = { Step = 0 },
+        Base64Variant = { Standard = 0, URLsafe = 1 } }
     env.C_CurveUtil = { CreateCurve = function()
         local curve = { points = {} }
         function curve:SetType(kind) self.kind = kind end
@@ -403,6 +427,8 @@ local function setup(saved, loggedIn, client)
     function object:GetPoint() return unpack(self.point or {}) end
     function object:SetAllPoints(relative) self.allPoints = relative or self.parent end
     function object:SetScrollChild(child) self.scrollChild = child end
+    function object:UpdateScrollChildRect() self.scrollChildUpdates = (self.scrollChildUpdates or 0) + 1 end
+    function object:EnableMouseWheel(value) self.mouseWheelEnabled = value end
     function object:SetVerticalScroll(value) self.verticalScroll = value end
     function object:GetVerticalScroll() return self.verticalScroll or 0 end
     function object:GetVerticalScrollRange() return self.scrollChild and math.max(0, self.scrollChild:GetHeight() - self:GetHeight()) or 0 end
@@ -485,10 +511,11 @@ local function setup(saved, loggedIn, client)
     function object:SetFont(face, size, flags)
         assert(not self.nativeAuraRestricted, "Addon must style its owned Font, not restricted native aura text")
         assert(type(face) == "string" and type(size) == "number", "Invalid SetFont arguments")
+        if client.unavailableFonts and client.unavailableFonts[face:lower()] then return nil end
         self.font = { face, size, flags or "" }
         self.fontWrites = (self.fontWrites or 0) + 1
         state.fontWrites = state.fontWrites + 1
-        return true
+        if not client.fontSetReturnsNil then return true end
     end
     function object:SetFontObject(value)
         assert(not self.nativeAuraRestricted, "Addon must not reassign a restricted native aura FontString")
@@ -586,6 +613,12 @@ local function setup(saved, loggedIn, client)
     function object:SetNumeric(value) self.numeric = value end
     function object:SetMultiLine(value) self.multiLine = value end
     function object:SetMaxLetters(value) self.maxLetters = value end
+    function object:SetMaxBytes(value) self.maxBytes = value end
+    function object:SetCursorPosition(value) self.cursorPosition = value end
+    function object:GetCursorPosition() return self.cursorPosition or 0 end
+    function object:GetNumLines()
+        return 1 + select(2, (self.textValue or ""):gsub("\n", ""))
+    end
     function object:SetTextInsets(...) self.textInsets = { ... } end
     function object:SetFocus()
         if state.focus and state.focus ~= self then state.focus:ClearFocus() end
@@ -1326,13 +1359,15 @@ test("invalid numeric edits show errors without changing saved values", function
     end
 end)
 
-test("categories expose entry Appearance and automatic Theme without unfinished feature controls", function()
+test("categories expose Appearance and usable Import Export while removed Themes routes safely to General", function()
     local _, addon = login(nil)
     local panel = options(addon)
     local found = {}
     for _, category in ipairs(panel.categories) do found[category.key] = category end
     equal(found.typography, nil, "global typography category is removed")
-    for _, key in ipairs({ "general", "mobility", "proc", "themes", "preview" }) do
+    equal(found.themes, nil, "Themes category is removed rather than disabled")
+    equal(panel.pages.themes, nil, "Themes page is not allocated")
+    for _, key in ipairs({ "general", "mobility", "proc", "preview", "importExport" }) do
         truthy(found[key] and found[key]:IsEnabled(), key .. " enabled")
         found[key]:Click()
         truthy(panel.pages[key]:IsShown(), key .. " page active")
@@ -1340,9 +1375,10 @@ test("categories expose entry Appearance and automatic Theme without unfinished 
             if other ~= key then equal(page:IsShown(), false, "other page hidden") end
         end
     end
-    truthy(found.importExport and not found.importExport:IsEnabled(), "import/export stays unavailable")
-    found.importExport:Click()
-    truthy(panel.pages.preview:IsShown(), "unfinished category cannot activate")
+    addon:SelectOptionsCategory("themes")
+    equal(panel.activeCategory, "general", "old Themes path has safe explicit General fallback")
+    truthy(panel.pages.general:IsShown(), "old category request cannot show a blank window")
+    truthy(found.importExport:IsEnabled(), "existing import/export entry is active")
 end)
 
 test("dropdown lifecycle and hidden refresh remain idle", function()
@@ -5852,7 +5888,7 @@ local function procClassFixture(class, spec, known, saved)
 end
 
 test("new Proc definitions agree with independently pinned target source facts before runtime simulation", function()
-    local facts = assert(loadfile(root .. "/tests/fixtures/proc_sources_69933.lua"))()
+    local facts = assert(loadfile(testRoot .. "/fixtures/proc_sources_69933.lua"))()
     equal(facts.build, "12.1.0.69933", "source fixture targets the requested client")
     local data, _, _, addon, state = genericEngine({})
     local classes, specs, definitions, regions, ownerKeys = 0, 0, 0, 0, {}
@@ -6492,6 +6528,686 @@ test("XY FIX no-specialization scopes use class-owned independent offsets for al
         visited = visited + 1
     end
     equal(visited, 13)
+end)
+end
+
+-- BEGIN RC SETTINGS TRANSFER REGRESSIONS
+-- Real Python JSON/Base64 crosses the genuine Lua 5.1 boundary. This proves
+-- our parser/transaction behavior, not WoW's C_EncodingUtil implementation.
+do
+local function transferPage(addon)
+    if not addon.optionsFrame or not addon.optionsFrame:IsShown() then options(addon) end
+    addon:SelectOptionsCategory("importExport")
+    return addon.optionsFrame, addon.optionsFrame.controls
+end
+local function unpackSettings(env, text)
+    local payload = assert(text:match("^CARGOUICFG:1:(.*)$"), "export has explicit independent format prefix")
+    return env.C_EncodingUtil.DeserializeJSON(env.C_EncodingUtil.DecodeBase64(payload))
+end
+local function packSettings(env, value)
+    return "CARGOUICFG:1:" .. env.C_EncodingUtil.EncodeBase64(env.C_EncodingUtil.SerializeJSON(value))
+end
+local function rawSettings(env, json)
+    return "CARGOUICFG:1:" .. env.C_EncodingUtil.EncodeBase64(json)
+end
+local function prepareSettings(addon, text)
+    transferPage(addon)
+    local transaction, message = addon:PrepareSettingsImport(text)
+    truthy(transaction, "valid settings prepare: " .. tostring(message))
+    truthy(type(transaction.summary) == "string" and #transaction.summary > 0, "preparation returns reviewable summary")
+    return transaction
+end
+local function transferMetrics(addon, state)
+    return { frames = #state.frames, slots = #state.auraSlots, bindings = #state.bindings,
+        callbacks = addon:GetEventDiagnostics().callbacks, reads = state.realReads, moduleLoads = state.moduleLoads }
+end
+local function transferSeed()
+    local env, addon, state = auraFixture(62)
+    addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 31 }, scale = 1.4 })
+    addon:UpdateSettings({ position = { x = 130, y = -80 }, mobility = { freeMovePosition = { x = -240, y = 75 } } })
+    addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 34, outline = "THICKOUTLINE" }, shadow = { enabled = false }, scale = 1.2 })
+    addon:UpdateSettings({ reminders = {
+        mage_arcane_clearcasting_left = { position = { x = -41, y = 17 } },
+        mage_arcane_clearcasting_right = { position = { x = 58, y = -23 } },
+    } })
+    addon:SetProcRegionColor(regionEntry(addon, "mage_arcane_clearcasting_left"), { r = 0.1, g = 0.7, b = 0.4 })
+    local other = addon:NewProcConfig()
+    other.style.font.size = 29
+    other.regions.mage_fire_hot_streak_left = { position = { anchor = "CENTER", x = 38, y = -14 }, color = { r = 0.8, g = 0.1, b = 0.2 } }
+    addon.db.classes.MAGE.proc[63] = other
+    addon.db.classes.WARRIOR = { mobility = addon:NewMobilityConfig(), proc = {} }
+    addon.db.classes.WARRIOR.mobility.position.x = -300
+    addon.db.options.position = { x = 37, y = -22 }; addon.db.options.animatedTitle = false
+    return env, addon, state
+end
+
+test("RC export is a read-only whitelist snapshot of all saved specs in the selected class", function()
+    local env, addon, state = transferSeed()
+    addon.db.playerName, addon.db.guid, addon.db.debugLog = "PRIVATE PLAYER", "PRIVATE GUID", { "SECRET TRACE" }
+    addon.db.importBackup = { private = "RECURSIVE BACKUP" }
+    addon.db.classes.MAGE.playerName = "PRIVATE CLASS"
+    addon.procEventTrace = { "PRIVATE EVENT" }; addon.pendingOptionsOpen = true
+    local before, metrics = copy(addon.db), transferMetrics(addon, state)
+    local text, message = addon:ExportSettings("class")
+    truthy(text, tostring(message))
+    same(addon.db, before, "export never normalizes or writes through getters")
+    same(transferMetrics(addon, state), metrics, "export creates no adapter/frame/listener/binding or game query")
+    local packet = unpackSettings(env, text)
+    equal(packet.formatVersion, 1, "format version is separate")
+    equal(packet.schemaVersion, 5, "settings schema is separate")
+    equal(packet.addonVersion, addon.version, "source addon version is separate")
+    equal(packet.project, "Retail", "project identity is explicit")
+    equal(packet.scope, "class", "current-class scope is explicit")
+    equal(countKeys(packet.classes), 1, "class export excludes other saved classes")
+    truthy(packet.classes.MAGE.proc["62"] and packet.classes.MAGE.proc["63"], "all saved Mage specs export with JSON string keys")
+    equal(packet.classes.MAGE.proc["64"], nil, "export does not initialize unvisited specs")
+    equal(packet.options, nil, "class export excludes shell settings")
+    local raw = env.C_EncodingUtil.DecodeBase64(text:match("^CARGOUICFG:1:(.*)$"))
+    for _, forbidden in ipairs({ "PRIVATE", "SECRET TRACE", "RECURSIVE", "pendingOptionsOpen", "procEventTrace", "theme", "Aura" }) do
+        equal(raw:find(forbidden, 1, true), nil, "whitelist does not serialize " .. forbidden)
+    end
+    local all = unpackSettings(env, assert(addon:ExportSettings("all")))
+    truthy(all.classes.WARRIOR and all.classes.MAGE and all.options, "all scope includes saved classes and permitted shell")
+    same(all.options.position, before.options.position, "shell coordinates retained")
+    same(addon.db, before, "all export is also read-only")
+end)
+
+test("RC current-class round trip restores independent XY RGB and spec fonts without replacing DB identity", function()
+    local env, addon, state = transferSeed()
+    local original = copy(addon.db.classes.MAGE)
+    local text = assert(addon:ExportSettings("class"))
+    local db = addon.db
+    addon:UpdateSettings({ position = { x = -999, y = 999 }, mobility = { freeMovePosition = { x = 10, y = 20 } } })
+    addon:UpdateReminderStyle("proc:MAGE:62", { font = { size = 18 } })
+    addon:SetProcRegionColor(regionEntry(addon, "mage_arcane_clearcasting_right"), { r = 1, g = 0, b = 0 })
+    transferPage(addon)
+    local before, metrics = copy(addon.db), transferMetrics(addon, state)
+    local transaction = prepareSettings(addon, text)
+    same(addon.db, before, "prepare has no partial writes")
+    same(transferMetrics(addon, state), metrics, "prepare does not mutate live monitoring")
+    truthy(addon:ConfirmSettingsImport(transaction), "explicit confirmation commits atomically")
+    equal(addon.db, db, "runtime database root reference is retained")
+    equal(env.CarGOUIDB, db, "SavedVariables and runtime still share the same root")
+    same(addon.db.classes.MAGE, original, "class snapshot restores all included settings")
+    same(addon.db.classes.WARRIOR, before.classes.WARRIOR, "other class untouched")
+    same(addon.db.options, before.options, "class import does not change shell")
+    equal(addon:GetProcRegionColor(regionEntry(addon, "mage_arcane_clearcasting_right")), nil, "omitted custom color clears target old RGB")
+    truthy(addon:GetMobilityConfig().position ~= addon:GetMobilityConfig().freeMovePosition, "independent positions have no shared table")
+    truthy(addon:HasSettingsImportBackup(), "latest pre-import snapshot is recoverable")
+    local _, reloaded = login(copy(addon.db), false, { specID = 62, proc = {} })
+    same(reloaded.db.classes.MAGE, original, "reload restores imported scopes")
+end)
+
+test("RC complete settings import on another class uses static metadata without activating foreign adapters", function()
+    local env, source = transferSeed()
+    local text = assert(source:ExportSettings("all"))
+    local expected = copy(source.db.classes)
+    local targetEnv, target, state = login(nil, false, { classToken = "WARRIOR", specID = 71, proc = {}, moduleUnavailable = true })
+    transferPage(target)
+    local db, metrics = target.db, transferMetrics(target, state)
+    local transaction = prepareSettings(target, text)
+    same(transferMetrics(target, state), metrics, "metadata validation requires no gameplay module load")
+    truthy(target:ConfirmSettingsImport(transaction), "foreign class data keeps its original ownership")
+    equal(target.db, db, "complete import retains database reference")
+    same(target.db.classes, expected, "saved classes restore independently")
+    same(target.db.options, source.db.options, "all import restores explicit shell snapshot")
+    equal(state.moduleLoads, metrics.moduleLoads, "foreign settings never activate Mage adapter")
+    target.db.classes.MAGE.mobility.position.x = 123
+    equal(source.db.classes.MAGE.mobility.position.x, 130, "source and imported tables do not alias")
+    equal(target.db.classes.WARRIOR.mobility.position.x, -300, "imported class configs do not alias")
+    equal(targetEnv.CarGOUIDB, db, "global reference remains synchronized")
+end)
+
+test("RC partial scopes retain omitted classes specs and region records", function()
+    local env, addon = transferSeed()
+    local packet = unpackSettings(env, assert(addon:ExportSettings("class")))
+    packet.classes.MAGE.mobility = nil
+    packet.classes.MAGE.proc["63"] = nil
+    local included = packet.classes.MAGE.proc["62"]
+    included.style.font.size = 41
+    included.regions = { mage_arcane_clearcasting_left = { position = { anchor = "CENTER", x = 19, y = 27 } } }
+    local before = copy(addon.db)
+    truthy(addon:ConfirmSettingsImport(prepareSettings(addon, packSettings(env, packet))))
+    same(addon.db.classes.MAGE.mobility, before.classes.MAGE.mobility, "omitted Mobility remains intact")
+    same(addon.db.classes.MAGE.proc[63], before.classes.MAGE.proc[63], "omitted spec remains intact")
+    same(addon.db.classes.MAGE.proc[62].regions.mage_arcane_clearcasting_right,
+        before.classes.MAGE.proc[62].regions.mage_arcane_clearcasting_right, "omitted region retains all settings")
+    equal(addon.db.classes.MAGE.proc[62].regions.mage_arcane_clearcasting_left.color, nil, "included full region snapshot removes absent RGB")
+    equal(addon.db.classes.MAGE.proc[62].style.font.size, 41, "included spec shared font changes")
+    same(addon.db.classes.WARRIOR, before.classes.WARRIOR, "unmentioned class retains its scope")
+end)
+
+test("RC malformed envelopes and payloads are rejected atomically with bounded native decoding", function()
+    local env, addon, state = transferSeed()
+    transferPage(addon)
+    local valid = assert(addon:ExportSettings("class"))
+    local base = unpackSettings(env, valid)
+    local function rejected(text, label)
+        addon:CancelSettingsImport()
+        local before, metrics = copy(addon.db), transferMetrics(addon, state)
+        local transaction, message = addon:PrepareSettingsImport(text)
+        equal(transaction, nil, label .. " rejected")
+        truthy(type(message) == "string" and #message > 0, label .. " explains rejection")
+        same(addon.db, before, label .. " has no partial settings or backup write")
+        same(transferMetrics(addon, state), metrics, label .. " has no gameplay side effects")
+    end
+    for _, text in ipairs({ "", "return {}", "CARGOUICFG:2:AAAA", "WRONG:1:AAAA", "CARGOUICFG:1:!@#$",
+        valid:sub(1, -4), rawSettings(env, "{"), rawSettings(env, '{"formatVersion":1,}'),
+        rawSettings(env, '{"formatVersion":1,"formatVersion":1}'),
+        rawSettings(env, '{"formatVersion":1,"\\u0066ormatVersion":1}'),
+        rawSettings(env, '{"ignored":null}'), rawSettings(env, '[{"formatVersion":1}]'),
+        rawSettings(env, string.rep('[', 14) .. '0' .. string.rep(']', 14)),
+        rawSettings(env, string.rep(' ', 131073) .. '{}'), "CARGOUICFG:1:" .. string.rep("A", 196609),
+        rawSettings(env, '{"x":NaN}'), rawSettings(env, '{"x":Infinity}'), rawSettings(env, '{"x":1e309}') }) do
+        rejected(text, "untrusted raw input")
+    end
+    local edits = {
+        function(p) p.formatVersion = 2 end, function(p) p.schemaVersion = 999 end,
+        function(p) p.project = "Classic" end, function(p) p.scope = "profile" end,
+        function(p) p.addonVersion = {} end, function(p) p.unknown = true end,
+        function(p) p.classes.ROGUE = p.classes.MAGE; p.classes.MAGE = nil end,
+        function(p) p.classes.MAGE.proc["71"] = p.classes.MAGE.proc["62"] end,
+        function(p) p.classes.MAGE.proc["62"].regions.arbitrary_region = { position = { x = 0, y = 0 } } end,
+        function(p) p.classes.MAGE.mobility.style.font.face = "C:\\malicious\\font.ttf" end,
+        function(p) p.classes.MAGE.mobility.style.font.size = 73 end,
+        function(p) p.classes.MAGE.mobility.style.scale = 0.1 end,
+        function(p) p.classes.MAGE.mobility.style.font.outline = "GLOW" end,
+        function(p) p.classes.MAGE.mobility.position.x = 20001 end,
+        function(p) p.classes.MAGE.mobility.freeMovePosition.y = -20001 end,
+        function(p) p.classes.MAGE.mobility.position.anchor = "TOP" end,
+        function(p) p.classes.MAGE.mobility.enabled = "yes" end,
+        function(p) p.classes.MAGE.mobility.unlisted = true end,
+        function(p) p.classes.MAGE.proc["62"].regions.mage_arcane_clearcasting_left.color = { r = 1, g = -0.1, b = 0 } end,
+        function(p) p.classes.MAGE.proc["62"].regions.mage_arcane_clearcasting_left.color.a = 0.5 end,
+        function(p) p.options = { position = { x = 0, y = 0 }, animatedTitle = true } end,
+    }
+    for index, edit in ipairs(edits) do
+        local packet = copy(base); edit(packet)
+        rejected(packSettings(env, packet), "invalid schema case " .. index)
+    end
+    local fields = {}
+    for i = 1, 2050 do fields[#fields + 1] = '"key' .. i .. '":0' end
+    rejected(rawSettings(env, '{' .. table.concat(fields, ',') .. '}'), "excess object fields")
+    local beforeDecode = state.codecCalls.DeserializeJSON or 0
+    rejected(rawSettings(env, '{"addonVersion":"' .. string.rep('[{\\"', 16) .. '"}'), "brackets and escapes inside a string")
+    equal(state.codecCalls.DeserializeJSON, beforeDecode + 1, "preflight counts structural depth, not braces inside strings")
+end)
+
+test("RC historical coordinates and unavailable fonts round-trip with explicit fallback review", function()
+    local env, addon = transferSeed()
+    addon.db.classes.MAGE.mobility.position = { anchor = "CENTER", x = 19999, y = -19999 }
+    addon.db.classes.MAGE.mobility.freeMovePosition = { anchor = "CENTER", x = -17000, y = 16000 }
+    addon.db.classes.MAGE.proc[62].regions.mage_arcane_clearcasting_left.position.x = 18000
+    local original = copy(addon.db.classes.MAGE)
+    local text = assert(addon:ExportSettings("class"))
+    addon.db.classes.MAGE.mobility.position.x = 0
+    truthy(addon:ConfirmSettingsImport(prepareSettings(addon, text)))
+    same(addon.db.classes.MAGE, original, "all valid historical +/-20000 coordinates remain portable without double scaling")
+    local packet = unpackSettings(env, text)
+    packet.classes.MAGE.mobility.style.font.face = "morpheus"
+    local supported = addon.IsSupportedFont
+    addon.IsSupportedFont = function(self, face)
+        if type(face) == "string" and face:lower():find("morpheus", 1, true) then return false end
+        return supported(self, face)
+    end
+    local transaction = prepareSettings(addon, packSettings(env, packet))
+    truthy(transaction.summary:lower():find("font", 1, true), "unavailable font replacement is shown before confirmation")
+    truthy(addon:ConfirmSettingsImport(transaction))
+    truthy(addon:IsSupportedFont(addon:GetMobilityConfig().style.font.face), "fallback is a supported local font")
+    equal(addon:GetMobilityConfig().position.x, 19999, "font fallback does not reset historic coordinates")
+end)
+
+test("RC native-shaped codecs handle both empty table formats and explicit nil or error results", function()
+    for _, emptyArrays in ipairs({ false, true }) do
+        local env, addon, state = login(nil, false, { specID = 62, proc = {}, codecEmptyArrays = emptyArrays })
+        local exported = assert(addon:ExportSettings("class"))
+        local value = unpackSettings(env, exported)
+        truthy(value.classes.MAGE, "real JSON round-trip preserved string map key")
+        truthy(addon:ConfirmSettingsImport(prepareSettings(addon, exported)), "empty maps remain portable under both native serialization possibilities")
+        for _, api in ipairs({ "DecodeBase64", "DeserializeJSON" }) do
+            for _, failure in ipairs({ "nil", "error" }) do
+                local before = copy(addon.db)
+                state.codecFailures[api] = failure
+                local transaction = addon:PrepareSettingsImport(exported)
+                equal(transaction, nil, "native decoder failure is reported, never treated as empty defaults")
+                same(addon.db, before, "native decoder failure is atomic")
+                state.codecFailures[api] = nil
+            end
+        end
+        for _, api in ipairs({ "SerializeJSON", "EncodeBase64" }) do
+            for _, failure in ipairs({ "nil", "error" }) do
+                state.codecFailures[api] = failure
+                equal(addon:ExportSettings("class"), nil, "native encoder failure cannot return a fabricated export")
+                state.codecFailures[api] = nil
+            end
+        end
+    end
+    local _, addon = login(nil, false, { proc = {}, encodingUnavailable = true })
+    equal(addon:ExportSettings("class"), nil, "missing native codecs are explicit unsupported capability")
+    transferPage(addon)
+    equal(addon:PrepareSettingsImport("CARGOUICFG:1:e30="), nil, "missing native codecs never execute another parser fallback")
+end)
+
+test("RC import confirmation rejects canceled stale tampered changed-context and combat transactions atomically", function()
+    local env, addon, state = transferSeed()
+    local text = assert(addon:ExportSettings("class"))
+    local transaction = prepareSettings(addon, text)
+    addon:CancelSettingsImport()
+    local before = copy(addon.db)
+    equal(addon:ConfirmSettingsImport(transaction), false, "canceled transaction cannot be replayed")
+    same(addon.db, before, "cancel never writes a backup or settings")
+    transaction = prepareSettings(addon, text)
+    addon.db.classes.MAGE.mobility.position.x = addon.db.classes.MAGE.mobility.position.x + 1
+    before = copy(addon.db)
+    equal(addon:ConfirmSettingsImport(transaction), false, "changed settings require another review")
+    same(addon.db, before, "stale review never overwrites intervening user edit")
+    transaction = prepareSettings(addon, text)
+    local forged = copy(transaction)
+    equal(addon:ConfirmSettingsImport(forged), false, "a copied public summary is not an authenticated private transaction")
+    transaction = prepareSettings(addon, text)
+    state.specID = 63
+    before = copy(addon.db)
+    equal(addon:ConfirmSettingsImport(transaction), false, "changed identity invalidates old review")
+    same(addon.db, before, "context rejection does not write partial state")
+    state.specID = 62
+    transaction = prepareSettings(addon, text)
+    state.inCombat = true
+    before = copy(addon.db)
+    equal(addon:ConfirmSettingsImport(transaction), false, "combat is rechecked at the actual commit boundary")
+    same(addon.db, before, "combat rejection leaves settings and backup intact")
+    state.inCombat = false
+    equal(addon:ConfirmSettingsImport(transaction), false, "combat-blocked transaction cannot auto-commit later")
+end)
+
+test("RC one-level backup restores only after review and is excluded from later exports", function()
+    local env, addon = transferSeed()
+    transferPage(addon)
+    equal(addon:HasSettingsImportBackup(), false, "fresh install has no fictional backup")
+    equal(addon:PrepareSettingsRestore(), nil, "restore without backup is rejected")
+    local original = unpackSettings(env, assert(addon:ExportSettings("all")))
+    local packet = copy(original)
+    packet.classes.MAGE.mobility.position.x = 222
+    truthy(addon:ConfirmSettingsImport(prepareSettings(addon, packSettings(env, packet))))
+    local current = unpackSettings(env, assert(addon:ExportSettings("all")))
+    equal(current.classes.MAGE.mobility.position.x, 222, "first confirmed import applied")
+    local transaction = assert(addon:PrepareSettingsRestore())
+    equal(addon:GetMobilityConfig().position.x, 222, "restore preview does not mutate settings")
+    addon:CancelSettingsImport()
+    equal(addon:ConfirmSettingsImport(transaction), false, "canceled restore cannot commit")
+    transaction = assert(addon:PrepareSettingsRestore())
+    truthy(addon:ConfirmSettingsImport(transaction), "restore uses the same atomic confirmation pipeline")
+    same(unpackSettings(env, assert(addon:ExportSettings("all"))), original, "restored export is equivalent without recursively exporting backup")
+    local length = #assert(addon:ExportSettings("all"))
+    for _ = 1, 5 do truthy(addon:ConfirmSettingsImport(prepareSettings(addon, packSettings(env, original)))) end
+    equal(#assert(addon:ExportSettings("all")), length, "repeated import cannot grow export through nested backup history")
+end)
+
+test("RC removed Theme page and drag copy leave contiguous navigation automatic visuals and actual dragging", function()
+    local _, addon, state = auraFixture(62)
+    local panel = options(addon)
+    equal(panel.transfer, nil, "transfer editors are deferred until their page is first opened")
+    equal(panel.pages.themes, nil, "Themes page does not exist")
+    equal(addon.RefreshOptionsThemeLabels, nil, "deleted page label updater cannot be called")
+    local previous, gap
+    for _, button in ipairs(panel.categories) do
+        truthy(button.key ~= "themes", "Themes is removed, not disabled")
+        local y = button.point[5]
+        if previous then
+            if not gap then gap = previous - y else equal(previous - y, gap, "navigation has no removed-category gap") end
+        end
+        previous = y
+    end
+    for _, text in ipairs(state.fontStrings) do
+        if type(text.textValue) == "string" then
+            equal(text.textValue:find("Drag any empty area to move", 1, true), nil, "no duplicate drag instruction replaces old label")
+        end
+    end
+    addon:SelectOptionsCategory("themes")
+    equal(panel.activeCategory, "general", "stale theme category routes to General")
+    local before = copy(addon.db.classes)
+    local header = copy(panel.theme.header.gradient)
+    state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    equal(addon:GetAutomaticThemeInfo().bodyKey, "fire", "Body still updates without a Themes page")
+    same(panel.theme.header.gradient, header, "same-faction Header is unchanged")
+    same(addon.db.classes.MAGE.mobility, before.MAGE.mobility, "theme switching preserves Mobility settings")
+    addon:BeginOptionsDrag("LeftButton")
+    truthy(panel.dragging and panel.moving, "dragging still works without explanatory text")
+    addon:CloseOptions()
+    truthy(not panel.dragging and not panel.moving, "close still ends dragging")
+end)
+
+test("RC Import Export page keeps full multiline text without per-keystroke parsing or mouse capture", function()
+    local _, addon, state = transferSeed()
+    local panel, controls = transferPage(addon)
+    equal(panel.transfer.scope, "class", "default export scope is Current class")
+    for _, key in ipairs({ "transferInput", "transferOutput", "transferSummary" }) do
+        local edit = controls[key]
+        truthy(edit.multiLine, "transfer text is multiline")
+        equal(edit.maxLetters, 0, "character cap cannot silently truncate")
+        equal(edit.maxBytes, 0, "byte cap cannot silently truncate")
+        equal(edit.optionsDragSurface, nil, "editor never registers as panel drag capture")
+        equal(edit.scroll.optionsDragSurface, nil, "scroll area never steals selection for dragging")
+    end
+    local parserCalls = copy(state.codecCalls)
+    local pasted = string.rep("payload line\n", 14000)
+    typeText(controls.transferInput, pasted)
+    equal(controls.transferInput:GetText(), pasted, "large multiline input is preserved until explicit backend validation")
+    same(state.codecCalls, parserCalls, "typing does not parse, serialize, or decode")
+    truthy(controls.transferInput:GetHeight() > controls.transferInput.minimumHeight, "long text creates scrollable content")
+    controls.transferInput.scroll.scripts.OnMouseWheel(controls.transferInput.scroll, -3)
+    truthy(controls.transferInput.scroll:GetVerticalScroll() > 0, "mouse wheel scrolls content")
+    local before, metrics = copy(addon.db), transferMetrics(addon, state)
+    controls.transferExport:Click()
+    local exported = controls.transferOutput:GetText()
+    truthy(exported:match("^CARGOUICFG:1:"), "Export produces a complete portable string")
+    equal(exported, panel.transfer.exportText, "export display is not truncated")
+    truthy(controls.transferOutput:HasFocus() and controls.transferOutput.highlight, "copy uses selectable text")
+    controls.transferSelectAll:Click()
+    truthy(controls.transferOutput.highlight, "Select all selects text rather than claiming clipboard access")
+    same(addon.db, before, "UI Export is still read-only")
+    same(transferMetrics(addon, state), metrics, "UI Export does not refresh monitors")
+    addon:CloseOptions()
+    for _, edit in ipairs(panel.transfer.editors) do equal(edit:GetText(), "", "close clears large text"); equal(edit:HasFocus(), false, "close releases focus") end
+    equal(panel.transfer.exportText, nil, "close releases temporary export string")
+end)
+
+test("RC UI import reviews before commit supports wrapped paste and restores the last backup only after confirmation", function()
+    local env, addon = transferSeed()
+    local text = assert(addon:ExportSettings("class"))
+    local prefix, payload = text:match("^(CARGOUICFG:1:)(.*)$")
+    local parts = {}
+    for i = 1, #payload, 71 do parts[#parts + 1] = payload:sub(i, i + 70) end
+    local wrapped = "\n " .. prefix .. table.concat(parts, "\r\n") .. " \n"
+    addon:UpdateSettings({ position = { x = 999 } })
+    local panel, controls = transferPage(addon)
+    local before = copy(addon.db)
+    typeText(controls.transferInput, wrapped)
+    controls.transferImport:Click()
+    truthy(panel.transfer.transaction and panel.transfer.confirmation:IsShown(), "Import displays in-page review")
+    same(addon.db, before, "review does not apply settings")
+    truthy(#controls.transferSummary:GetText() > 0 and controls.transferConfirm:IsEnabled(), "summary and explicit confirmation available")
+    controls.transferCancel:Click()
+    same(addon.db, before, "Cancel is read-only")
+    typeText(controls.transferInput, wrapped); controls.transferImport:Click(); controls.transferConfirm:Click()
+    equal(addon:GetMobilityConfig().position.x, 130, "Confirm applied reviewed value")
+    equal(controls.transferInput:GetText(), "", "successful commit clears text")
+    truthy(controls.transferRestore:IsEnabled(), "one-level restore is now available")
+    controls.transferRestore:Click()
+    equal(addon:GetMobilityConfig().position.x, 130, "Restore also waits for confirmation")
+    controls.transferConfirm:Click()
+    equal(addon:GetMobilityConfig().position.x, 999, "confirmed restoration returns pre-import user configuration")
+    truthy(panel.pages.importExport:IsShown(), "same page handles restore; no extra window")
+end)
+
+test("RC import review cancels on close category identity and combat without deferred auto-commit", function()
+    local env, addon, state = transferSeed()
+    local text = assert(addon:ExportSettings("class"))
+    addon:UpdateSettings({ position = { x = 909 } })
+    local panel, controls = transferPage(addon)
+    for _, action in ipairs({ "close", "category", "identity", "combat" }) do
+        transferPage(addon)
+        typeText(controls.transferInput, text); controls.transferImport:Click()
+        local transaction = assert(panel.transfer.transaction)
+        if action == "close" then addon:CloseOptions()
+        elseif action == "category" then addon:SelectOptionsCategory("general")
+        elseif action == "identity" then state.specID = 63; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+        else state:fire("PLAYER_REGEN_DISABLED") end
+        equal(panel.transfer.transaction, nil, action .. " drops pending review")
+        equal(controls.transferInput:GetText(), "", action .. " drops uncommitted text")
+        equal(addon:ConfirmSettingsImport(transaction), false, action .. " invalidates private transaction")
+        equal(addon:GetMobilityConfig().position.x, 909, action .. " never changes current value")
+        if action == "combat" then
+            env.SlashCmdList.CARGOUI(""); state:fire("PLAYER_REGEN_ENABLED"); state:flushTimers()
+            truthy(panel:IsShown(), "previous combat Options queue semantics still work")
+            equal(addon:GetMobilityConfig().position.x, 909, "deferred open cannot submit old import")
+            equal(panel.transfer.transaction, nil, "reopen has no executable old review")
+        end
+        state.specID = 62; syncEvent(state, "PLAYER_SPECIALIZATION_CHANGED", "player")
+    end
+end)
+
+test("RC repeated equivalent imports and open cancel cycles keep native resources bounded", function()
+    local _, addon, state = transferSeed()
+    local text = assert(addon:ExportSettings("class"))
+    transferPage(addon)
+    truthy(addon:ConfirmSettingsImport(prepareSettings(addon, text)))
+    local metrics = transferMetrics(addon, state)
+    local fonts = #state.auraFonts
+    for _ = 1, 12 do
+        truthy(addon:ConfirmSettingsImport(prepareSettings(addon, text)))
+        same(transferMetrics(addon, state), metrics, "equivalent import cannot accumulate runtime resources")
+        local transaction = prepareSettings(addon, text)
+        addon:CancelSettingsImport()
+        equal(addon:ConfirmSettingsImport(transaction), false, "canceled review never gains authority after repetition")
+    end
+    equal(#state.auraFonts, fonts, "font availability probing reuses bounded owned Font")
+    addon:CloseOptions()
+    local hiddenCalls = copy(state.codecCalls)
+    for _ = 1, 4 do state:advance(1) end
+    same(state.codecCalls, hiddenCalls, "hidden page does not generate or decode settings in the background")
+end)
+
+test("RC font availability accepts documented nil SetFont success and warns on actual missing resources", function()
+    local env, source = transferSeed()
+    local packet = unpackSettings(env, assert(source:ExportSettings("class")))
+    packet.classes.MAGE.mobility.style.font.face = "morpheus"
+    local text = packSettings(env, packet)
+    local _, target, state = login(nil, false, { proc = {}, specID = 62, fontSetReturnsNil = true })
+    truthy(target:ConfirmSettingsImport(prepareSettings(target, text)), "nil SetFont return is not a native failure indication")
+    truthy(target:GetMobilityConfig().style.font.face:lower():find("morpheus", 1, true), "available requested font is preserved after nil SetFont result")
+    local _, missing = login(nil, false, { proc = {}, specID = 62, fontSetReturnsNil = true,
+        unavailableFonts = { ["fonts\\morpheus.ttf"] = true } })
+    local transaction = prepareSettings(missing, text)
+    truthy(transaction.summary:lower():find("font", 1, true), "unavailable resource is explained during review")
+    truthy(missing:ConfirmSettingsImport(transaction))
+    equal(missing:GetMobilityConfig().style.font.face:lower():find("morpheus", 1, true), nil, "unavailable font cannot silently remain configured")
+end)
+
+test("RC appearance import preserves opaque live timing providers gates and business subscriptions", function()
+    local env, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+        chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {}, specID = 62 })
+    putAura(state, 263725, 19, 2, true); putAura(state, 375240, 13, 1, true)
+    showProc(env, state, 1277420, 1027131, "LeftRight")
+    transferPage(addon)
+    local packet = unpackSettings(env, assert(addon:ExportSettings("class")))
+    packet.classes.MAGE.mobility.position.x = 340
+    packet.classes.MAGE.mobility.freeMovePosition.y = 150
+    packet.classes.MAGE.mobility.style.font.size = 33
+    packet.classes.MAGE.proc["62"].style.font.size = 36
+    packet.classes.MAGE.proc["62"].regions.mage_arcane_clearcasting_left = {
+        position = { anchor = "CENTER", x = 110, y = -90 }, color = { r = 0.15, g = 0.8, b = 0.4 } }
+    local transaction = prepareSettings(addon, packSettings(env, packet))
+    local metrics, reads, calls, wrappers, native = transferMetrics(addon, state), copy(state.spellReads), {}, {}, {}
+    for _, name in ipairs({ "ConfigureMobility", "ConfigureProc", "ConfigureFreeMove", "RefreshMobility",
+        "ApplySettings", "RenderMobilityState", "RenderProcState", "RenderFreeMoveState" }) do
+        addon[name] = function() calls[name] = (calls[name] or 0) + 1; error("appearance import invoked " .. name) end
+    end
+    for _, pool in pairs(addon.reminderFrames) do for _, frame in pairs(pool) do
+        wrappers[frame] = { alpha = frame.alpha, writes = frame.alphaWrites, handle = frame.auraHandle,
+            duration = frame.durationBinding and frame.durationBinding.duration,
+            durationWrites = frame.durationBinding and frame.durationBinding.durationWrites }
+    end end
+    for _, slot in ipairs(state.auraSlots) do native[slot] = { slot.nativeBinding, slot.nativeBinding and slot.nativeBinding.duration } end
+    local success, message = addon:ConfirmSettingsImport(transaction)
+    truthy(success, message); equal(message, nil, "targeted refresh must not conceal a presentation failure")
+    equal(next(calls), nil, "pure appearance never restarts live monitoring or renders cached state")
+    same(transferMetrics(addon, state), metrics, "appearance changes allocate no runtime objects or listeners")
+    same(state.spellReads, reads, "appearance import performs no cooldown or charge queries")
+    for frame, prior in pairs(wrappers) do
+        equal(frame.alpha, prior.alpha, "opaque visibility token stays bound")
+        equal(frame.alphaWrites, prior.writes, "appearance never writes live opacity")
+        equal(frame.auraHandle, prior.handle, "native Aura provider is retained")
+        if frame.durationBinding then
+            equal(frame.durationBinding.duration, prior.duration, "existing recovery duration is not replaced")
+            equal(frame.durationBinding.durationWrites, prior.durationWrites, "no repeated duration binding")
+        end
+    end
+    for slot, prior in pairs(native) do
+        equal(slot.nativeBinding, prior[1], "native Aura timer binding identity survives")
+        if slot.nativeBinding then equal(slot.nativeBinding.duration, prior[2], "native Aura duration is unchanged") end
+    end
+    equal(addon:GetMobilityConfig().position.x, 340, "targeted position really applied")
+    equal(currentLive(addon).text.font[2], 33, "live Mobility font really updated")
+    same(procFrame(addon, "mage_arcane_clearcasting_left").text.textColor, { 0.15, 0.8, 0.4, 1 }, "live native Proc Font recolored")
+end)
+
+test("RC commit clears owned TEST and picker drafts then restores real live state without queries", function()
+    local env, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+        chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {}, specID = 62 })
+    putAura(state, 263725, 19, 2, true); putAura(state, 375240, 13, 1, true)
+    showProc(env, state, 1277420, 1027131, "LeftRight")
+    transferPage(addon)
+    local text = assert(addon:ExportSettings("class"))
+    local entry = addon:GetSelectedProcColorEntry()
+    truthy(addon:SetPreview("all"), "TEST samples are active before commit")
+    truthy(addon:OpenProcColorPicker(entry), "owned native picker can be active during direct backend review")
+    state:pickerChange(0.9, 0.1, 0.2)
+    truthy(addon.procColorPickerSession, "draft is active and uncommitted")
+    local transaction = assert(addon:PrepareSettingsImport(text))
+    local reads, calls = copy(state.spellReads), {}
+    for _, name in ipairs({ "ConfigureMobility", "ConfigureProc", "ConfigureFreeMove", "RefreshMobility" }) do
+        addon[name] = function() calls[name] = (calls[name] or 0) + 1; error("TEST cleanup restarted " .. name) end
+    end
+    local renders = {}
+    for _, name in ipairs({ "RenderMobilityState", "RenderProcState", "RenderFreeMoveState" }) do
+        local original = addon[name]
+        addon[name] = function(self, ...) renders[name] = (renders[name] or 0) + 1; return original(self, ...) end
+    end
+    local ok, message = addon:ConfirmSettingsImport(transaction)
+    truthy(ok, message); equal(message, nil, "TEST cleanup and live restoration both succeeded")
+    equal(addon.previewState.mode, "off", "owned TEST state ends before committed settings are displayed")
+    equal(addon.procColorPickerSession, nil, "owned picker session ends")
+    equal(env.ColorPickerFrame:IsShown(), false, "owned picker closes")
+    equal(addon:GetProcRegionColor(entry), nil, "unconfirmed picker RGB is not imported as user configuration")
+    for _, frame in pairs(addon.previewFrames) do equal(frame:IsShown(), false, "no stale TEST samples remain") end
+    for name, count in pairs(renders) do equal(count, 1, name .. " restores cached live state once") end
+    equal(countKeys(renders), 3, "Mobility, Proc and Free move all resume their own live presentation")
+    equal(next(calls), nil, "TEST cleanup preserves active monitor configuration")
+    same(state.spellReads, reads, "restoring suppressed live state does not query cooldowns")
+    state:nativeTick()
+    truthy(nativeText(addon) ~= "", "real depleted Mobility is visible again")
+    truthy(procText(addon, state, "mage_arcane_clearcasting_left") ~= "", "real native Aura timer is visible again")
+    equal(procText(addon, state, "free_move_mage"), "Free move", "real receiver text is visible again")
+    local foreign = { foreign = true }
+    local foreignChange, foreignCancel = function() end, function() error("must not cancel foreign picker") end
+    env.ColorPickerFrame:SetupColorPickerAndShow({ r = 0.2, g = 0.3, b = 0.4,
+        swatchFunc = foreignChange, cancelFunc = foreignCancel, extraInfo = foreign })
+    transaction = assert(addon:PrepareSettingsImport(text))
+    truthy(addon:ConfirmSettingsImport(transaction))
+    truthy(env.ColorPickerFrame:IsShown(), "another addon's shared picker remains open")
+    equal(env.ColorPickerFrame.extraInfo, foreign, "another addon's owner survives")
+    equal(env.ColorPickerFrame.swatchFunc, foreignChange, "another addon's callbacks survive")
+end)
+
+test("RC backup restoration removes classes created after the saved backup without scope aliasing", function()
+    local env, addon = transferSeed()
+    local before = unpackSettings(env, assert(addon:ExportSettings("all")))
+    local packet = copy(before); packet.classes.MAGE.mobility.position.x = 771
+    truthy(addon:ConfirmSettingsImport(prepareSettings(addon, packSettings(env, packet))))
+    addon.db.classes.DRUID = { mobility = addon:NewMobilityConfig(), proc = { [102] = addon:NewProcConfig() } }
+    addon.db.classes.DRUID.mobility.position.x = 834
+    local transaction = assert(addon:PrepareSettingsRestore())
+    truthy(addon.db.classes.DRUID, "preparation must not remove a post-backup class")
+    truthy(addon:ConfirmSettingsImport(transaction))
+    equal(addon.db.classes.DRUID, nil, "restore returns the exact prior formal class tree")
+    same(unpackSettings(env, assert(addon:ExportSettings("all"))), before, "restored formal snapshot matches the pre-import backup")
+    local backup = addon.db.settingsImportBackup.settings
+    equal(backup.classes.DRUID, nil, "restoration preserves the latest pre-import backup")
+    addon.db.classes.MAGE.mobility.position.x = 500
+    equal(backup.classes.MAGE.mobility.position.x, before.classes.MAGE.mobility.position.x, "restored configuration cannot mutate the recoverable backup")
+    truthy(addon:ConfirmSettingsImport(assert(addon:PrepareSettingsRestore())))
+    equal(addon.db.classes.MAGE.mobility.position.x, before.classes.MAGE.mobility.position.x, "repeated restoration stays at the pre-import snapshot instead of toggling")
+end)
+
+test("RC all-class maximum current metadata snapshot fits parser budgets and preserves independent scopes", function()
+    local env, addon, state = auraFixture(62)
+    local classes, specs, regions = 0, 0, 0
+    for _, classRow in ipairs(themeRoster) do
+        local class = classRow[1]
+        local metadata = assert(addon.settingsMetadata.classes[class], "target class has explicit import ownership")
+        local classConfig = { mobility = addon:NewMobilityConfig(), proc = {} }
+        addon.db.classes[class] = classConfig; classes = classes + 1
+        classConfig.mobility.position.x = 400 + classes
+        for _, specRow in ipairs(classRow[2]) do
+            local spec = specRow[1]
+            local specMetadata = assert(metadata[spec], "target spec has explicit import ownership")
+            local proc = addon:NewProcConfig(); classConfig.proc[spec] = proc; specs = specs + 1
+            proc.style.font.size = 20 + specs % 20
+            for id in pairs(specMetadata) do
+                regions = regions + 1
+                proc.regions[id] = { position = { anchor = "CENTER", x = 100 + regions, y = -100 - regions },
+                    color = { r = (regions % 9) / 10, g = 0.5, b = 0.7 } }
+            end
+        end
+        equal(countKeys(metadata), #classRow[2], "metadata has no extra spec under a different class")
+    end
+    equal(classes, 13, "independent target-client class roster")
+    equal(specs, 40, "independent target-client spec roster includes Devourer")
+    equal(regions, 97, "audited active and historical region metadata coverage")
+    equal(countKeys(addon.settingsMetadata.classes), classes, "no unsupported metadata classes")
+    local metrics = transferMetrics(addon, state)
+    local text, message = addon:ExportSettings("all")
+    truthy(text, message); truthy(#text < addon.settingsTransferLimits.inputBytes, "all admitted saved regions fit encoded input cap")
+    local decoded = env.C_EncodingUtil.DecodeBase64(text:match("^CARGOUICFG:1:(.*)$"))
+    truthy(#decoded < addon.settingsTransferLimits.decodedBytes, "all admitted saved regions fit decoded byte cap")
+    same(transferMetrics(addon, state), metrics, "exporting foreign saved scopes does not activate their adapters")
+    local _, target = login(nil, false, { proc = {}, specID = 62 })
+    local transaction = prepareSettings(target, text)
+    truthy(transaction.summary:find("MAGE", 1, true), "review names actual imported classes")
+    truthy(transaction.summary:find("62", 1, true), "review identifies included specialization scopes")
+    truthy(transaction.summary:find("mage_arcane_clearcasting_left", 1, true), "review names actual stable Proc regions before confirmation")
+    truthy(target:ConfirmSettingsImport(transaction))
+    same(unpackSettings(env, assert(target:ExportSettings("all"))), unpackSettings(env, text), "maximal whitelist data roundtrips exactly")
+    local warriorX = target.db.classes.WARRIOR.mobility.position.x
+    target.db.classes.MAGE.mobility.position.x = -777
+    equal(target.db.classes.WARRIOR.mobility.position.x, warriorX, "separate classes never share writable tables")
+    local fireSize = target.db.classes.MAGE.proc[63].style.font.size
+    target.db.classes.MAGE.proc[62].style.font.size = 17
+    equal(target.db.classes.MAGE.proc[63].style.font.size, fireSize, "Proc specs never share imported style tables")
+    local left = target.db.classes.MAGE.proc[62].regions.mage_arcane_clearcasting_left
+    local right = target.db.classes.MAGE.proc[62].regions.mage_arcane_clearcasting_right
+    local oldRight = copy(right); left.position.x = 999; left.color.r = 0.99
+    same(right, oldRight, "distinct Proc regions never share position or RGB tables")
+    print("OFFLINE-SETTINGS-CAPACITY classes=" .. classes .. ", specs=" .. specs .. ", regions=" .. regions
+        .. ", encoded-bytes=" .. #text .. ", decoded-bytes=" .. #decoded .. "; native WoW codec acceptance separate")
+end)
+
+test("RC confirmed persistence with a display-refresh warning is visibly distinguished from rejection", function()
+    local env, addon = transferSeed()
+    local packet = unpackSettings(env, assert(addon:ExportSettings("class")))
+    packet.classes.MAGE.mobility.position.x = 838
+    local panel, controls = transferPage(addon)
+    typeText(controls.transferInput, packSettings(env, packet)); controls.transferImport:Click()
+    truthy(panel.transfer.transaction)
+    addon.RefreshReminderPositions = function() error("injected presentation-only failure") end
+    controls.transferConfirm:Click()
+    equal(addon:GetMobilityConfig().position.x, 838, "validated persistence succeeded before presentation failed")
+    equal(panel.transfer.transaction, nil, "committed transaction cannot be replayed")
+    truthy(addon:HasSettingsImportBackup(), "recovery backup exists after presentation warning")
+    truthy(panel.feedback:GetText():lower():find("reload", 1, true), "successful commit still explains that display needs reload")
+end)
+
+test("RC configuration metadata exactly matches class-spec region ownership without runtime activation", function()
+    local data, _, _, addon, state = genericEngine({})
+    local classes, scopes, regions = 0, 0, 0
+    for _, row in ipairs(themeRoster) do
+        classes = classes + 1
+        local class, adapter = row[1], assert(data.adapters[row[1]])
+        for _, specRow in ipairs(row[2]) do
+            local spec, expected = specRow[1], {}
+            local definitions = class == "MAGE" and adapter:GetProcDefinitions(spec) or adapter.procFactory(spec)
+            for _, definition in ipairs(definitions) do for _, region in ipairs(definition.regions) do expected[region.id] = true end end
+            same(addon.settingsMetadata.classes[class][spec], expected, "import ownership equals shipped source definitions for " .. class .. "/" .. spec)
+            scopes = scopes + 1; regions = regions + countKeys(expected)
+        end
+    end
+    equal(classes, 13, "all classes audited from independent target roster")
+    equal(scopes, 40, "all target spec ownership scopes audited")
+    equal(regions, 97, "all saved active/historical regions have exact source ownership")
+    equal(#state.auraSlots, 0, "offline ownership audit never initializes native Aura providers")
+    equal(state.realReads, 0, "metadata audit does not query gameplay")
 end)
 end
 

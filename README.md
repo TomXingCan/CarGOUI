@@ -1,12 +1,14 @@
-# CarGOUI Alpha 0.1
+# CarGOUI 1.0.0-rc.1
 
-当前版本 **0.1.0-alpha.16**，在 alpha.15 提交 `10bbad6b53382a9f352676f207ba83cf961b4d96` 上合入并复核独立坐标修复。本轮只隔离 Free move 与普通 Mobility 的 XY，并避免纯坐标更新重配 live 监控。目标 WoW Retail 12.1.0（Interface 120100），原数据/API 核查固定 build 69933。保留现有 Proc 映射、Mobility、Free move 效果来源、Options 战斗锁、主题、区域颜色、字体范围及用户坐标；不扩展新功能。
+当前版本 **1.0.0-rc.1**，基于 alpha.16 提交 `60ae62425dbe6944c3a15325decb7a79ac7bf2b7`。本轮删除拖动提示和 Themes 页面，保留实际拖动与全自动主题；启用设置导入/导出和最近一次导入前配置恢复。保留全部既有技能映射、Free move 独立坐标、Options 战斗锁、字体范围、区域颜色及存档。目标 WoW Retail 12.1.0（Interface 120100），既有数据/API 核查固定 build 69933。
+
+这是供最终回归的发布候选，不是正式 Release；没有合并 main、公开发布或上传 CurseForge。见 [RC 验收与发布清单](docs/RC_ACCEPTANCE.md)、[配置格式](docs/SETTINGS_TRANSFER_FORMAT.md) 和 [CurseForge 描述草稿](docs/CURSEFORGE_DESCRIPTION_DRAFT.md)。
 
 保留 alpha.15 新增的 **63 个按专精归属的真实 Proc 定义、81 个区域**，来自 52 个原生图形来源键和 51 个有限计时 Aura。37 个非 Mage 专精中，33 个有符合条件的条目；Enhancement、Destruction、Arms、Fury 当前没有纳入的合格条目，显示明确空状态。不能把这解释成每个专精都有计时器。完整映射、条件、证据及排除项见 [Proc 覆盖表](docs/PROC_COVERAGE.md)，该阶段实机步骤见 [alpha.15 升级说明](docs/UPGRADE_ALPHA15.md)。
 
 用户已确认此前法师 Proc、区域颜色与 alpha.14 Options 战斗锁在其测试场景正常。本轮保留这份反馈，不将其扩写为新增职业或全部天赋/布局的实机验收。新增映射均为**已实现、已离线验证、真实客户端待验收**。历史 [Clearcasting 修复依据](docs/CLEARCASTING_ALPHA13.md)、[法师覆盖表](docs/MAGE_PROC_COVERAGE.md) 与 [战斗锁定说明](docs/OPTIONS_COMBAT_LOCK.md) 保留。
 
-**本轮：Free move 的 XY 与普通 Mobility 解耦；一次迁移保留升级前实际位置。纯坐标编辑只重新定位对应现有框体。来源与实际 Lua 5.1 验证见 [坐标修复与验收](docs/POSITION_ISOLATION_XYFIX1.md)。**
+Free move 与普通 Mobility 的独立 XY、一次迁移和纯坐标定向更新继续保留，历史依据见 [alpha.16 坐标修复](docs/POSITION_ISOLATION_XYFIX1.md)。
 
 ## 安装与升级
 
@@ -52,6 +54,8 @@ Test Mode 使用外部游戏空间的固定 `8.0` 样例并标记 TEST；Free mo
 ## 分层自动主题
 
 Header 只表达阵营：Alliance 蓝色、Horde 红色，中立/未知使用中性回退。同阵营切专精不改变 Header 主色或品牌强调色；原始彩色徽记/字标保持清晰。
+
+Themes 分类、说明页和只读识别标签已移除。主题引擎独立运行；现有字体编辑中的职业/专精配置上下文继续保留。
 
 Body 只读取职业＋专精，覆盖主体、侧栏及底部操作区。目标版本全部 13 职业、40 专精都有明确配色和图案；同职业专精使用不同成品主题。法师 Arcane 的深紫→奥术紫符文法阵、Fire 的暗红棕→琥珀橙火焰、Frost 的深蓝→冰青冰晶均保持 alpha.9 的原始定义。按钮、输入框、菜单使用同色系层次，普通正文保持清楚。[完整 Body 覆盖表、来源与逐项验收状态](docs/BODY_THEME_COVERAGE.md)。
 
@@ -100,12 +104,20 @@ Schema 5 使用 `classes[classToken].mobility` 与 `classes[classToken].proc[spe
 
 离线测试保留战斗秘密值与战斗标志分别模拟的回归，并验证范围隔离、延迟初始化、加载/订阅/绑定有界、主题和草稿行为。交付报告记录**最终 ZIP 解包后的测试**及 SHA256。
 
-**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer、法师 Header/Body、当前法师 Proc、区域颜色和 Options 战斗锁在其测试场景正常。本轮新增职业的原生 Aura 匹配、战斗安全性、图形中点、触发/消费/刷新/重载及 CPU/内存均待客户端验收；没有据此生成实机性能数值。离线测试验证给定 API 响应下的行为，固定版本资料另行验证数据来源，两者均不等于目标客户端实测。Body 主题、Mobility 与 Proc 覆盖分别记录。
+Import / Export 默认导出 Current class，包含当前职业所有已保存 Proc 专精，不初始化其他范围。All saved settings 包含已保存职业和 Options 外壳。导出只读取正式用户字段，不含身份、主题、技能数据、运行态、迁移/导入备份。使用完整可选中文字与 Ctrl+C 复制，不声称写入剪贴板。
+
+核心新增的小型配置元数据表仅列出有效职业、专精和稳定区域键，用于校验导入范围；不包含技能 ID、天赋规则或业务适配器。导入其他职业的设置不会为其启动冷却查询、AuraContainer 或计时绑定。
+
+粘贴后点击 Import 才校验，先展示影响摘要，确认后原子提交。来源职业/专精不转换到当前角色；未包含的职业、专精和区域保留。包含区域未指定 RGB 会清除目标旧 RGB，恢复职业色。仅保存最近一次导入前用户设置备份，恢复同样先预览和确认。关闭或进战斗取消输入及事务，脱战不会自动提交。纯坐标/颜色更新继续定向处理；完整清理 TEST 时仅恢复必要的 live 显示。
+
+**开发环境没有真实 WoW 客户端。** 用户已确认升级前 Blink/Shimmer、法师 Header/Body、当前法师 Proc、区域颜色和 Options 战斗锁在其测试场景正常。此前新增职业的原生 Aura 匹配、战斗安全性、图形中点、触发/消费/刷新/重载及 CPU/内存均待客户端验收；没有据此生成实机性能数值。离线测试验证给定 API 响应下的行为，固定版本资料另行验证数据来源，两者均不等于目标客户端实测。Body 主题、Mobility 与 Proc 覆盖分别记录。
 
 ## 源码结构
 
 `Core/`：初始化、事件、配置校验迁移、按需加载、诊断；`Config/`：工厂默认、英文文案、命令；`Database/`：通用样式上下文与主题映射；`UI/`：共用提醒、Preview、Options、品牌/主题；`Modules/Mobility/`：当前活动技能事件引擎与 Free move；`Modules/Proc/`：原生 Aura 槽位与图形事件生命周期；`UI/ProcDisplay.lua`：合法原生位置和字体边界；`Modules/CarGOUI_Data/`：统一 LoD TOC、职业注册、`Shared/` 状态引擎与各 `Classes/` 私有定义/适配器；`tests/`：Lua 5.1 离线测试与静态检查。
 
-运行 `python tests/run_tests.py`、`python tests/check_mobility_static.py`、`python tests/check_styles_theme_static.py`、`python tests/check_proc_static.py`。需要已有 Lua 5.1/LuaJIT 或 `lupa.lua51`，运行器不自动安装依赖。
+完整测试运行 `python tests/run_tests.py`，需要已有 `lupa.lua51`，以 Python 标准 JSON/Base64 库提供明确标注的离线接口模拟，运行器不自动安装依赖。原生 C_EncodingUtil 在实际 WoW 内的结构和往返仍需实机验证。三套既有静态检查及新增设置传输检查均保留在 `tests/`。
 
-本轮安装与验收见 [坐标修复说明](docs/POSITION_ISOLATION_XYFIX1.md)。两目录清理和拖动的历史核查见 [UPGRADE_ALPHA9.md](docs/UPGRADE_ALPHA9.md)；主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，只按访问初始化当前范围，不写入职业色默认值或重置现有样式/坐标。
+用户安装 ZIP 只包含两个目录的 TOC 运行文件、四张必要 TGA、简短说明、CHANGELOG 和版权/素材声明；测试、审查记录、制作源文件和脚本仍留在仓库。`python tools/package.py --output <directory>` 从干净提交打包，然后以仓库测试工具的 `--addon-root <extracted/CarGOUI>` 指向最终解压代码执行测试，记录源码树和 SHA256。
+
+本轮安装与验收见 [RC 检查清单](docs/RC_ACCEPTANCE.md)。主题表保留于 [BODY_THEME_COVERAGE.md](docs/BODY_THEME_COVERAGE.md)。继续保留 WTF / SavedVariables；Schema 5 不变，序列化格式另用版本 1，不把插件版本、存档版本与导出格式混为一谈。

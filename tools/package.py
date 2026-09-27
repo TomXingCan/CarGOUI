@@ -1,4 +1,4 @@
-"""Build and test the two-addon installer from a clean Git commit.
+"""Build a runtime-only two-addon installer and test its extracted code.
 
 python tools/package.py --output /path/to/deliverables [--git /path/to/git]
 Requires the same existing Lua 5.1/lupa runtime as tests/run_tests.py.
@@ -16,6 +16,7 @@ import zipfile
 
 def install_files(files):
     prefix = "Modules/CarGOUI_Data/"
+    result = {}
     for toc, parent in (("CarGOUI.toc", ""), (prefix + "CarGOUI_Data.toc", prefix)):
         lines = files[toc].decode("utf-8-sig").splitlines()
         entries = [line.strip().replace("\\", "/") for line in lines if line.strip() and not line.startswith("#")]
@@ -25,14 +26,25 @@ def install_files(files):
             assert "## LoadOnDemand: 1" in lines and "## Dependencies: CarGOUI" in lines
         else:
             assert not any("Classes/" in entry for entry in entries), "Core must not list class files"
-    result = {}
+        installed_root = "CarGOUI_Data/" if parent else "CarGOUI/"
+        result[installed_root + Path(toc).name] = files[toc]
+        for entry in entries:
+            assert entry.endswith(".lua") and ".." not in Path(entry).parts, "Unexpected runtime entry"
+            result[installed_root + entry] = files[parent + entry]
+    for name in ("emblem.tga", "wordmark.tga", "wordmark-mask.tga", "sweep.tga"):
+        path = "Media/Branding/" + name
+        result["CarGOUI/" + path] = files[path]
+    result["CarGOUI/README.md"] = files["docs/USER_README.md"]
+    result["CarGOUI/NOTICE.md"] = files["NOTICE.md"]
+    result["CarGOUI/CHANGELOG.md"] = files["CHANGELOG.md"]
+    # Preserve any existing license documents without inventing a new license.
     for path, data in files.items():
-        assert "CarGOUI_Mage/" not in path, "Obsolete Mage package remains in source snapshot"
-        if path.startswith("Media/Branding/source/"):
-            continue
-        target = "CarGOUI_Data/" + path[len(prefix):] if path.startswith(prefix) else "CarGOUI/" + path
-        result[target] = data
+        if "/" not in path and Path(path).name.upper().startswith(("LICENSE", "COPYING")):
+            result["CarGOUI/" + path] = data
     assert {path.split("/")[0] for path in result} == {"CarGOUI", "CarGOUI_Data"}
+    assert not any(part in ("tests", "tools", "source", ".git", "work")
+                   for path in result for part in Path(path).parts)
+    assert all(not path.endswith((".py", ".zip", ".patch", ".gitkeep")) for path in result)
     return result
 
 
@@ -68,7 +80,11 @@ def main():
     files = {path: git("show", "HEAD:" + path) for path in git("ls-tree", "-r", "--name-only", "HEAD").decode().splitlines()}
     version = next(line.split(":", 1)[1].strip() for line in files["CarGOUI.toc"].decode().splitlines() if line.startswith("## Version:"))
     args.output.mkdir(parents=True, exist_ok=True)
-    target = args.output / ("CarGOUI-" + version + "-Independent-Positions.zip")
+    data_version = next(line.split(":", 1)[1].strip() for line in files["Modules/CarGOUI_Data/CarGOUI_Data.toc"].decode().splitlines() if line.startswith("## Version:"))
+    assert data_version == version
+    assert ('addon.version = "' + version + '"') in files["Core/Addon.lua"].decode()
+    assert version in files["CHANGELOG.md"].decode()
+    target = args.output / ("CarGOUI-" + version + ".zip")
     installed = install_files(files)
     digest = write_archive(installed, target)
     extraction = args.output / ("package-check-" + digest[:12])
@@ -78,13 +94,15 @@ def main():
         archive.extractall(extraction)
     lines = ["Version: " + version, "Commit: " + commit, "Tree: " + tree,
              "Archive: " + target.name, "SHA256: " + digest,
-             "Verification: extracted final installer; no real WoW client acceptance."]
+             "Verification: repository test tools against extracted final runtime-only installer.",
+             "Native WoW C_EncodingUtil/client combat/visual/performance acceptance: not executed."]
     failed = False
-    for test in ("run_tests.py", "check_mobility_static.py", "check_styles_theme_static.py", "check_proc_static.py"):
-        result = subprocess.run([sys.executable, str(extraction / "CarGOUI/tests" / test)],
+    tests = [repo / "tests/run_tests.py"] + sorted((repo / "tests").glob("check_*_static.py"))
+    for test in tests:
+        result = subprocess.run([sys.executable, str(test), "--addon-root", str(extraction / "CarGOUI")],
                                 cwd=extraction / "CarGOUI", env=os.environ,
                                 capture_output=True, text=True, encoding="utf-8")
-        lines += ["\n" + test + ": exit " + str(result.returncode), result.stdout, result.stderr]
+        lines += ["\n" + test.name + ": exit " + str(result.returncode), result.stdout, result.stderr]
         failed = failed or result.returncode != 0
     target.with_suffix(".tests.txt").write_text("\n".join(lines), encoding="utf-8")
     target.with_suffix(".sha256").write_text(digest + "  " + target.name + "\n", encoding="ascii")

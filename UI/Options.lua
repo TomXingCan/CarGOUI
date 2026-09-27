@@ -325,16 +325,6 @@ function addon:OpenAppearance(kind, key)
     self:SelectOptionsCategory("appearance")
 end
 
-function addon:RefreshOptionsThemeLabels(info)
-    local panel = self.optionsFrame
-    if not panel or not panel.themeIdentity then return end
-    panel.themeIdentity:SetText("Theme: Automatic\nFaction: " .. info.faction
-        .. "\nClass: " .. info.class .. "\nSpecialization: " .. info.specialization
-        .. "\nHeader: " .. (info.headerPalette or info.palette)
-        .. "\nBody: " .. (info.bodyPalette or info.palette))
-    panel.themeFallback:SetText(info.fallback or "")
-end
-
 local function InCombat()
     return InCombatLockdown and InCombatLockdown() or false
 end
@@ -474,6 +464,7 @@ end
 function addon:RefreshOptions()
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() then return end
+    if self.RefreshSettingsTransferPage then self:RefreshSettingsTransferPage() end
     local controls, db = panel.controls, self.db
     panel.refreshing = true
     local mobility = self:GetMobilityConfig()
@@ -563,13 +554,22 @@ end
 
 function addon:SelectOptionsCategory(key)
     local panel = self.optionsFrame
-    if not panel or not panel.pages[key] then return end
+    if not panel then return end
+    if InCombat() then self:CloseOptions(); return end
+    if not panel.pages[key] then key = "general" end
+    if self.ClearSettingsTransferPage then self:ClearSettingsTransferPage() end
     self:CancelProcColorPicker()
     CloseMenus(panel)
     if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
     ClearEdits(panel)
     CancelReset(panel)
     panel.activeCategory = key
+    if key == "importExport" then
+        self:CreateSettingsTransferPage(panel, panel.pages.importExport, {
+            Label = Label, Button = Button, Dropdown = Dropdown,
+            ThemeControl = ThemeControl, Feedback = Feedback,
+        })
+    end
     for pageKey, page in pairs(panel.pages) do
         page:SetShown(pageKey == key)
     end
@@ -580,13 +580,14 @@ function addon:SelectOptionsCategory(key)
             self:ApplyOptionsCategoryTheme(button, selected)
         end
     end
-    Feedback(panel, L.immediate)
+    Feedback(panel, key == "importExport" and L.transferHint or L.immediate)
     self:RefreshOptions()
 end
 
 local function OnOptionsSpecializationChanged(self, _, unit)
     if issecretvalue and issecretvalue(unit) then return end
     if unit and unit ~= "player" then return end
+    if self.ClearSettingsTransferPage then self:ClearSettingsTransferPage() end
     self:CancelProcColorPicker()
     CloseMenus(self.optionsFrame)
     ClearEdits(self.optionsFrame)
@@ -669,7 +670,7 @@ function addon:CreateOptions()
     divider:SetSize(1, 380)
     panel.themeDivider = divider
 
-    for _, key in ipairs({ "general", "appearance", "preview", "mobility", "proc", "themes" }) do
+    for _, key in ipairs({ "general", "appearance", "preview", "mobility", "proc", "importExport" }) do
         local page = CreateFrame("Frame", nil, panel)
         page:SetPoint("TOPLEFT", panel, "TOPLEFT", 216, -88)
         page:SetSize(480, 374)
@@ -679,22 +680,15 @@ function addon:CreateOptions()
         panel.pages[key] = page
         Label(page, L[key], 0, 0, 470, 24, "GameFontNormalLarge")
     end
-    for index, key in ipairs({ "general", "preview", "mobility", "proc", "themes", "importExport" }) do
+    for index, key in ipairs({ "general", "preview", "mobility", "proc", "importExport" }) do
         local category = key
         local button = Button(panel, L[key], 16, -88 - (index - 1) * 40, 162, function()
             addon:SelectOptionsCategory(category)
         end)
         button.key = key
-        if not panel.pages[key] then
-            local status = Label(panel, L.unavailable, 22, -116 - (index - 1) * 40, 156, 12)
-            status:SetTextColor(0.55, 0.58, 0.62)
-            button:SetScript("OnClick", nil)
-            button:Disable()
-        end
         panel.categories[#panel.categories + 1] = button
     end
     self:CreateOptionsTheme(panel)
-    Label(panel, L.future, 20, -382, 156, 72)
     panel.feedback = Label(panel, "", 24, -476, 672, 32)
     panel.controls.reset = Button(panel, L.reset, 24, -516, 170, function()
         CloseMenus(panel)
@@ -705,6 +699,7 @@ function addon:CreateOptions()
             return
         end
         ClearEdits(panel)
+        if addon.ClearSettingsTransferPage then addon:ClearSettingsTransferPage() end
         addon:ResetDatabase()
         CancelReset(panel)
         Feedback(panel, L.resetDone)
@@ -907,11 +902,6 @@ function addon:CreateOptions()
     end)
     Label(proc, "Proc font, size, outline, shadow and scale are shared within this specialization. Each region has its own position and optional timer color.", 0, -326, 470, 44)
 
-    local themes = panel.pages.themes
-    Label(themes, "Automatic faction Header and class / specialization Body. No manual selection or custom colors.", 0, -36, 470, 42)
-    panel.themeIdentity = Label(themes, "", 0, -92, 470, 168, "GameFontHighlight")
-    panel.themeFallback = Label(themes, "", 0, -276, 470, 72)
-
     local mobility = panel.pages.mobility
     panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,
         function(value) return { mobility = { enabled = value } } end)
@@ -969,6 +959,7 @@ function addon:CreateOptions()
         addon:SelectOptionsCategory(panel.activeCategory)
     end)
     panel:HookScript("OnHide", function()
+        if addon.ClearSettingsTransferPage then addon:ClearSettingsTransferPage() end
         addon:CancelProcColorPicker()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)

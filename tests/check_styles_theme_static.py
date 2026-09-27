@@ -1,8 +1,11 @@
 """Structural boundaries only; not a substitute for WoW native rendering tests."""
 from pathlib import Path
+import argparse
 import re
 
-root = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--addon-root", type=Path, default=Path(__file__).resolve().parent.parent)
+root = parser.parse_args().addon_root.resolve()
 
 def source(path):
     return re.sub(r"--[^\n]*", "", (root / path).read_text(encoding="utf-8"))

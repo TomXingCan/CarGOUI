@@ -1,8 +1,11 @@
 """Proc/native-aura structural guards; not a Retail secret-value or taint proof."""
 from pathlib import Path
+import argparse
 import re
 
-root = Path(__file__).resolve().parent.parent
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("--addon-root", type=Path, default=Path(__file__).resolve().parent.parent)
+root = parser.parse_args().addon_root.resolve()
 data_root = root / "Modules/CarGOUI_Data"
 if not data_root.is_dir():
     data_root = root.parent / "CarGOUI_Data"

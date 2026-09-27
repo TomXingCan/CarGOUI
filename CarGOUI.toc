@@ -2,7 +2,7 @@
 ## Title: CarGOUI
 ## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 0.1.0-alpha.16
+## Version: 1.0.0-rc.1
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua
@@ -13,6 +13,8 @@ Database\Themes.lua
 Config\Defaults.lua
 Config\Locale.lua
 Core\Database.lua
+Database\SettingsMetadata.lua
+Core\SettingsTransfer.lua
 UI\ReminderStyle.lua
 UI\Display.lua
 Modules\Proc\AuraState.lua
@@ -26,6 +28,7 @@ UI\Preview.lua
 UI\Branding.lua
 UI\Theme.lua
 UI\ProcColorPicker.lua
+UI\SettingsTransfer.lua
 UI\Options.lua
 Config\Commands.lua
 Core\Initialize.lua
