@@ -10,6 +10,7 @@ function addon:Initialize()
     self.configurationClass, self.configurationSpec = self:GetPlayerContext()
     self:RegisterSlashCommands()
     self.initialized = true
+    self:InitializeLauncher()
 end
 
 function addon:Enable()

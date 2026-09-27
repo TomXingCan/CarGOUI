@@ -4,6 +4,7 @@ local english = {
     options = "Options", general = "General", appearance = "Appearance",
     preview = "Test Mode", mobility = "Mobility", proc = "Proc",
     importExport = "Import / Export",
+    showMinimapIcon = "Show minimap icon",
     generalHint = "Current class Mobility settings. Appearance is in Mobility / Proc.",
     transferHint = "Export saved settings or review an import before confirming changes.",
     transferScope = "Export scope", transferClass = "Current class", transferAll = "All saved settings",

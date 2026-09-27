@@ -2,8 +2,15 @@
 ## Title: CarGOUI
 ## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 1.0.0-rc.2
+## Version: 1.0.0-rc.3
 ## SavedVariables: CarGOUIDB
+## IconTexture: Interface\AddOns\CarGOUI\Media\Branding\emblem.tga
+## AddonCompartmentFunc: CarGOUI_OnAddonCompartmentClick
+
+Libs\LibStub\LibStub.lua
+Libs\CallbackHandler-1.0\CallbackHandler-1.0.lua
+Libs\LibDataBroker-1.1\LibDataBroker-1.1.lua
+Libs\LibDBIcon-1.0\LibDBIcon-1.0.lua
 
 Core\Addon.lua
 Core\Events.lua
@@ -30,5 +37,6 @@ UI\Theme.lua
 UI\ProcColorPicker.lua
 UI\SettingsTransfer.lua
 UI\Options.lua
+UI\Launcher.lua
 Config\Commands.lua
 Core\Initialize.lua

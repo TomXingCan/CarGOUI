@@ -2,6 +2,7 @@
 -- Run: python tests/run_tests.py --addon-root /path/to/CarGOUI
 local root = assert(arg and arg[1], "Pass the CarGOUI AddOn directory as argument 1.")
 local testRoot = arg[2] or root .. "/tests"
+local launcherHarness = {}
 local files, metadata = {}, {}
 local toc = assert(io.open(root .. "/CarGOUI.toc", "r"))
 for line in toc:lines() do
@@ -124,6 +125,19 @@ local function setup(saved, loggedIn, client)
     end
     env.IsLoggedIn = function() return state.loggedIn end
     env.InCombatLockdown = function() return state.inCombat end
+    env.IsShiftKeyDown = function() return state.shiftDown == true end
+    env.IsControlKeyDown = function() return state.controlDown == true end
+    env.IsAltKeyDown = function() return state.altDown == true end
+    env.IsModifierKeyDown = function() return state.shiftDown or state.controlDown or state.altDown or false end
+    env.WOW_PROJECT_MAINLINE, env.WOW_PROJECT_ID = 1, 1
+    env.strmatch = string.match
+    env.securecallfunction = function(callback, ...)
+        local result = { pcall(callback, ...) }
+        if not result[1] then env.geterrorhandler()(result[2]); return end
+        return unpack(result, 2)
+    end
+    env.GetCursorPosition = function() return state.cursorX or 1100, state.cursorY or 960 end
+    env.GetMinimapShape = function() return state.minimapShape or "ROUND" end
     env.GetBuildInfo = function() return "12.1.0", "99999", "Sep 26 2026", 120100 end
     env.GetLocale = function() return client.locale or "enUS" end
     env.GetTime = function() return state.clock end
@@ -419,12 +433,17 @@ local function setup(saved, loggedIn, client)
     local object = {}
     function object:GetName() return self.name end
     function object:GetParent() return self.parent end
+    function object:SetParent(parent) self.parent = parent end
     function object:GetObjectType() return self.kind end
     function object:SetPoint(point, relative, relativePoint, x, y)
+        if type(relative) == "number" then
+            x, y, relative, relativePoint = relative, relativePoint, self.parent, point
+        end
         self.point = { point, relative, relativePoint, x or 0, y or 0 }
     end
     function object:ClearAllPoints() self.point = nil end
     function object:GetPoint() return unpack(self.point or {}) end
+    function object:GetNumPoints() return self.point and 1 or 0 end
     function object:SetAllPoints(relative) self.allPoints = relative or self.parent end
     function object:SetScrollChild(child) self.scrollChild = child end
     function object:UpdateScrollChildRect() self.scrollChildUpdates = (self.scrollChildUpdates or 0) + 1 end
@@ -488,12 +507,16 @@ local function setup(saved, loggedIn, client)
         return self.alpha == nil and 1 or self.alpha
     end
     function object:SetFrameStrata(strata) self.strata = strata end
+    function object:SetFixedFrameStrata(value) self.fixedFrameStrata = value end
+    function object:SetFixedFrameLevel(value) self.fixedFrameLevel = value end
     function object:SetClampedToScreen(value) self.clampedToScreen = value end
     function object:SetFrameLevel(level) self.frameLevel = level end
     function object:GetFrameLevel() return self.frameLevel or 1 end
     function object:EnableMouse(enabled) self.mouseEnabled = enabled end
     function object:SetScript(event, callback)
-        assert(event ~= "OnUpdate" or callback == nil, "Options must not register OnUpdate scans")
+        assert(event ~= "OnUpdate" or callback == nil
+            or (self.name == "LibDBIcon10_CarGOUI" and self.isMouseDown == true),
+            "Only the vendored icon's active mouse drag may use a transient OnUpdate")
         self.scripts[event] = callback
     end
     function object:GetScript(event) return self.scripts[event] end
@@ -602,6 +625,7 @@ local function setup(saved, loggedIn, client)
     end
     function object:SetAtlas(value) self.atlas = value end
     function object:SetVertexColor(...) self.vertexColor = { ... } end
+    function object:GetVertexColor() return unpack(self.vertexColor or { 1, 1, 1, 1 }) end
     function object:SetTexCoord(...) self.texCoord = { ... } end
     function object:SetDrawLayer(layer) self.layer = layer end
     function object:SetNormalTexture(value) self.normalTexture = value end
@@ -609,6 +633,10 @@ local function setup(saved, loggedIn, client)
     function object:SetPushedTexture(value) self.pushedTexture = value end
     function object:SetDisabledTexture(value) self.disabledTexture = value end
     function object:SetCheckedTexture(value) self.checkedTexture = value end
+    function object:LockHighlight() self.highlightLocked = true end
+    function object:UnlockHighlight() self.highlightLocked = false end
+    function object:SetOwner(owner, anchor) self.owner, self.ownerAnchor = owner, anchor; self.tooltipLines = {} end
+    function object:AddLine(text, ...) self.tooltipLines = self.tooltipLines or {}; self.tooltipLines[#self.tooltipLines + 1] = text end
     function object:SetAutoFocus(value) self.autoFocus = value end
     function object:SetNumeric(value) self.numeric = value end
     function object:SetMultiLine(value) self.multiLine = value end
@@ -744,6 +772,9 @@ local function setup(saved, loggedIn, client)
         return group
     end
     if client.maskUnavailable then object.CreateMaskTexture = nil end
+    -- Existing Blizzard surfaces are native fixtures, not addon-created frames.
+    env.Minimap = setmetatable({ name = "Minimap", kind = "Minimap", parent = env.UIParent,
+        width = 140, height = 140, mockCenter = { 1800, 960 }, scripts = {}, events = {} }, { __index = object })
     env.CreateFrame = function(kind, name, parent, template)
         local frame = setmetatable({ kind = kind, name = name, parent = parent, template = template,
             events = {}, scripts = {}, shown = true }, { __index = object })
@@ -1586,8 +1617,10 @@ test("Options backgrounds drag the same window while interactive controls keep t
             local oldStart = frame:GetScript("OnDragStart")
             addon:RegisterOptionsDragSurface(frame)
             equal(frame:GetScript("OnDragStart"), oldStart, "re-registering does not stack hooks")
-        else
+        elseif frame.name ~= "LibDBIcon10_CarGOUI" then
             equal(frame:GetScript("OnDragStart"), nil, "buttons inputs menus sliders and reminder frames never start window drag")
+        else
+            equal(frame.optionsDragSurface, nil, "vendor icon drag is never an Options drag surface")
         end
     end
     truthy(dragSurfaces >= 10, "existing empty surfaces covered without extra overlay frame")
@@ -1632,7 +1665,10 @@ end)
 
 test("title animation defaults on, has a static fallback, and stops when hidden", function()
     local _, addon, state = login(nil)
-    equal(#state.animations, 0, "branding animation deferred until Options opens")
+    for _, group in ipairs(state.animations) do
+        equal(group.parent:GetName(), "LibDBIcon10_CarGOUI", "only the vendor's dormant fade exists before Options")
+        equal(group:IsPlaying(), false, "the optional icon fade does not start at login")
+    end
     local panel, controls = options(addon)
     local group = panel.titleAnimation
     truthy(group and #group.animations > 0, "native animation group created")
@@ -6580,6 +6616,9 @@ local function transferSeed()
     addon.db.options.position = { x = 37, y = -22 }; addon.db.options.animatedTitle = false
     return env, addon, state
 end
+launcherHarness.transferSeed, launcherHarness.transferPage = transferSeed, transferPage
+launcherHarness.prepareSettings, launcherHarness.packSettings = prepareSettings, packSettings
+launcherHarness.unpackSettings, launcherHarness.transferMetrics = unpackSettings, transferMetrics
 
 test("RC export is a read-only whitelist snapshot of all saved specs in the selected class", function()
     local env, addon, state = transferSeed()
@@ -7574,6 +7613,13 @@ test("RC2 Options disables native position persistence at creation and restores 
     equal(x, 1100, "reload restores saved visual center X")
     equal(y, 465, "reload restores saved visual center Y")
 end)
+
+assert(loadfile(testRoot .. "/launcher_smoke.lua"))(setmetatable({ test = test, equal = equal, truthy = truthy,
+    same = same, copy = copy, secret = secret, root = root, metadata = metadata, login = login, setup = setup,
+    options = options, transferSeed = transferSeed, transferPage = transferPage,
+    prepareSettings = prepareSettings, packSettings = packSettings, unpackSettings = unpackSettings,
+    transferMetrics = transferMetrics, mobilityLogin = mobilityLogin, putAura = putAura,
+    showProc = showProc, procFrame = procFrame, counts = counts }, { __index = launcherHarness }))
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")

@@ -527,6 +527,7 @@ function addon:RefreshOptions()
     local mobility = self:GetMobilityConfig()
     controls.enabled:SetChecked(mobility.enabled)
     controls.animatedTitle:SetChecked(db.options.animatedTitle)
+    controls.showMinimapIcon:SetChecked(not db.options.minimap.hide)
     if not panel.positionDirty then
         controls.x:SetText(string.format("%g", mobility.position.x))
         controls.y:SetText(string.format("%g", mobility.position.y))
@@ -809,12 +810,14 @@ function addon:CreateOptions()
         Submit(panel, { position = { x = 0, y = 0 } })
     end)
     Label(general, L.positionHint, 0, -174, 470, 36)
-    Label(general, "Mobility settings belong to your current class. Proc styles belong to your current class and specialization.", 0, -266, 470, 48)
+    Label(general, "Mobility settings belong to your current class. Proc styles belong to your current class and specialization.", 0, -250, 470, 40)
     panel.controls.animatedTitle = CheckBox(panel, general, L.animatedTitle, 0, -332,
         function(value) return { options = { animatedTitle = value } } end)
     panel.controls.centerOptions = Button(general, L.centerOptions, 316, -332, 158, function()
         Submit(panel, { options = { position = { x = 0, y = 0 } } })
     end)
+    panel.controls.showMinimapIcon = CheckBox(panel, general, L.showMinimapIcon, 0, -296,
+        function(value) return { options = { minimap = { hide = not value } } } end)
 
     local appearance = panel.pages.appearance
     local scroll = CreateFrame("ScrollFrame", nil, appearance, "UIPanelScrollFrameTemplate")

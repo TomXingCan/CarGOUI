@@ -18,7 +18,8 @@ end
 
 addon.defaults = {
     schemaVersion = 5,
-    options = { position = { x = 0, y = 0 }, animatedTitle = true },
+    options = { position = { x = 0, y = 0 }, animatedTitle = true,
+        minimap = { hide = false, minimapPos = 220 } },
     classes = {},
 }
 

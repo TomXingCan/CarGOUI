@@ -50,8 +50,18 @@ local positionSchema = {
     x = NumberSetting(addon.limits.offset, "X offset must be a number from -10000 to 10000."),
     y = NumberSetting(addon.limits.offset, "Y offset must be a number from -10000 to 10000."),
 }
+local minimapSchema = {
+    hide = BooleanSetting,
+    -- LibDBIcon stores an angle, not XY. Equivalent negative angles are valid.
+    minimapPos = function(value)
+        if issecretvalue and issecretvalue(value) then return false, "Minimap angle must be public." end
+        return addon:IsNumberInRange(value, { min = -360, max = 360 }),
+            "Minimap angle must be a finite number from -360 to 360."
+    end,
+}
 local optionsSchema = {
     animatedTitle = BooleanSetting,
+    minimap = minimapSchema,
     position = {
         x = NumberSetting(addon.limits.offset, "Window X must be from -10000 to 10000."),
         y = NumberSetting(addon.limits.offset, "Window Y must be from -10000 to 10000."),
@@ -356,8 +366,13 @@ function addon:InitializeDatabase()
     CaptureLegacy(CarGOUIDB)
     CarGOUIDB.classes = type(CarGOUIDB.classes) == "table" and CarGOUIDB.classes or {}
     CarGOUIDB.options = Complete(CarGOUIDB.options, self.defaults.options, optionsSchema)
+    -- Only our two persistent launcher values belong in this shell record.
+    -- Detach the table and discard accidental runtime/third-party fields.
+    local minimap = CarGOUIDB.options.minimap
+    CarGOUIDB.options.minimap = { hide = minimap.hide, minimapPos = minimap.minimapPos }
     CarGOUIDB.schemaVersion = self.defaults.schemaVersion
     self.db, self.configurationClass, self.procConfigurationCache = CarGOUIDB, nil, {}
+    if self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
     self:RefreshConfigurationContext()
 end
 
@@ -471,6 +486,20 @@ end
 function addon:UpdateSettings(patch)
     if not self.db then return false, "Settings are not initialized yet." end
     if type(patch) ~= "table" then return false, "Settings must be supplied as a table." end
+    local optionsOnly = patch.options ~= nil
+    for key in pairs(patch) do if key ~= "options" then optionsOnly = false end end
+    if optionsOnly then
+        -- The shell needs neither a player class nor a gameplay catalog.
+        -- This also keeps combat drag cleanup independent of active adapters.
+        local valid, message = ValidatePatch(patch, { options = optionsSchema }, "")
+        if not valid then return false, message end
+        MergePatch(self.db.options, patch.options)
+        if patch.options.position and self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
+        if patch.options.animatedTitle ~= nil and self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
+        if patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
+        if self.RefreshOptions then self:RefreshOptions() end
+        return true
+    end
     local class = self:GetPlayerContext()
     local schema = { options = optionsSchema, enabled = BooleanSetting, position = positionSchema,
         mobility = { enabled = BooleanSetting, style = styleSchema, position = positionSchema,
@@ -498,8 +527,6 @@ function addon:UpdateSettings(patch)
     end
     local changedPositions = PositionChanges(patch, entries)
     local changedStyles, changedColors, stylesOnly = {}, {}, true
-    local optionsOnly = patch.options ~= nil
-    for key in pairs(patch) do if key ~= "options" then optionsOnly = false end end
     local function RecordStyle(kind)
         local context = self:GetAppearanceContext(kind)
         if context then changedStyles[context.key] = true end
@@ -541,17 +568,13 @@ function addon:UpdateSettings(patch)
         local _, canonical = self:IsSupportedFont(style.font.face)
         style.font.face = canonical
     end
-    if optionsOnly then
-        -- Saving a dragged Options window (including combat auto-close) only
-        -- changes the shell. Do not reconfigure live modules or their bindings.
-        if self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
-        if self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
-    elseif changedPositions then
+    if changedPositions then
         if self.RefreshReminderPositions then self:RefreshReminderPositions(changedPositions) end
     elseif stylesOnly then
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
         if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end
     else self:ApplySettings() end
+    if patch.options and patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
     if stylesOnly and next(changedColors) and not next(changedStyles) then
         if self.RefreshProcColorControls then self:RefreshProcColorControls() end
     elseif self.RefreshOptions then self:RefreshOptions() end
@@ -566,6 +589,7 @@ function addon:ResetDatabase()
     -- Reset is deliberately scoped. Other classes and historical migration
     -- backups remain intact; completed migrations never reapply old settings.
     self.db.options = CopyTable(self.defaults.options)
+    if self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
     self.configurationClass, self.procConfigurationCache = nil, {}
     self:RefreshConfigurationContext()
     self:ApplySettings()

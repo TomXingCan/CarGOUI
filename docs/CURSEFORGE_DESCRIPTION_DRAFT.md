@@ -8,10 +8,11 @@ CarGOUI is a Retail reminder addon with a standalone `/cui` settings window.
 - Mobility settings belong to each class. Proc fonts belong to each class and specialization. Automatic faction Headers and class/spec Body themes require no manual selection.
 - Import / Export shares current-class or all-saved settings through a copyable string, with validation, an impact summary, confirmation and a recoverable last-import backup.
 - Options closes safely in combat; a combat opening request is deferred once until combat ends. Sliders update immediately and numerical edits save on Enter.
+- A standard minimap/LDB launcher and the native AddOn Compartment open the same combat-safe settings. The minimap icon can be hidden in General; slash commands and the compartment remain available.
 
 Install both **CarGOUI** and **CarGOUI_Data**. The internal Data addon loads automatically. Existing SavedVariables should be kept when upgrading.
 
-This **1.0.0-rc.2** candidate adds Options drag-session safeguards and retains the admitted Proc implementation for Mage and the other reviewed classes. Native pickup behavior remains pending client regression. Coverage is based on eligible finite effects with native graphics; it does not mean every specialization has a timer. Exact mappings and limitations are listed in the source repository's Proc and Mobility coverage documents.
+This **1.0.0-rc.3** candidate adds standard launcher entries and retains RC2's Options drag-session safeguards and the admitted Proc implementation for Mage and the other reviewed classes. Necessary launcher libraries are embedded; no extra library addon installation is needed. Native dragging and specific collector versions remain pending client regression. Coverage is based on eligible finite effects with native graphics; it does not mean every specialization has a timer. Exact mappings and limitations are listed in the source repository's Proc and Mobility coverage documents.
 
 Target: Retail 12.1 / Interface 120100; existing source audits pin build 69933. This is not a claim that every class/talent has been tested in a live client, that resource use is zero, or that Blizzard has certified the addon. Final native-codec and gameplay acceptance remains pending. Preview samples are clearly marked and isolated from live effects.
 

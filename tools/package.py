@@ -38,6 +38,14 @@ def install_files(files):
     result["CarGOUI/README.md"] = files["docs/USER_README.md"]
     result["CarGOUI/NOTICE.md"] = files["NOTICE.md"]
     result["CarGOUI/CHANGELOG.md"] = files["CHANGELOG.md"]
+    # Required embedded-library licenses/provenance travel with the runtime.
+    # Lua files are already included through the main TOC, without standalone
+    # library TOCs or any additional top-level addon directories.
+    for path, data in files.items():
+        if path.startswith("Libs/") and (Path(path).name.startswith("LICENSE")
+                or path == "Libs/THIRD_PARTY_NOTICES.md"):
+            result["CarGOUI/" + path] = data
+    assert "CarGOUI/Libs/THIRD_PARTY_NOTICES.md" in result
     # Preserve any existing license documents without inventing a new license.
     for path, data in files.items():
         if "/" not in path and Path(path).name.upper().startswith(("LICENSE", "COPYING")):

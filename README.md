@@ -1,6 +1,6 @@
-# CarGOUI 1.0.0-rc.2
+# CarGOUI 1.0.0-rc.3
 
-当前版本 **1.0.0-rc.2**，基于 RC1 提交 `9c29f62684c54adc40618f4a215bab28a9d84edc`。本轮整合 Options 拖动修复交接包，处理起拖入口、来源归属、窗口外释放及结束重入；起拖跳位是否在原生客户端消失仍待实测。保留 RC1 的界面精简、设置导入导出和备份恢复，以及全部既有技能映射、Free move 独立坐标、战斗锁、字体范围、区域颜色及存档。目标 WoW Retail 12.1.0（Interface 120100），既有数据/API 核查固定 build 69933。[本轮修复依据与复测步骤](docs/DRAG_RC2.md)。
+当前版本 **1.0.0-rc.3**，基于 RC2 提交 `b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`。本轮增加统一品牌图标、标准小地图/LDB launcher 与原生 AddOn Compartment 入口，复用已有 Options 战斗队列。保留 RC2 拖动修复、全部真实监控、主题、字体、区域颜色、坐标及存档。目标 WoW Retail 12.1.0（Interface 120100），既有数据/API 核查固定 build 69933。[入口说明与兼容验收](docs/LAUNCHER_RC3.md)，[库与收纳接口核查](docs/LAUNCHER_RC3_API.md)，[保留的拖动修复记录](docs/DRAG_RC2.md)。
 
 这是供最终回归的发布候选，不是正式 Release；没有合并 main、公开发布或上传 CurseForge。见 [RC 验收与发布清单](docs/RC_ACCEPTANCE.md)、[配置格式](docs/SETTINGS_TRANSFER_FORMAT.md) 和 [CurseForge 描述草稿](docs/CURSEFORGE_DESCRIPTION_DRAFT.md)。
 
@@ -15,7 +15,9 @@ Free move 与普通 Mobility 的独立 XY、一次迁移和纯坐标定向更新
 1. 完全退出 WoW，把交付 ZIP 中 **CarGOUI 和 CarGOUI_Data 两个文件夹一起**放入 `_retail_/Interface/AddOns/`。这是同一个安装包，内部 Data 包会自动加载，不需要选择职业包。
 2. 检查 `CarGOUI/CarGOUI.toc` 与 `CarGOUI_Data/CarGOUI_Data.toc` 都在上述目录下，没有多嵌套一层。
 3. 从 alpha.8 升级时，退出游戏后删除旧 **AddOns/CarGOUI_Mage 程序目录**，再替换新包两个目录。**不要删除 WTF 中的 CarGOUI SavedVariables**。插件不会自动删除程序目录或用户存档。所有现有职业配置、Proc 样式、坐标及外壳设置保留。
-4. 登录后 `/cui` 打开或关闭 Options；`/cargoui` 为别名。zhCN 客户端也默认英文。
+4. 登录后 `/cui` 打开或关闭 Options；`/cargoui` 为别名。也可普通左键点击小地图徽记、LDB launcher 或原生 AddOn Compartment 中的 CarGOUI。zhCN 客户端也默认英文。
+
+安装包内部嵌入 LibStub、CallbackHandler-1.0、LibDataBroker-1.1、LibDBIcon-1.0；用户无需另装依赖插件，不包含完整 Ace3/AceGUI。来源、版本和各自许可见 `Libs/THIRD_PARTY_NOTICES.md`。
 
 战斗中输入任一别名只排队一次，并提示 `CarGOUI: Options will open when combat ends.`，不会创建窗口、打开拾色器或启动 Test Mode。脱战并确认解除锁定后打开一次；普通脱战不会反复弹窗。窗口已打开时进战斗会自动收起、取消未确认编辑并停止 TEST；仅自动收起不会排队重开。待处理请求只存于当前会话，重载/登出不保留；`help`、`status` 行为不变。
 
@@ -29,13 +31,17 @@ Free move 与普通 Mobility 的独立 XY、一次迁移和纯坐标定向更新
 | Free move 锚点、XY | 当前职业的独立 `mobility.freeMovePosition`；不跟随普通 Mobility 的 XY |
 | Proc 字体、字号、描边、阴影、文字缩放 | 当前 classToken + specID，同专精所有区域共用 |
 | Proc 区域锚点、XY、可选 RGB | 对应职业/专精下稳定区域 ID 分别保存；无自定义 RGB 时动态使用职业色 |
-| Options 窗口位置、品牌动画开关 | 插件外壳独立保存 |
+| Options 窗口位置、品牌动画开关、小地图显示/环绕角度 | 插件外壳独立保存，各自独立表；不属于职业配置 |
 
 没有职业、专精、Profile 或手动 Theme 选择器。Appearance 的原选择字段现在只读显示自动配置上下文。Proc 区域菜单选择位置、预览和颜色对象，不创建区域独立字体。
 
 Mobility 和 Free move 固定使用玩家的暴雪职业色。Proc 数字默认使用职业色，允许各稳定区域分别设置 RGB，没有透明度设置。Options 的阵营/专精主题与提醒颜色、字体、计时无关。
 
 ## 操作
+
+General → **Show minimap icon** 默认开启，关闭只隐藏标准小地图按钮；`/cui`、LDB 和原生收纳入口仍可用。未被收纳的图标可按标准库方式拖动位置。收纳管理器掌管其布局时，本插件不持续夺回按钮。所有入口只接受普通左键，修饰键和右键留给收纳工具。三个入口与 `/cui` 共用战斗延期打开逻辑，不自动开启 TEST 或拾色器。
+
+HidingBar 默认只收纳标准按钮，不同时添加第二个 LDB 条目；用户开启双来源后可能出现两个表示，可用其排除设置选择一个。WindTools 与 MBB 的标准接口已核查；具体版本的真实客户端收纳、显示和拖动仍待验收，不承诺多个管理器同时抢占按钮时兼容。
 
 Options 仍是左分类、右选项。Header、Body 背景、侧栏空白、边框与静态说明区域均可左键拖动整个窗口。按钮、滑块、输入框、下拉菜单及滚动条保留正常操作，不要求修饰键。松开、关闭或 Esc 结束拖动，位置保存与屏幕约束保留。General 与 Mobility 的开关/XY 都编辑当前职业的同一份 Mobility 配置。关闭 Mobility 也停止 Free move 并隐藏 Mobility 样例，不影响真实 Proc；Proc 页面可独立启停本专精的数字。
 
@@ -116,7 +122,7 @@ Import / Export 默认导出 Current class，包含当前职业所有已保存 P
 
 `Core/`：初始化、事件、配置校验迁移、按需加载、诊断；`Config/`：工厂默认、英文文案、命令；`Database/`：通用样式上下文与主题映射；`UI/`：共用提醒、Preview、Options、品牌/主题；`Modules/Mobility/`：当前活动技能事件引擎与 Free move；`Modules/Proc/`：原生 Aura 槽位与图形事件生命周期；`UI/ProcDisplay.lua`：合法原生位置和字体边界；`Modules/CarGOUI_Data/`：统一 LoD TOC、职业注册、`Shared/` 状态引擎与各 `Classes/` 私有定义/适配器；`tests/`：Lua 5.1 离线测试与静态检查。
 
-完整测试运行 `python tests/run_tests.py`，需要已有 `lupa.lua51`，以 Python 标准 JSON/Base64 库提供明确标注的离线接口模拟，运行器不自动安装依赖。原生 C_EncodingUtil 在实际 WoW 内的结构和往返仍需实机验证。三套既有静态检查及新增设置传输检查均保留在 `tests/`。
+完整测试运行 `python tests/run_tests.py`，需要已有 `lupa.lua51`，以 Python 标准 JSON/Base64 库提供明确标注的离线接口模拟，运行器不自动安装依赖。原生 C_EncodingUtil 在实际 WoW 内的结构和往返仍需实机验证。保留四套 RC2 静态检查并增加入口/嵌入库检查，共五套。全部 219 组 RC2 测试保留，并增加 15 组入口回归；真实库文件由测试执行，原生 WoW 框体由离线模型提供。
 
 用户安装 ZIP 只包含两个目录的 TOC 运行文件、四张必要 TGA、简短说明、CHANGELOG 和版权/素材声明；测试、审查记录、制作源文件和脚本仍留在仓库。`python tools/package.py --output <directory>` 从干净提交打包，然后以仓库测试工具的 `--addon-root <extracted/CarGOUI>` 指向最终解压代码执行测试，记录源码树和 SHA256。
 

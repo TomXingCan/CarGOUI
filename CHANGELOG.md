@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.0-rc.3
+
+- Reuse the existing transparent emblem for both AddOns list entries, one standard LDB launcher/minimap button, and the main addon's TOC-registered native compartment entry.
+- Embed pinned LibStub, CallbackHandler, LibDataBroker and LibDBIcon sources with their notices; no separate dependency installation is required.
+- Route plain left-clicks through the existing combat-safe Options toggle. Preserve RC2 dragging, lazy Options creation and all real reminders.
+- Add General's Show minimap icon setting; keep shell display/angle independent of class settings and window/reminder positions.
+- Include whitelisted minimap settings only in all-settings exports. Old imports retain existing preferences. Keep the library-bound settings table stable through import, restore and reset, without replacing collected-button drag scripts or layout.
+- Retain all 219 RC2 regression groups and extend the Lua 5.1 suite with actual embedded library execution. Manager source checks and offline simulations are distinct from pending real-client acceptance.
+- No formal Release, main merge or CurseForge upload.
+
 ## 1.0.0-rc.2
 
 - Integrate the RC1 drag handoff: start native Options movement from the current mouse position and keep ownership of the initiating background surface.

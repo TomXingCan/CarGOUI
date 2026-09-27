@@ -177,6 +177,11 @@ local function Position(value, path, kinds, shell)
     if not shell then result.anchor = "CENTER" end
     return result
 end
+local function Minimap(value, path, kinds)
+    Map(value, Keys("hide minimapPos"), path, kinds)
+    return { hide = Boolean(value.hide, path .. ".hide"),
+        minimapPos = Number(value.minimapPos, -360, 360, path .. ".minimapPos") }
+end
 local function Preferences(value, path, kinds)
     Map(value, Keys("skillDisplay"), path, kinds, true)
     local result = {}
@@ -255,9 +260,14 @@ local function ValidateEnvelope(self, value, kinds)
     if count > 13 or (value.scope == "class" and count ~= 1) then Fail("Invalid class scope count.") end
     if value.options ~= nil then
         if value.scope ~= "all" then Fail("Current class packages cannot change the Options shell.") end
-        Map(value.options, Keys("position animatedTitle"), "/options", kinds)
+        Map(value.options, Keys("position animatedTitle minimap"), "/options", kinds)
         result.options = { position = Position(value.options.position, "/options/position", kinds, true),
             animatedTitle = Boolean(value.options.animatedTitle, "options.animatedTitle") }
+        -- Optional for format-1 strings exported by RC1/RC2. Missing is not a
+        -- request to overwrite the recipient's launcher preferences.
+        if value.options.minimap ~= nil then
+            result.options.minimap = Minimap(value.options.minimap, "/options/minimap", kinds)
+        end
     end
     if count == 0 and result.options == nil then Fail("The package contains no settings.") end
     return result, warnings
@@ -327,8 +337,13 @@ local function Snapshot(self, scope)
     end
     if scope == "all" then
         local options = self.db.options or {}
+        local minimap = options.minimap
+        if minimap ~= nil and type(minimap) ~= "table" then Fail("Malformed saved minimap settings.") end
+        minimap = minimap or self.defaults.options.minimap
         result.options = { position = SavedPosition(options.position, nil, true),
-            animatedTitle = options.animatedTitle == nil and true or Boolean(options.animatedTitle, "saved title animation") }
+            animatedTitle = options.animatedTitle == nil and true or Boolean(options.animatedTitle, "saved title animation"),
+            -- Pick our own fields instead of serializing library/runtime state.
+            minimap = Minimap({ hide = minimap.hide, minimapPos = minimap.minimapPos }, "saved minimap") }
     elseif not result.classes[current] then Fail("No saved settings exist for the current class.") end
     return result
 end
@@ -402,7 +417,13 @@ local function MergeCandidate(self, incoming, restore)
         end
         classes[class] = record
     end
-    return { classes = classes, options = incoming.options and Copy(incoming.options) or self.db.options }
+    local options = incoming.options and Copy(incoming.options) or self.db.options
+    if incoming.options and not incoming.options.minimap then
+        -- Older all-settings imports and backups keep the current preference.
+        -- A provided minimap snapshot instead owns a fresh validated table.
+        options.minimap = self.db.options.minimap
+    end
+    return { classes = classes, options = options }
 end
 local function Summary(incoming, before, context, warnings, restore)
     local names, specs, regions, mobility = {}, 0, 0, 0
@@ -417,7 +438,10 @@ local function Summary(incoming, before, context, warnings, restore)
     local lines = { restore and "Restore the saved configuration from before the latest import?" or "Import validated settings?",
         "Classes: " .. (#names > 0 and table.concat(names, ", ") or "none"),
         "Mobility snapshots: " .. mobility .. "; Proc specializations: " .. specs .. "; Proc regions: " .. regions .. ".",
-        incoming.options and "Options position and title animation are included." or "Options shell settings are unchanged.",
+        incoming.options and (incoming.options.minimap
+            and "Options position, title animation and minimap icon settings are included."
+            or "Options position and title animation are included; minimap icon settings are unchanged.")
+            or "Options shell settings are unchanged.",
         restore and "This restores the complete backup; settings added after that backup are removed."
             or "Only included scopes are replaced. Other classes, specializations and regions are unchanged.",
         "Included regions without RGB use the current class color, clearing any old override.",
@@ -509,6 +533,10 @@ local function CandidateSnapshot(self, candidate)
     return Snapshot(facade, "all")
 end
 local function ApplyTransferredSettings(self, before, after, context, wasPreview)
+    -- Synchronize even when imported scalar values are equal: atomic commit
+    -- may have installed a fresh minimap table. The launcher retains its bound
+    -- table, copies the validated preferences into it, and restores that ref.
+    if self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
     local oldClass, newClass = before.classes[context.class] or {}, after.classes[context.class] or {}
     local oldMobility, newMobility = oldClass.mobility or {}, newClass.mobility or {}
     local spec = context.spec and tostring(context.spec)
@@ -555,10 +583,8 @@ local function ApplyTransferredSettings(self, before, after, context, wasPreview
             end
         end
     end
-    if not Equal(before.options, after.options) then
-        if self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
-        if self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
-    end
+    if not Equal(before.options.position, after.options.position) and self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
+    if before.options.animatedTitle ~= after.options.animatedTitle and self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
     -- Functional enable changes can activate/deactivate a module. Appearance
     -- changes alone never query cooldowns, rebuild filters or bind durations.
     if mobilityEnabled then

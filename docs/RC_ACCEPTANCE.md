@@ -1,6 +1,6 @@
-# 1.0.0-rc.2 acceptance and release checklist
+# 1.0.0-rc.3 acceptance and release checklist
 
-This is a release candidate based on RC1 (`9c29f62684c54adc40618f4a215bab28a9d84edc`). RC2 integrates the Options drag handoff; [DRAG_RC2.md](DRAG_RC2.md) contains its focused regression steps and evidence boundary. No formal release, main merge or CurseForge upload is authorized by this delivery. Automated tests and pinned API declarations cannot establish actual client dragging, encoding, rendering, taint or combat behavior.
+This candidate is based on RC2 (`b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`). RC3 adds brand/launcher entries and minimap shell preferences; [LAUNCHER_RC3.md](LAUNCHER_RC3.md) gives its focused acceptance matrix and manager limitations. RC2's drag handoff remains intact; [DRAG_RC2.md](DRAG_RC2.md) contains its regression steps and evidence boundary. No formal release, main merge or CurseForge upload is authorized by this delivery. Automated tests and pinned API declarations cannot establish actual client dragging, encoding, rendering, taint or combat behavior.
 
 ## Final client regression
 
@@ -33,4 +33,5 @@ Record native empty-table JSON round trips (the protocol accepts both empty `{}`
 - [ ] Review supported interface/build metadata against the actual target client.
 - [ ] Confirm distribution rights and choose an explicit project license; `NOTICE.md` records current provenance and does not invent a license grant.
 - [ ] Review the CurseForge description draft and current coverage/known boundaries.
+- [ ] Complete RC3's launcher/collector checks separately for each manager version and verify the embedded-library attribution/relationship requirements before any actual publisher upload.
 - [ ] User separately authorizes main merge, formal release/tag and any upload. None is performed by this RC task.

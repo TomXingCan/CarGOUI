@@ -2,7 +2,8 @@
 ## Title: CarGOUI - Data (internal)
 ## Notes: Automatically loaded class adapter definitions. Only the current class is activated.
 ## Author: CarGOUI
-## Version: 1.0.0-rc.2
+## Version: 1.0.0-rc.3
+## IconTexture: Interface\AddOns\CarGOUI\Media\Branding\emblem.tga
 ## Dependencies: CarGOUI
 ## LoadOnDemand: 1
 
