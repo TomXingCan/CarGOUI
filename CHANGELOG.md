@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.0-rc.2
+
+- Integrate the RC1 drag handoff: start native Options movement from the current mouse position and keep ownership of the initiating background surface.
+- End active drags safely on outside release, source hiding, combat/close and viewport/world boundaries; remove temporary callbacks after each session.
+- Capture and validate the visible center before stopping native movement, and keep SavedVariables as the Options position owner.
+- Preserve the 204 RC1 regression groups and add the handoff's 11 drag groups, plus focused integration regressions. Gameplay monitoring and settings-transfer logic are unchanged.
+- Native pickup-jump resolution remains pending real-client verification. No formal Release, main merge or CurseForge upload.
+
 ## 1.0.0-rc.1
 
 - Remove the dragging hint and Themes category; keep whole-window background dragging and automatic faction/spec themes.

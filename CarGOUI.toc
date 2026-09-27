@@ -2,7 +2,7 @@
 ## Title: CarGOUI
 ## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 1.0.0-rc.1
+## Version: 1.0.0-rc.2
 ## SavedVariables: CarGOUIDB
 
 Core\Addon.lua

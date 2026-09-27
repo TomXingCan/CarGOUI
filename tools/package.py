@@ -9,6 +9,7 @@ import argparse
 import hashlib
 import json
 import os
+import platform
 import subprocess
 import sys
 import zipfile
@@ -94,8 +95,9 @@ def main():
         archive.extractall(extraction)
     lines = ["Version: " + version, "Commit: " + commit, "Tree: " + tree,
              "Archive: " + target.name, "SHA256: " + digest,
+             "Environment: " + platform.platform() + "; Python " + sys.version.split()[0],
              "Verification: repository test tools against extracted final runtime-only installer.",
-             "Native WoW C_EncodingUtil/client combat/visual/performance acceptance: not executed."]
+             "Native WoW C_EncodingUtil/dragging/client combat/visual/performance acceptance: not executed."]
     failed = False
     tests = [repo / "tests/run_tests.py"] + sorted((repo / "tests").glob("check_*_static.py"))
     for test in tests:

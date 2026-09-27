@@ -1,6 +1,6 @@
 # CarGOUI notices
 
-CarGOUI 1.0.0-rc.1 is a release candidate supplied for evaluation and final regression testing. It is not an official Blizzard product or certification.
+CarGOUI 1.0.0-rc.2 is a release candidate supplied for evaluation and final regression testing. It is not an official Blizzard product or certification.
 
 The source baseline does not contain an open-source LICENSE file. This notice does not grant a new license or change ownership. A distribution license must be selected by the project owner before a formal public release; the RC does not silently assign one.
 

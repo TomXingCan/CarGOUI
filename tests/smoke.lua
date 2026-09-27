@@ -7211,5 +7211,369 @@ test("RC configuration metadata exactly matches class-spec region ownership with
 end)
 end
 
+-- Append-only regression groups for the RC.1 drag hotfix.
+-- Cursor-origin/Stop-shift injections are fault models, NOT observations of
+-- Blizzard's C++ mover. The ordinary rc.1 204 tests remain unchanged.
+do
+local function near(actual, expected, label)
+    truthy(type(actual) == "number" and math.abs(actual - expected) < 0.000001,
+        (label or "coordinate") .. ": expected " .. tostring(expected) .. ", got " .. tostring(actual))
+end
+local function begin(surface)
+    surface:GetScript("OnDragStart")(surface, "LeftButton")
+end
+local function stop(surface)
+    surface:GetScript("OnDragStop")(surface)
+end
+local function instrument(panel)
+    local nativeStart, nativeStop = panel.StartMoving, panel.StopMovingOrSizing
+    local calls = { starts = 0, stops = 0 }
+    function panel:StartMoving(always)
+        calls.starts, calls.always = calls.starts + 1, always
+        return nativeStart(self, always)
+    end
+    function panel:StopMovingOrSizing()
+        calls.stops = calls.stops + 1
+        return nativeStop(self)
+    end
+    function panel:SetUserPlaced(value) self.userPlaced = value end
+    return calls
+end
+
+test("DRAG FIX every initiating surface requests the current native mouse origin without reanchoring at pickup", function()
+    local env, addon, state = login()
+    local panel = options(addon)
+    local calls = instrument(panel)
+    local surfaces = { panel, panel.header, panel.pages.general, panel.appearanceScroll.scrollChild }
+    for _, surface in ipairs(surfaces) do
+        local x, y = panel:GetCenter()
+        begin(surface)
+        equal(calls.always, true, "explicit alwaysStartFromMouse instead of stale root press origin")
+        equal(panel.dragSource, surface, "source retained separately from moved root")
+        equal(state.movingFrame, panel, "native mover only owns Options root")
+        local nx, ny = panel:GetCenter()
+        near(nx, x, "no Lua pickup reanchor X"); near(ny, y, "no Lua pickup reanchor Y")
+        stop(surface)
+        equal(panel.dragSource, nil, "source released")
+        equal(panel.userPlaced, false, "one SavedVariables owner instead of a native saved position")
+    end
+    for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil, "no polling added") end
+end)
+
+test("DRAG FIX global mouse-up outside the initiating surface ends exactly one session", function()
+    local _, addon, state = login()
+    local panel = options(addon); local calls = instrument(panel)
+    local old = copy(addon.db.options.position)
+    begin(panel.pages.general)
+    equal(addon:GetEventDiagnostics().perEvent.GLOBAL_MOUSE_UP, 1, "one temporary global release callback")
+    panel.mockCenter = { 1130, 450 }
+    state:fire("GLOBAL_MOUSE_UP", "RightButton")
+    truthy(panel.dragging, "another button cannot end left drag")
+    state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+    truthy(not panel.dragging and not panel.moving, "outside release unlatches mover")
+    equal(calls.stops, 1, "one stop")
+    near(addon.db.options.position.x, 170); near(addon.db.options.position.y, -90)
+    state:fire("GLOBAL_MOUSE_UP", "LeftButton"); stop(panel.pages.general)
+    equal(calls.stops, 1, "later duplicated local/global releases are no-ops")
+    equal(addon:GetEventDiagnostics().perEvent.GLOBAL_MOUSE_UP, nil, "idle callback removed")
+end)
+
+test("DRAG FIX a fresh global left press releases a lost-up session before the next drag", function()
+    local _, addon, state = login()
+    local panel = options(addon); local calls = instrument(panel)
+    begin(panel.header)
+    state:fire("GLOBAL_MOUSE_DOWN", "LeftButton")
+    truthy(not panel.dragging and state.movingFrame == nil, "stale prior capture cleared without reload")
+    begin(panel.pages.general)
+    equal(calls.starts, 2, "new source starts fresh")
+    equal(panel.dragSource, panel.pages.general)
+    state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+end)
+
+test("DRAG FIX unrelated child hide and delayed child STOP do not end a different source drag", function()
+    local _, addon, state = login()
+    local panel = options(addon)
+    panel.pages.preview:Show()
+    begin(panel.header)
+    panel.pages.preview:Hide()
+    truthy(panel.dragging and state.movingFrame == panel, "unrelated OnHide cannot save/reanchor moving parent")
+    stop(panel.header)
+    begin(panel.pages.general)
+    stop(panel.header)
+    truthy(panel.dragging, "late previous-source STOP cannot cancel current drag")
+    panel.pages.general:Hide()
+    truthy(not panel.dragging and state.movingFrame == nil, "actual source hide does end session")
+end)
+
+test("DRAG FIX source ancestor hiding and Options combat closure release ownership without disturbing reminders", function()
+    local _, addon, state = login()
+    local panel = options(addon)
+    addon:OpenAppearance("mobility")
+    begin(panel.appearanceScroll.scrollChild)
+    panel.appearanceScroll:Hide()
+    truthy(not panel.dragging and not panel.moving, "hidden source ancestor ends dragging")
+    panel.appearanceScroll:Show()
+    begin(panel.header)
+    state.inCombat = true; state:fire("PLAYER_REGEN_DISABLED")
+    truthy(not panel.dragging and not panel:IsShown() and not panel.moving, "combat ends root session")
+    equal(panel.dragSource, nil); equal(addon:GetEventDiagnostics().perEvent.GLOBAL_MOUSE_UP, nil)
+    equal(addon.pendingOptionsOpen, nil, "drag cleanup does not enqueue reopening")
+    truthy(#state.errors == 0, "no event error")
+end)
+
+test("DRAG FIX stopping is reentrant-safe and persists visual center before native anchor conversion", function()
+    local _, addon = login()
+    local panel = options(addon); local native = panel.StopMovingOrSizing
+    local calls = 0
+    function panel:StopMovingOrSizing()
+        calls = calls + 1
+        -- Fault injection: native anchor conversion changes reported center.
+        -- Also simulate an OnDragStop callback re-entering the save function.
+        self.mockCenter = { 1700, 200 }
+        if calls == 1 then addon:SaveOptionsPosition() end
+        return native(self)
+    end
+    begin(panel.header); panel.mockCenter = { 1085, 495 }
+    stop(panel.header)
+    equal(calls, 1, "ownership cleared before native STOP reentry")
+    near(addon.db.options.position.x, 125, "save before anchor-rewrite X")
+    near(addon.db.options.position.y, -45, "save before anchor-rewrite Y")
+end)
+
+test("DRAG FIX invalid transient geometry releases capture without writing corrupt SavedVariables", function()
+    local _, addon, state = login()
+    local panel = options(addon); local before = copy(addon.db)
+    begin(panel.header)
+    panel.mockCenter = { 0 / 0, math.huge }
+    stop(panel.header)
+    same(addon.db, before, "invalid centers do not persist")
+    truthy(not panel.dragging and not panel.moving, "invalid geometry cannot leave a drag latched")
+    equal(addon:GetEventDiagnostics().perEvent.GLOBAL_MOUSE_UP, nil)
+    equal(panel.dragSource, nil)
+    truthy(#state.errors == 0)
+end)
+
+test("DRAG FIX scale matrix uses root visual center and never the source child coordinates", function()
+    for _, parentScale in ipairs({0.533333, 0.71, 1, 1.25}) do
+        for _, panelScale in ipairs({0.65, 0.85, 1}) do
+            local env, addon, state = login()
+            env.UIParent.GetEffectiveScale = function() return parentScale end
+            local panel = options(addon)
+            panel:SetScale(panelScale)
+            panel.header:SetScale(0.6)
+            for i = 1, 20 do
+                begin(panel.header)
+                local ox, oy = i * 7 - 130, 100 - i * 4
+                panel.mockCenter = { (960 + ox) / panelScale, (540 + oy) / panelScale }
+                stop(panel.header)
+                near(addon.db.options.position.x, ox, "UIParent-relative x")
+                near(addon.db.options.position.y, oy, "UIParent-relative y")
+                panel.mockCenter = nil
+                local x,y = panel:GetCenter()
+                near(x * panelScale, 960 + ox); near(y * panelScale, 540 + oy)
+            end
+            equal(#state.errors, 0)
+        end
+    end
+end)
+
+test("DRAG FIX viewport or world transition ends a session and keeps unrelated subscriptions", function()
+    for _, event in ipairs({"UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEAVING_WORLD"}) do
+        local _, addon, state = login()
+        local panel = options(addon)
+        local other=0
+        local function foreign() other=other+1 end
+        addon:RegisterEvent(event,foreign)
+        begin(panel.header)
+        state:fire(event)
+        truthy(not panel.dragging and state.movingFrame == nil, event .. " ends active dragging")
+        equal(other,1,"other module event callback preserved")
+        equal(addon:GetEventDiagnostics().perEvent.GLOBAL_MOUSE_UP,nil)
+        state:fire(event); equal(other,2,"own-only unsubscribe")
+    end
+end)
+
+test("DRAG FIX repeated source switching leaves no listeners timers frames or native work running", function()
+    local _, addon, state = login()
+    local panel = options(addon)
+    local calls=instrument(panel)
+    local baseline=copy(addon:GetEventDiagnostics())
+    local frames=#state.frames
+    local reads,slots,bindings=state.realReads,#state.auraSlots,#state.bindings
+    for i=1,250 do
+        local source=i%2==0 and panel.header or panel.pages.general
+        begin(source); begin(source)
+        equal(addon:GetEventDiagnostics().perEvent.GLOBAL_MOUSE_UP,1,"coalesced registration")
+        state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+        same(addon:GetEventDiagnostics(), baseline,"idle event inventory restored")
+        equal(panel.dragSource,nil); truthy(not panel.dragging)
+    end
+    equal(calls.starts,250,"one native start per session")
+    equal(calls.stops,250,"one native stop per session")
+    equal(#state.frames,frames); equal(state.realReads,reads)
+    equal(#state.auraSlots,slots); equal(#state.bindings,bindings)
+    equal(state:activeTimers(),0,"no drag timer survives")
+    for _,frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"),nil) end
+end)
+test("DRAG FIX a native synchronous stop during pickup does not leave boundary listeners registered", function()
+    local _, addon, state = login()
+    local panel = options(addon)
+    local baseline = copy(addon:GetEventDiagnostics())
+    local native = panel.StartMoving
+    function panel:StartMoving(always)
+        native(self, always)
+        addon:SaveOptionsPosition() -- Fault-injected native reentrancy, not a live observation.
+    end
+    begin(panel.header)
+    truthy(not panel.dragging and not panel.moving)
+    same(addon:GetEventDiagnostics(), baseline, "finished pickup cannot register stale listeners afterward")
+    equal(#state.errors, 0)
+end)
+
+end
+
+test("RC2 drag cleanup preserves foreign global callbacks and ignores unrelated or opaque mouse buttons", function()
+    local _, addon, state = login()
+    local panel = options(addon)
+    local events = { "GLOBAL_MOUSE_UP", "GLOBAL_MOUSE_DOWN", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEAVING_WORLD" }
+    local calls = {}
+    local function foreign(_, event) calls[event] = (calls[event] or 0) + 1 end
+    for _, event in ipairs(events) do addon:RegisterEvent(event, foreign) end
+    local baseline = copy(addon:GetEventDiagnostics())
+    panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
+    for _, event in ipairs(events) do equal(addon:GetEventDiagnostics().perEvent[event], 2, "drag adds only its own callback") end
+    for _, event in ipairs({ "GLOBAL_MOUSE_UP", "GLOBAL_MOUSE_DOWN" }) do
+        for _, button in ipairs({ "RightButton", "MiddleButton", secret("LeftButton") }) do
+            state:fire(event, button)
+            truthy(panel.dragging and state.movingFrame == panel, "unrelated/opaque button cannot release left drag")
+        end
+    end
+    state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+    same(addon:GetEventDiagnostics(), baseline, "release removes only owned callbacks from all boundary events")
+    equal(calls.GLOBAL_MOUSE_UP, 4, "foreign release callback sees every dispatched event")
+    for _, event in ipairs(events) do
+        local prior = calls[event] or 0
+        state:fire(event, "LeftButton")
+        equal(calls[event], prior + 1, "foreign callback remains live after drag release")
+    end
+    equal(#state.errors, 0, "no restricted button comparison or event ownership error")
+end)
+
+test("RC2 unavailable opaque or rejected drag geometry always releases capture without saving or poisoning the next drag", function()
+    local cases = {
+        { "missing center", center = function() return nil, nil end },
+        { "opaque center", center = function() return secret(123), secret(456) end },
+        { "non-numeric center", center = function() return "960", 540 end },
+        { "zero panel effective scale", scale = 0 },
+        { "negative panel effective scale", scale = -1 },
+        { "opaque panel effective scale", scale = secret(1) },
+        { "nonfinite panel effective scale", scale = math.huge },
+        { "zero parent effective scale", parentScale = 0 },
+        { "opaque parent effective scale", parentScale = secret(1) },
+        { "coordinates rejected by setting range", center = function() return 1e6, 540 end },
+    }
+    for _, case in ipairs(cases) do
+        local env, addon, state = login()
+        local panel = options(addon)
+        local before, baseline = copy(addon.db), copy(addon:GetEventDiagnostics())
+        local center, scale, parentScale = panel.GetCenter, panel.GetEffectiveScale, env.UIParent.GetEffectiveScale
+        panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
+        panel.GetCenter = case.center or function() return 1080, 500 end
+        if case.scale ~= nil then panel.GetEffectiveScale = function() return case.scale end end
+        if case.parentScale ~= nil then
+            -- Model each native getter's returned value directly. Do not make
+            -- the Lua mock calculate the child's scale from an opaque parent.
+            panel.GetEffectiveScale = function() return 1 end
+            env.UIParent.GetEffectiveScale = function() return case.parentScale end
+        end
+        state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+        same(addon.db, before, case[1] .. " leaves stored configuration unchanged")
+        truthy(not panel.dragging and not panel.moving and not state.movingFrame, case[1] .. " releases native movement")
+        equal(panel.dragSource, nil, case[1] .. " releases source ownership")
+        same(addon:GetEventDiagnostics(), baseline, case[1] .. " leaves no boundary listeners")
+        panel.GetCenter, panel.GetEffectiveScale, env.UIParent.GetEffectiveScale = center, scale, parentScale
+        panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
+        panel.mockCenter = { 1080, 500 }; state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+        equal(addon.db.options.position.x, 120, "next normal drag recovers without reload")
+        equal(addon.db.options.position.y, -40, "next normal drag does not inherit invalid geometry")
+        equal(#state.errors, 0, case[1] .. " is safely handled")
+    end
+end)
+
+test("RC2 global drag releases save only Options position while live native timers and opaque gates continue", function()
+    local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2, chargeStart = 95,
+        chargeDuration = 20, cooldownStart = 100, cooldownDuration = 20,
+        secretCharges = true, secretDuration = true }, { proc = {} })
+    putAura(state, 48108, 19, 1, true); putAura(state, 375240, 11, 1, true)
+    local panel = options(addon)
+    local config, reads, native, frames = copy(addon.db.classes), copy(state.spellReads), {}, {}
+    local slots, bindings = #state.auraSlots, #state.bindings
+    for _, slot in ipairs(state.auraSlots) do native[slot] = { slot.nativeBinding, slot.nativeBinding and slot.nativeBinding.duration } end
+    for _, pool in pairs(addon.reminderFrames) do for _, frame in pairs(pool) do
+        frames[frame] = { alpha = frame.alpha, alphaWrites = frame.alphaWrites,
+            duration = frame.durationBinding and frame.durationBinding.duration,
+            durationWrites = frame.durationBinding and frame.durationBinding.durationWrites }
+    end end
+    for _, method in ipairs({ "ConfigureMobility", "ConfigureProc", "ConfigureFreeMove", "ApplySettings", "RefreshMobility" }) do
+        addon[method] = function() error("global drag release cannot reconfigure or query gameplay: " .. method) end
+    end
+    for index, source in ipairs({ panel.header, panel.pages.general, panel }) do
+        source:GetScript("OnDragStart")(source, "LeftButton")
+        panel.mockCenter = { 960 + index * 24, 540 - index * 12 }
+        state:fire("GLOBAL_MOUSE_UP", "LeftButton")
+        equal(addon.db.options.position.x, index * 24, "global release saves actual shell offset")
+        equal(addon.db.options.position.y, -index * 12, "global release saves actual shell offset")
+    end
+    same(addon.db.classes, config, "global release preserves every reminder configuration")
+    same(state.spellReads, reads, "global release never queries protected spell state")
+    equal(#state.auraSlots, slots); equal(#state.bindings, bindings)
+    for frame, prior in pairs(frames) do
+        equal(frame.alpha, prior.alpha, "native opaque gate remains bound")
+        equal(frame.alphaWrites, prior.alphaWrites, "release does not overwrite visibility")
+        if frame.durationBinding then
+            equal(frame.durationBinding.duration, prior.duration, "native recovery timer object retained")
+            equal(frame.durationBinding.durationWrites, prior.durationWrites, "release never rebinds recovery duration")
+        end
+    end
+    for slot, prior in pairs(native) do
+        equal(slot.nativeBinding, prior[1], "native Proc/Free move binding retained")
+        if slot.nativeBinding then equal(slot.nativeBinding.duration, prior[2], "native Aura duration retained") end
+    end
+    state:advance(3)
+    equal(nativeText(addon), "No Shimmer\n12.0", "real Mobility timer continues from original recovery")
+    equal(procText(addon, state, "mage_fire_hot_streak_left"), "16.0", "real Proc timer continues from original aura")
+    equal(procText(addon, state, "free_move_mage"), "Free move", "real Time Spiral receiver remains active")
+    equal(#state.errors, 0, "no gameplay tripwire was reached")
+end)
+
+test("RC2 Options disables native position persistence at creation and restores only saved shell coordinates after reload", function()
+    local env, addon = login()
+    local create = env.CreateFrame
+    local calls = {}
+    env.CreateFrame = function(kind, name, ...)
+        local frame = create(kind, name, ...)
+        if name == "CarGOUIOptionsFrame" then
+            function frame:SetDontSavePosition(value) calls.noSave = value end
+            function frame:SetUserPlaced(value) calls.userPlaced = value; calls.userWrites = (calls.userWrites or 0) + 1 end
+        end
+        return frame
+    end
+    local panel = options(addon)
+    equal(calls.noSave, true, "native layout-cache persistence disabled before first use")
+    equal(calls.userPlaced, false, "new root does not inherit user-placed ownership")
+    equal(calls.userWrites, 1, "creation initializes native persistence ownership once")
+    panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
+    panel.mockCenter = { 1100, 465 }
+    panel.header:GetScript("OnDragStop")(panel.header)
+    equal(calls.userPlaced, false, "release clears native user-placed state")
+    equal(calls.userWrites, 2, "release resets native ownership once")
+    local _, reloaded = login(copy(addon.db))
+    local restored = options(reloaded)
+    equal(reloaded.db.options.position.x, 140); equal(reloaded.db.options.position.y, -75)
+    local x, y = restored:GetCenter()
+    equal(x, 1100, "reload restores saved visual center X")
+    equal(y, 465, "reload restores saved visual center Y")
+end)
+
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")

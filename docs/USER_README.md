@@ -1,6 +1,8 @@
-# CarGOUI 1.0.0-rc.1
+# CarGOUI 1.0.0-rc.2
 
 Release candidate for WoW Retail 12.1 / Interface 120100. Existing ability/API source audit targets build 69933. Final client acceptance is still required.
+
+RC2 improves Options pickup and drag-session cleanup. Alternate grabs from different blank surfaces and release outside the window when testing. The reported native pickup jump has not been reproduced in the development environment; this remains a candidate awaiting in-game confirmation.
 
 ## Install or upgrade
 

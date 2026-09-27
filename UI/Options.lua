@@ -1,13 +1,61 @@
 local _, addon = ...
 local L = addon.L
 
--- Attach only to existing non-interactive frames. Native hit testing leaves
--- buttons, edits, sliders, menus and scrollbars in charge of their own input.
-function addon:BeginOptionsDrag(button)
+-- One native movement session belongs to the actual empty surface that received
+-- OnDragStart, while only the Options root is ever moved. Retail's explicit
+-- current-mouse option avoids using a stale root-frame mouse-down origin when
+-- a child (page/header/scroll content) forwards the drag. No polling is needed.
+local dragBoundaryEvents = { "GLOBAL_MOUSE_UP", "GLOBAL_MOUSE_DOWN",
+    "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "PLAYER_LEAVING_WORLD" }
+
+local function PublicNumber(value)
+    return not (issecretvalue and issecretvalue(value)) and type(value) == "number"
+        and value == value and value > -math.huge and value < math.huge
+end
+
+local function OnOptionsDragBoundary(self, event, button)
+    if event == "GLOBAL_MOUSE_UP" or event == "GLOBAL_MOUSE_DOWN" then
+        if (issecretvalue and issecretvalue(button)) or button ~= "LeftButton" then return end
+        -- UP works even outside the initiating child. A new DOWN also releases
+        -- an obsolete session if a prior release was lost during focus loss.
+    end
+    self:SaveOptionsPosition()
+    if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
+        local panel = self.optionsFrame
+        if panel and panel:IsShown() then
+            panel:SetScale(math.min(1, UIParent:GetWidth() / 752, UIParent:GetHeight() / 592))
+            self:ApplyOptionsPosition(true)
+        end
+    end
+end
+
+local function WatchOptionsDrag(self, enabled)
+    local method = enabled and self.RegisterEvent or self.UnregisterEvent
+    for _, event in ipairs(dragBoundaryEvents) do method(self, event, OnOptionsDragBoundary) end
+end
+
+function addon:BeginOptionsDrag(button, surface)
     local panel = self.optionsFrame
     if InCombatLockdown() or button ~= "LeftButton" or not panel or not panel:IsShown() or panel.dragging then return end
-    panel.dragging = true
-    panel:StartMoving()
+    surface = surface or panel
+    if not surface.optionsDragSurface then return end
+    panel.dragging, panel.dragSource = true, surface
+    -- Do not SetPoint, restore saved position or change scale at pickup.
+    panel:StartMoving(true)
+    if panel.dragging and panel.dragSource == surface then WatchOptionsDrag(self, true) end
+end
+
+local function OwnsDragSurface(panel, surface, ancestorAllowed)
+    if not panel or not panel.dragging then return false end
+    if surface == panel or surface == panel.dragSource then return true end
+    if ancestorAllowed then
+        local current = panel.dragSource
+        while current and current ~= panel do
+            current = current:GetParent()
+            if current == surface then return true end
+        end
+    end
+    return false
 end
 
 function addon:RegisterOptionsDragSurface(surface)
@@ -15,12 +63,21 @@ function addon:RegisterOptionsDragSurface(surface)
     surface.optionsDragSurface = true
     surface:EnableMouse(true)
     surface:RegisterForDrag("LeftButton")
-    surface:SetScript("OnDragStart", function(_, button) addon:BeginOptionsDrag(button) end)
-    surface:SetScript("OnDragStop", function() addon:SaveOptionsPosition() end)
-    surface:HookScript("OnMouseUp", function(_, button)
-        if button == "LeftButton" then addon:SaveOptionsPosition() end
+    surface:SetScript("OnDragStart", function(frame, button) addon:BeginOptionsDrag(button, frame) end)
+    surface:SetScript("OnDragStop", function(frame)
+        local panel = addon.optionsFrame
+        -- Late STOP from a different child must not cancel a new session.
+        if panel and panel.dragSource == frame then addon:SaveOptionsPosition() end
     end)
-    surface:HookScript("OnHide", function() addon:SaveOptionsPosition() end)
+    surface:HookScript("OnMouseUp", function(frame, button)
+        if button == "LeftButton" and OwnsDragSurface(addon.optionsFrame, frame, false) then
+            addon:SaveOptionsPosition()
+        end
+    end)
+    surface:HookScript("OnHide", function(frame)
+        -- Hiding an unrelated page/dialog is not the end of this drag.
+        if OwnsDragSurface(addon.optionsFrame, frame, true) then addon:SaveOptionsPosition() end
+    end)
 end
 
 local function ThemeControl(control, kind)
@@ -542,14 +599,26 @@ end
 function addon:SaveOptionsPosition()
     local panel = self.optionsFrame
     if not panel or not panel.dragging then return end
-    panel:StopMovingOrSizing()
-    panel.dragging = false
+    -- Capture the visual center before native Stop changes the anchor basis.
+    -- All persistence is in UIParent units, independent of the initiating child.
     local x, y = panel:GetCenter()
     local px, py = UIParent:GetCenter()
-    if not x or not y or not px or not py then return end
-    local factor = panel:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    local frameScale, parentScale = panel:GetEffectiveScale(), UIParent:GetEffectiveScale()
+    -- Clear ownership first: native STOP/OnHide may invoke another release hook.
+    panel.dragging, panel.dragSource = false, nil
+    WatchOptionsDrag(self, false)
+    panel:StopMovingOrSizing()
+    if panel.SetUserPlaced then panel:SetUserPlaced(false) end
     panel.appliedX = nil
-    self:UpdateSettings({ options = { position = { x = x * factor - px, y = y * factor - py } } })
+    if not (PublicNumber(x) and PublicNumber(y) and PublicNumber(px) and PublicNumber(py)
+        and PublicNumber(frameScale) and frameScale > 0
+        and PublicNumber(parentScale) and parentScale > 0) then
+        self:ApplyOptionsPosition(true)
+        return
+    end
+    local factor = frameScale / parentScale
+    local ok = self:UpdateSettings({ options = { position = { x = x * factor - px, y = y * factor - py } } })
+    if not ok then self:ApplyOptionsPosition(true) end
 end
 
 function addon:SelectOptionsCategory(key)
@@ -654,6 +723,9 @@ function addon:CreateOptions()
     panel:SetFrameStrata("DIALOG")
     panel:SetClampedToScreen(true)
     panel:SetMovable(true)
+    -- SavedVariables is the sole persistence owner, not the native layout cache.
+    if panel.SetDontSavePosition then panel:SetDontSavePosition(true) end
+    if panel.SetUserPlaced then panel:SetUserPlaced(false) end
     panel:EnableMouse(true)
     Backdrop(panel, 0.045, 0.06, 0.075)
     panel.controls, panel.pages, panel.categories = {}, {}, {}

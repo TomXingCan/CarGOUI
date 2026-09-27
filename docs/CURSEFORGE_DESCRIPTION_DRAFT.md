@@ -11,7 +11,7 @@ CarGOUI is a Retail reminder addon with a standalone `/cui` settings window.
 
 Install both **CarGOUI** and **CarGOUI_Data**. The internal Data addon loads automatically. Existing SavedVariables should be kept when upgrading.
 
-This **1.0.0-rc.1** candidate retains the admitted Proc implementation for Mage and the other reviewed classes. Coverage is based on eligible finite effects with native graphics; it does not mean every specialization has a timer. Exact mappings and limitations are listed in the source repository's Proc and Mobility coverage documents.
+This **1.0.0-rc.2** candidate adds Options drag-session safeguards and retains the admitted Proc implementation for Mage and the other reviewed classes. Native pickup behavior remains pending client regression. Coverage is based on eligible finite effects with native graphics; it does not mean every specialization has a timer. Exact mappings and limitations are listed in the source repository's Proc and Mobility coverage documents.
 
 Target: Retail 12.1 / Interface 120100; existing source audits pin build 69933. This is not a claim that every class/talent has been tested in a live client, that resource use is zero, or that Blizzard has certified the addon. Final native-codec and gameplay acceptance remains pending. Preview samples are clearly marked and isolated from live effects.
 

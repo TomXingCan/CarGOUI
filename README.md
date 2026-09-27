@@ -1,6 +1,6 @@
-# CarGOUI 1.0.0-rc.1
+# CarGOUI 1.0.0-rc.2
 
-当前版本 **1.0.0-rc.1**，基于 alpha.16 提交 `60ae62425dbe6944c3a15325decb7a79ac7bf2b7`。本轮删除拖动提示和 Themes 页面，保留实际拖动与全自动主题；启用设置导入/导出和最近一次导入前配置恢复。保留全部既有技能映射、Free move 独立坐标、Options 战斗锁、字体范围、区域颜色及存档。目标 WoW Retail 12.1.0（Interface 120100），既有数据/API 核查固定 build 69933。
+当前版本 **1.0.0-rc.2**，基于 RC1 提交 `9c29f62684c54adc40618f4a215bab28a9d84edc`。本轮整合 Options 拖动修复交接包，处理起拖入口、来源归属、窗口外释放及结束重入；起拖跳位是否在原生客户端消失仍待实测。保留 RC1 的界面精简、设置导入导出和备份恢复，以及全部既有技能映射、Free move 独立坐标、战斗锁、字体范围、区域颜色及存档。目标 WoW Retail 12.1.0（Interface 120100），既有数据/API 核查固定 build 69933。[本轮修复依据与复测步骤](docs/DRAG_RC2.md)。
 
 这是供最终回归的发布候选，不是正式 Release；没有合并 main、公开发布或上传 CurseForge。见 [RC 验收与发布清单](docs/RC_ACCEPTANCE.md)、[配置格式](docs/SETTINGS_TRANSFER_FORMAT.md) 和 [CurseForge 描述草稿](docs/CURSEFORGE_DESCRIPTION_DRAFT.md)。
 
