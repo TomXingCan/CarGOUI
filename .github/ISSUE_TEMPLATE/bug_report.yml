@@ -1,0 +1,96 @@
+name: Bug Report
+description: Report a problem with CarGOUI on WoW Retail.
+title: "[Bug]: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the problem and include enough detail to reproduce it.
+        For a field that does not apply, enter "Not applicable".
+  - type: input
+    id: cargoui-version
+    attributes:
+      label: CarGOUI version
+      placeholder: "For example: 1.0.0"
+    validations:
+      required: true
+  - type: input
+    id: wow-version-build
+    attributes:
+      label: WoW version and build
+      description: Include the WoW Retail version and build number.
+    validations:
+      required: true
+  - type: input
+    id: class
+    attributes:
+      label: Class
+      placeholder: "For example: Mage"
+    validations:
+      required: true
+  - type: input
+    id: specialization
+    attributes:
+      label: Specialization
+      placeholder: "For example: Fire"
+    validations:
+      required: true
+  - type: input
+    id: ability-proc
+    attributes:
+      label: Relevant ability or proc
+      description: Enter the ability or proc name, or "Not applicable".
+    validations:
+      required: true
+  - type: dropdown
+    id: in-combat
+    attributes:
+      label: Did it happen in combat?
+      options:
+        - "Yes"
+        - "No"
+        - "Both in and out of combat"
+        - "Unsure"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction-steps
+    attributes:
+      label: Reproduction steps
+      description: Describe the steps and relevant CarGOUI settings. If it happens intermittently, say how often.
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual-behavior
+    attributes:
+      label: Actual behavior
+      description: What happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: lua-error
+    attributes:
+      label: Lua error, if present
+      description: Paste the full error and stack trace if one appeared.
+      render: text
+    validations:
+      required: false
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots (optional)
+      description: Attach screenshots that help show the problem.
+    validations:
+      required: false

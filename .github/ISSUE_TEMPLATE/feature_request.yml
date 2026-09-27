@@ -1,0 +1,45 @@
+name: Feature Request
+description: Suggest a focused quality-of-life improvement for CarGOUI.
+title: "[Feature]: "
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the player need and how the suggestion fits CarGOUI's focused QoL scope.
+        Suggestions are considered during triage; submitting a request does not guarantee implementation.
+  - type: textarea
+    id: problem-use-case
+    attributes:
+      label: Problem or use case
+      description: What problem are you trying to solve, and when do you encounter it?
+    validations:
+      required: true
+  - type: textarea
+    id: requested-behavior
+    attributes:
+      label: Requested behavior
+      description: Describe what you would like CarGOUI to do.
+    validations:
+      required: true
+  - type: input
+    id: class-specialization
+    attributes:
+      label: Class and specialization (if relevant)
+      description: Include the class and specialization affected by this request.
+    validations:
+      required: false
+  - type: textarea
+    id: qol-scope
+    attributes:
+      label: Fit with CarGOUI's focused QoL scope
+      description: Explain why this belongs in CarGOUI and how it improves everyday play without expanding its scope unnecessarily.
+    validations:
+      required: true
+  - type: textarea
+    id: screenshots-references
+    attributes:
+      label: Screenshots or references (optional)
+      description: Attach screenshots or link relevant examples that explain the request.
+    validations:
+      required: false
