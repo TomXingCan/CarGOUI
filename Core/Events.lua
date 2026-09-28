@@ -10,17 +10,19 @@ function addon:RegisterEvent(event, callback)
 
     local callbacks = listeners[event]
     if not callbacks then
-        eventFrame:RegisterEvent(event)
+        -- Restricted research events may be rejected without throwing.
+        if eventFrame:RegisterEvent(event) == false then return false end
         callbacks = {}
         listeners[event] = callbacks
     end
 
     for i = 1, #callbacks do
         if callbacks[i] == callback then
-            return
+            return true
         end
     end
     callbacks[#callbacks + 1] = callback
+    return true
 end
 
 function addon:UnregisterEvent(event, callback)

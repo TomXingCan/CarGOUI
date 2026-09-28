@@ -41,6 +41,7 @@ Modules\Proc\Runtime.lua
 Modules\Mobility\Runtime.lua
 Modules\Mobility\FreeMove.lua
 Core\Diagnostics.lua
+Research\ClassToolsRawCapture.lua
 UI\Preview.lua
 UI\Branding.lua
 UI\Theme.lua

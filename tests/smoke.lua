@@ -7633,5 +7633,10 @@ assert(loadfile(testRoot .. "/localization_smoke.lua"))(setmetatable({ test = te
     same = same, copy = copy, secret = secret, root = root, login = login, setup = setup,
     options = options, putAura = putAura }, { __index = launcherHarness }))
 
+assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, equal = equal,
+    truthy = truthy, same = same, copy = copy, root = root, metadata = metadata,
+    login = login, mobilityLogin = mobilityLogin, putAura = putAura,
+    nativeText = nativeText, procText = procText })
+
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")
