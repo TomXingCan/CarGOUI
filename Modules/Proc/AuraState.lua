@@ -16,12 +16,19 @@ function addon:CanUseNativeAuraSlots()
     return true
 end
 
+local function NativeCall(self, entry, operation, callback, ...)
+    if entry and entry.kind == "proc" then return self:ProcDiagnosticCall(operation, callback, ...) end
+    return callback(...)
+end
+
 local function DurationTemplate(self)
     if self.nativeAuraDurationTemplate then return self.nativeAuraDurationTemplate end
-    local formatter = C_StringUtil.CreateNumericRuleFormatter()
+    local formatter = self:ProcDiagnosticCall("CreateNumericRuleFormatter", C_StringUtil.CreateNumericRuleFormatter)
+    self:ProcDiagnosticCount("formattersCreated")
     formatter:AddBreakpoint({ threshold = 0, step = 0.1,
         rounding = Enum.NumericRuleFormatRounding.Up, format = "%.1f" })
-    local binding = C_DurationUtil.CreateDurationTextBinding()
+    local binding = self:ProcDiagnosticCall("CreateDurationTextBinding", C_DurationUtil.CreateDurationTextBinding)
+    self:ProcDiagnosticCount("durationTemplatesCreated")
     binding:SetTextFormat("{}", {
         { property = Enum.DurationTextBindingProperty.RemainingDuration, formatter = formatter },
     })
@@ -41,7 +48,11 @@ function Handle:SetEnabled(enabled)
     if self.enabled == enabled then return end
     self.enabled = enabled
     self.container:SetAlpha(enabled and 1 or 0)
-    self.container:SetEnabled(enabled)
+    if self.procOwned then
+        self.owner:ProcDiagnosticAPI(enabled and "RegisterUnitAura" or "UnregisterUnitAura", "requested")
+        self.owner:ProcDiagnosticCall(enabled and "SetEnabledTrue" or "SetEnabledFalse",
+            self.container.SetEnabled, self.container, enabled)
+    else self.container:SetEnabled(enabled) end
     -- Keep the public container and its ancestor wrapper shown. SetEnabled(false)
     -- queues one native dirty pass which clears assignments and disables copied
     -- duration bindings. Hiding it before that pass would suspend the clear.
@@ -55,7 +66,7 @@ end
 -- textOnly is nil for a numeric timer, or a static public string ("Free move").
 -- Update handle.font with the existing reminder style function. The Font object
 -- is ours; the access-restricted native button/FontString are never touched again.
-function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly, entry)
+local function CreateNativeAuraSlot(self, parent, key, auraID, textOnly, entry)
     local supported, reason = self:CanUseNativeAuraSlots()
     if not supported then return nil, reason end
     self.nativeAuraSlots = self.nativeAuraSlots or {}
@@ -72,21 +83,27 @@ function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly, entry)
     end
 
     self.nativeAuraFontCount = (self.nativeAuraFontCount or 0) + 1
-    local font = CreateFont("CarGOUINativeAuraFont" .. self.nativeAuraFontCount)
+    local font = NativeCall(self, entry, "CreateFont", CreateFont, "CarGOUINativeAuraFont" .. self.nativeAuraFontCount)
+    if entry and entry.kind == "proc" then self:ProcDiagnosticCount("fontsCreated") end
     font:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
     self:ApplyReminderColor(font, entry)
 
-    local container = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
+    local container = NativeCall(self, entry, "CreateFrame", CreateFrame, "AuraContainer", nil, parent, "CustomAuraContainerTemplate")
+    if entry and entry.kind == "proc" then
+        self:ProcDiagnosticCount("containersCreated")
+        self:ProcDiagnosticAPI("RegisterProviderSwitch", "requested")
+    end
     container:SetAllPoints(parent)
-    container:SetEnabled(false)
+    NativeCall(self, entry, "SetEnabledFalse", container.SetEnabled, container, false)
     container:SetAlpha(0)
-    container:SetUnit("player")
+    NativeCall(self, entry, "SetUnit", container.SetUnit, container, "player")
     container:Show()
 
     local binding = not textOnly and DurationTemplate(self) or nil
-    container:AddAuraSlot(key, "HELPFUL", {
+    NativeCall(self, entry, "AddAuraSlot", container.AddAuraSlot, container, key, "HELPFUL", {
         candidateFilters = { includeSpellIDs = { [auraID] = true } },
         initializeFrame = function(button)
+            if entry and entry.kind == "proc" then self:ProcDiagnosticCount("nativeInitializeCallbacks") end
             -- Initialization is the sanctioned public callback before Blizzard
             -- applies DenyTaintedAccessWhenAurasAreSecret to this native button.
             button:SetAllPoints(container)
@@ -108,8 +125,12 @@ function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly, entry)
         end,
     })
 
-    local handle = setmetatable({ container = container, font = font,
+    local handle = setmetatable({ container = container, font = font, owner = self, procOwned = entry and entry.kind == "proc",
         key = key, auraID = auraID, textOnly = textOnly, enabled = false }, { __index = Handle })
     self.nativeAuraSlots[key] = handle
     return handle
+end
+
+function addon:CreateNativeAuraSlot(parent, key, auraID, textOnly, entry)
+    return CreateNativeAuraSlot(self, parent, key, auraID, textOnly, entry)
 end

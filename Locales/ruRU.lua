@@ -428,4 +428,5 @@ addon:RegisterLocale("ruRU", {
 
     -- RC2 contextual editors.
     ["Test Mobility"] = "Тест мобильности",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - Снимок текущего сеанса вручную; открывать настройки не требуется.",
 })

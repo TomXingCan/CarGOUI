@@ -428,4 +428,5 @@ addon:RegisterLocale("frFR", {
 
     -- RC2 contextual editors.
     ["Test Mobility"] = "Tester la mobilité",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - Instantané manuel de la session, sans ouvrir les options.",
 })

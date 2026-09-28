@@ -426,4 +426,5 @@ addon:RegisterLocale("enUS", {
 
     -- RC2 contextual editors.
     ["Test Mobility"] = "Test Mobility",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - manual session snapshot; Options is not required.",
 })

@@ -42,7 +42,7 @@ function addon:AnchorProcReminder(frame, entry, style, guideOnly, preview)
     return true
 end
 
-function addon:AcquireAuraReminder(entry, auraID, textOnly)
+local function AcquireAuraReminder(self, entry, auraID, textOnly)
     self:CreateDisplay()
     local pool = self.reminderFrames.nativeAura
     if not pool then pool = {}; self.reminderFrames.nativeAura = pool end
@@ -54,6 +54,7 @@ function addon:AcquireAuraReminder(entry, auraID, textOnly)
     end
     if not frame then
         frame = CreateFrame("Frame", nil, UIParent)
+        if entry.kind == "proc" then self:ProcDiagnosticCount("wrapperFramesCreated") end
         frame:SetFrameStrata("MEDIUM")
         frame:SetFrameLevel(15)
         frame:EnableMouse(false)
@@ -68,6 +69,14 @@ function addon:AcquireAuraReminder(entry, auraID, textOnly)
     frame.reminderEntry, frame.styleKey = entry, self:GetReminderStyleKey(entry)
     self:StyleAuraReminder(frame)
     return frame
+end
+
+function addon:AcquireAuraReminder(entry, auraID, textOnly)
+    if entry.kind == "proc" and not (self.reminderFrames and self.reminderFrames.nativeAura
+        and self.reminderFrames.nativeAura[entry.id]) then
+        return self:ProcDiagnosticCall("nativeConstruct", AcquireAuraReminder, self, entry, auraID, textOnly)
+    end
+    return AcquireAuraReminder(self, entry, auraID, textOnly)
 end
 
 function addon:StyleAuraReminder(frame)

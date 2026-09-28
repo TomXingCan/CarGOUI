@@ -428,4 +428,5 @@ addon:RegisterLocale("zhTW", {
 
     -- RC2 contextual editors.
     ["Test Mobility"] = "測試位移提示",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - 手動取得工作階段快照，無需開啟選項。",
 })

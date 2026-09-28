@@ -38,6 +38,7 @@ Database\SettingsMetadata.lua
 Core\SettingsTransfer.lua
 UI\ReminderStyle.lua
 UI\Display.lua
+Core\ProcDiagnostics.lua
 Modules\Proc\AuraState.lua
 UI\ProcDisplay.lua
 UI\ProcArtwork.lua

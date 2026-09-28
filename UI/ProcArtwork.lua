@@ -47,7 +47,9 @@ function addon:RestoreProcNativeOverlay(overlay)
     local owned = self.procSuppressedOverlays and self.procSuppressedOverlays[overlay]
     if not owned then return true end
     -- Never inspect alpha. Keep failed restores owned so release/Stop retries.
+    self:ProcDiagnosticAPI("RestoreNativeAlpha", "requested")
     local ok = pcall(owned.texture.SetAlpha, owned.texture, 1)
+    self:ProcDiagnosticAPI("RestoreNativeAlpha", ok and "completed" or "failed")
     if ok then self.procSuppressedOverlays[overlay] = nil end
     return ok
 end
@@ -69,9 +71,13 @@ local function Animation(frame, name, kind)
     local group = frame.groups[name]
     if not group then
         group = frame.texture:CreateAnimationGroup()
+        frame.rendererOwner:ProcDiagnosticCount("animationGroupsCreated")
         frame.groups[name] = group
     end
-    if not group.animation then group.animation = group:CreateAnimation(kind) end
+    if not group.animation then
+        group.animation = group:CreateAnimation(kind)
+        frame.rendererOwner:ProcDiagnosticCount("animationsCreated")
+    end
     group.animation:SetOrder(1)
     return group, group.animation
 end
@@ -155,6 +161,7 @@ local function Acquire(self, entry, preview)
     local frame = self[key][entry.id]
     if not frame then
         frame = CreateFrame("Frame", nil, UIParent)
+        self:ProcDiagnosticCount(preview and "previewArtworkFramesCreated" or "artworkFramesCreated")
         self[key][entry.id] = frame
         frame.entryID, frame.previewOwned, frame.rendererOwner = entry.id, preview == true, self
         frame:Hide()
@@ -162,7 +169,10 @@ local function Acquire(self, entry, preview)
     -- Cache each allocation immediately. A later initialization error must
     -- retry the same owned objects rather than leaking one per public SHOW.
     frame:SetFrameStrata("MEDIUM"); frame:SetFrameLevel(9); frame:EnableMouse(false)
-    if not frame.texture then frame.texture = frame:CreateTexture(nil, "ARTWORK") end
+    if not frame.texture then
+        frame.texture = frame:CreateTexture(nil, "ARTWORK")
+        self:ProcDiagnosticCount(preview and "previewArtworkTexturesCreated" or "artworkTexturesCreated")
+    end
     frame.texture:SetAllPoints(frame)
     frame.texture:SetBlendMode("BLEND")
     return frame
@@ -266,7 +276,9 @@ local function RenderRegion(self, entry, visible, opacity)
     self.procSuppressedOverlays = self.procSuppressedOverlays or {}
     if not self.procSuppressedOverlays[matched] then
         self.procSuppressedOverlays[matched] = record
+        self:ProcDiagnosticAPI("SuppressNativeAlpha", "requested")
         record.texture:SetAlpha(0)
+        self:ProcDiagnosticAPI("SuppressNativeAlpha", "completed")
     end
     self.procArtworkDiagnostics[entry.id] = "ready"
 end
@@ -345,7 +357,7 @@ function addon:InstallProcArtworkHooks()
         if not installed.show then hooksecurefunc(root, "ShowOverlay", function(owner, ...)
             local observed = pcall(Observe, self, owner, ...)
             if not observed then self:StopProcArtwork(); self.procArtworkHookReason = "native lifecycle unavailable" end
-        end); installed.show = true end
+        end); installed.show = true; self:ProcDiagnosticCount("artworkHooksInstalled") end
         if not installed.release then hooksecurefunc(root, "ReleaseOverlay", function(_, overlay)
             self:RestoreProcNativeOverlay(overlay)
             local record = self.procNativeOverlays and self.procNativeOverlays[overlay]
@@ -354,7 +366,7 @@ function addon:InstallProcArtworkHooks()
                 local frame = self.procArtworkFrames and self.procArtworkFrames[record.regionID]
                 if frame and frame.nativeOverlay == overlay and not frame.exiting then pcall(HideArtwork, frame) end
             end
-        end); installed.release = true end
+        end); installed.release = true; self:ProcDiagnosticCount("artworkHooksInstalled") end
     end)
     if not ok then
         self:StopProcArtwork()

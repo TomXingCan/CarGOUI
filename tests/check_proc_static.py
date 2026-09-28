@@ -64,11 +64,11 @@ absent(runtime, [r"GetText\s*\(", r"GetStringWidth\s*\(", r"GetStringHeight\s*\(
                  r"GetAlpha\s*\(", r"GetAuraSlotFrame\s*\(", r"GetAuraInstance\s*\("],
        "Proc never reads native aura child visibility, opacity, identity or timer text")
 assert '"CustomAuraContainerTemplate"' in native
-assert '"AuraContainer"' in native and ':SetUnit("player")' in native
-assert 'container:AddAuraSlot(key, "HELPFUL"' in native
+assert '"AuraContainer"' in native and '"SetUnit", container.SetUnit, container, "player"' in native
+assert '"AddAuraSlot", container.AddAuraSlot, container, key, "HELPFUL"' in native
 assert "candidateFilters = { includeSpellIDs = { [auraID] = true } }" in native
 assert "button:SetDurationText(text, { binding = binding })" in native
-assert "text:SetFontObject(font)" in native and "CreateFont(" in native
+assert "text:SetFontObject(font)" in native and '"CreateFont", CreateFont' in native
 assert "self.container:SetEnabled(enabled)" in native
 assert "self.container:Show()" in native
 absent(native, [r"self\.container:Hide\s*\(", r"self\.button", r"handle\.button",

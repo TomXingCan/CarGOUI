@@ -42,22 +42,35 @@ function addon:GetRuntimeLoadDiagnostics()
     return result
 end
 
+local function SampleCall(callback, ...)
+    if type(callback) ~= "function" then return end
+    local ok, value = pcall(callback, ...)
+    if ok then return value end
+end
+
 local function SamplePerformance(moduleNames)
     local lines = {}
-    -- Invoked only by the existing Copy diagnostics / Refresh snapshot actions.
+    -- Invoked only by explicit slash snapshots or Copy / Refresh actions.
     -- No periodic sampling, forced GC or profiling-CVar mutation.
-    if UpdateAddOnMemoryUsage then UpdateAddOnMemoryUsage() end
-    local profiling = C_CVar and C_CVar.GetCVarBool and C_CVar.GetCVarBool("scriptProfile")
+    SampleCall(UpdateAddOnMemoryUsage)
+    local profiling = C_CVar and SampleCall(C_CVar.GetCVarBool, "scriptProfile")
     if issecretvalue and issecretvalue(profiling) then profiling = false end
-    if profiling and UpdateAddOnCPUUsage then UpdateAddOnCPUUsage() end
+    if profiling then SampleCall(UpdateAddOnCPUUsage) end
     for _, name in ipairs(moduleNames) do
-        local memory = GetAddOnMemoryUsage and GetAddOnMemoryUsage(name)
+        local memory = SampleCall(GetAddOnMemoryUsage, name)
         lines[#lines + 1] = name .. " memory (runtime KB): " .. Public(memory)
-        local cpu = profiling and GetAddOnCPUUsage and GetAddOnCPUUsage(name)
+        local cpu = profiling and SampleCall(GetAddOnCPUUsage, name)
         lines[#lines + 1] = name .. " CPU (cumulative ms): "
             .. (profiling and Public(cpu) or "unavailable (scriptProfile disabled)")
     end
     return table.concat(lines, "\n")
+end
+
+local function DiagnosticText(self, callback, fallback)
+    if type(callback) ~= "function" then return fallback end
+    local ok, text = pcall(callback, self)
+    if ok and not (issecretvalue and issecretvalue(text)) and type(text) == "string" then return text end
+    return fallback
 end
 
 function addon:GetLoadDiagnosticsText()
@@ -95,12 +108,69 @@ function addon:GetLoadDiagnosticsText()
             .. "; static-text slots=" .. report.nativeAuraTextSlots
             .. "; addon binding templates=" .. report.nativeAuraTemplateBindings,
         "Aura bindings: copied bindings and their active state are native-private and are not introspected.",
-        "Native aura lifecycle: enabled slots request UNIT_AURA tracking; disabled slots clear on the next native dirty pass.",
-        "Native aura containers retain one static AURA_DATA_PROVIDER_SWITCH listener each; these are not core callbacks or active aura scans.",
-        self.GetProcDiagnostics and self:GetProcDiagnostics() or "Proc: not initialized.",
-        self.GetFreeMoveDiagnostics and self:GetFreeMoveDiagnostics() or "Free move: not initialized.",
+        "Native aura lifecycle: enabled/disabled are addon requests; completion of the native dirty pass is unobservable.",
+        "Native template listener ownership is separate from core callbacks; actual native registration state is unobservable.",
+        DiagnosticText(self, self.GetProcDiagnostics, "Proc detail: unavailable (snapshot failed or not initialized)."),
+        DiagnosticText(self, self.GetFreeMoveDiagnostics, "Free move detail: unavailable (snapshot failed or not initialized)."),
+        DiagnosticText(self, self.GetProcDiagnosticText, "Proc allocation baseline: not initialized."),
         "Preview: " .. report.previewMode .. "; native alpha is not read back.",
         SamplePerformance(names),
         "CPU/memory are explicit client snapshots, not package-size estimates; compare deltas across the acceptance steps.",
     }, "\n")
+end
+
+function addon:GetDiagnosticsSnapshotText()
+    -- The same producer serves the existing Mobility Copy diagnostics dialog
+    -- and the independent slash entry. Opening Options is never a prerequisite.
+    return DiagnosticText(self, self.GetMobilityDiagnostics,
+        "CarGOUI diagnostic snapshot unavailable.")
+end
+
+function addon:PrintDiagnosticsSnapshot()
+    local snapshot = self:GetDiagnosticsSnapshotText()
+    for line in snapshot:gmatch("[^\n]+") do self:Print(line) end
+    return snapshot
+end
+
+function addon:ShowDiagnosticsSnapshot()
+    local dialog = self.diagnosticsSnapshotFrame
+    if not dialog then
+        local C = self.CUI
+        if not C then return self:PrintDiagnosticsSnapshot() end
+        dialog = CreateFrame("Frame", "CarGOUIDiagnosticsSnapshotFrame", UIParent)
+        dialog:Hide(); dialog:SetSize(720, 520); dialog:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+        dialog:SetFrameStrata("DIALOG"); dialog:SetClampedToScreen(true); dialog:EnableMouse(true)
+        dialog.editBoxes, dialog.dropdowns, dialog.cuiPanel = {}, {}, dialog
+        self.DesignSystem.Skin(dialog, "dialog")
+        C.Label(dialog, self.L.mobilityDiagnostics, 20, -16, 680, 24, "GameFontNormalLarge")
+        C.Label(dialog, self.L.diagnosticsHint, 20, -50, 680, 40)
+        local scroll = C.ScrollFrame(dialog, dialog, 20, -100, 668, 350)
+        local edit = C.EditBox(dialog, scroll, 0, 0, 650)
+        edit:SetMultiLine(true); edit:SetMaxLetters(0)
+        if edit.SetMaxBytes then edit:SetMaxBytes(0) end
+        edit:SetHeight(350); edit:SetJustifyH("LEFT"); edit:SetJustifyV("TOP")
+        scroll:SetScrollChild(edit)
+        dialog.editBox, dialog.scroll = edit, scroll
+        edit:SetScript("OnTextChanged", function(self, userInput)
+            if userInput then self:SetText(dialog.snapshot or ""); self:HighlightText() end
+        end)
+        local function Refresh()
+            dialog.snapshot = addon:GetDiagnosticsSnapshotText()
+            local lines = 0
+            for line in dialog.snapshot:gmatch("[^\n]+") do lines = lines + math.max(1, math.ceil(#line / 60)) end
+            edit:SetHeight(math.max(350, (lines + 1) * 20)); edit:SetText(dialog.snapshot)
+            scroll:SetVerticalScroll(0); scroll:RefreshRange()
+            edit:SetFocus(); edit:HighlightText()
+        end
+        dialog.refresh = C.Button(dialog, self.L.diagnosticsRefresh, 20, -470, 180, Refresh)
+        dialog.selectAll = C.Button(dialog, self.L.diagnosticsSelect, 220, -470, 180,
+            function() edit:SetFocus(); edit:HighlightText() end)
+        dialog.close = C.Button(dialog, self.L.close, 580, -470, 120, function() dialog:Hide() end, "ghost")
+        dialog.RefreshSnapshot = Refresh
+        dialog:HookScript("OnHide", function() edit:ClearFocus(); C.StopMotion(dialog) end)
+        UISpecialFrames[#UISpecialFrames + 1] = "CarGOUIDiagnosticsSnapshotFrame"
+        self.diagnosticsSnapshotFrame = dialog
+    end
+    dialog:Show(); dialog.RefreshSnapshot()
+    return dialog
 end

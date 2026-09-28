@@ -100,6 +100,7 @@ function addon:GetProcRegionOverlayState(entry)
 end
 
 function addon:StopProc()
+    self:ProcDiagnosticCount("stopCalls")
     if self.StopProcArtwork then self:StopProcArtwork() end
     self.procTracking = false
     for _, event in ipairs(events) do self:UnregisterEvent(event, OnProcEvent) end
@@ -160,8 +161,11 @@ function addon:RenderProcState(changedDefinitions)
 end
 
 function addon:ConfigureProc()
+    self:ProcDiagnosticCount("configureCalls")
     local definitions = self:GetProcDefinitions()
     local class, spec = self:GetCurrentModuleIdentity()
+    self:SetProcDiagnosticState("currentClass", class or "unavailable")
+    self:SetProcDiagnosticState("currentSpec", spec or "unavailable")
     local config = #definitions > 0 and self:GetProcConfig() or nil
     local supported, reason = self:CanUseNativeAuraSlots()
     if not config or not config.enabled or not supported then
@@ -193,6 +197,7 @@ OnProcEvent = function(self, event, id, texture, locationType, scale, r, g, b)
         if not seen[definition.id] then changed[#changed + 1] = definition; seen[definition.id] = true end
     end
     if event == "SPELL_ACTIVATION_OVERLAY_SHOW" then
+        self:ProcDiagnosticCount("showEvents")
         if not ID(id) or not ID(texture) or not Public(locationType) or not Scale(scale) then
             Trace(self, event, id, texture, locationType, scale, "ignored: non-public/invalid event argument")
             return
@@ -231,6 +236,7 @@ OnProcEvent = function(self, event, id, texture, locationType, scale, r, g, b)
         end
         if #changed == 0 then Trace(self, event, id, texture, locationType, scale, "ignored: texture/location mismatch"); return end
     elseif event == "SPELL_ACTIVATION_OVERLAY_HIDE" then
+        self:ProcDiagnosticCount("hideEvents")
         if not Public(id) or (id ~= nil and not ID(id)) then
             Trace(self, event, id, nil, nil, nil, "ignored: non-public/invalid owner")
             return
@@ -315,7 +321,7 @@ function addon:GetProcDiagnostics()
     details[#details + 1] = "Recent public native graphic events (bounded 16; no aura payloads):"
     for _, line in ipairs(self.procEventTrace or {}) do details[#details + 1] = line end
     return "Proc: " .. (self.procTracking and "Native tracking" or "inactive")
-        .. "; definitions=" .. #definitions .. "; regions=" .. regions .. "; enabled native slots=" .. enabled
+        .. "; definitions=" .. #definitions .. "; regions=" .. regions .. "; requested native slots=" .. enabled
         .. "\n" .. (self.procStatusReason or "Not initialized.")
         .. "\nNative slots own actual presence/duration; enabled slots are not a count of visible auras."
         .. "\n" .. table.concat(details, "\n")
