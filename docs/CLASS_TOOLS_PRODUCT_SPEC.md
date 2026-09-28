@@ -21,6 +21,16 @@ Class Tools output is normally hidden. A tool briefly displays feedback only aft
 
 Each tool has its own independent `enabled` preference. Common Tool settings are shared within the same class. Spec Tool settings are saved per specialization, and only the current specialization's tools appear in the interface.
 
+The agreed setting scopes are:
+
+| Setting | Scope |
+| --- | --- |
+| Class Tools master switch | Global |
+| Common Tools group switch | Class-scoped |
+| Spec Tools group switch | Specialization-scoped |
+| Individual Common tool settings | Class-scoped |
+| Individual Spec tool settings | Specialization-scoped |
+
 The Class Tools master switch, Common group switch, and Spec group switch are runtime gates. They control whether eligible tools may run; they do not change the tool's own preference. The effective runtime eligibility is:
 
 ```text
