@@ -16,6 +16,15 @@ local function Finish(group)
     if callback then callback(group) end
 end
 
+-- Deliver the native completion boundary before interacting with revealed inputs.
+local function FinishSection(section)
+    local group = section.collapsed and section.collapseAnimation or section.expandAnimation
+    truthy(group and group:IsPlaying(), "shared section animation is active")
+    group.playing = false
+    group:GetScript("OnFinished")(group)
+    equal(section.transition, nil, "section has settled before editing")
+end
+
 local function Choose(control, value)
     if control.menu then control:Click(); Finish(control.menu.openAnimation) end
     for _, choice in ipairs(control.choices) do
@@ -78,6 +87,7 @@ test("modern Proc page composes section hierarchy segmented modes and session-on
     truthy(panel.procAdvancedSection:IsShown(), "Basic retains the Advanced section heading")
     equal(panel.procAdvancedSection.content:IsShown(), false)
     controls.procAdvanced:Click()
+    FinishSection(panel.procAdvancedSection)
     equal(panel.procAdvancedSection.collapsed, false)
     truthy(panel.procAdvancedSection.content:IsShown())
     same(addon.db, before, "disclosure remains transient UI state")
@@ -117,6 +127,7 @@ test("modern artwork inputs and toggles preserve validation Enter semantics and 
     equal(controls.procArt_alpha.invalid, true)
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.45)
     controls.procAdvanced:Click()
+    FinishSection(panel.procAdvancedSection)
     truthy(controls.procArt_mirrorX.track and controls.procArt_mirrorX.thumb and controls.procArt_mirrorX.accent)
     controls.procArt_mirrorX:Click()
     equal(addon:GetProcRegionAppearance(entry).mirrorX, true)
@@ -125,6 +136,45 @@ test("modern artwork inputs and toggles preserve validation Enter semantics and 
     same(addon:GetProcConfig().regions[entry.id].color, timer.color)
     addon:SelectOptionsCategory("general")
     equal(controls.procArt_alpha.invalid, false, "discarded draft does not retain an invalid border")
+end)
+
+test("modern Proc Advanced shared fades gate input and refresh scroll layout on completion", function()
+    local _, addon, _, panel, controls = Open()
+    Choose(controls.procArt_mode, "custom")
+    local section = panel.procAdvancedSection
+    local before = copy(addon.db)
+    controls.procAdvanced:Click()
+    equal(section.transition, "expanding")
+    equal(section.content.cuiSectionLocked, true)
+    equal(controls.procArt_offsetX:IsEnabled(), false, "an expanding input cannot accept edits")
+    equal(controls.procArt_mirrorX:IsEnabled(), false, "an expanding toggle cannot accept clicks")
+    controls.procArt_offsetX:SetFocus()
+    equal(controls.procArt_offsetX:HasFocus(), false, "fade-in cannot capture keyboard focus")
+    FinishSection(section)
+    equal(section.content.cuiSectionLocked, false)
+    truthy(controls.procArt_offsetX:IsEnabled())
+    local expandedHeight, expandedRange = panel.procEditor:GetHeight(), panel.procScroll.cuiRange
+    panel.procScroll:SetVerticalScroll(expandedRange)
+    controls.procArt_offsetX:SetFocus()
+    UserText(controls.procArt_offsetX, "249")
+    local expandGroup, collapseGroup = section.expandAnimation, section.collapseAnimation
+    controls.procAdvanced:Click()
+    equal(section.transition, "collapsing")
+    equal(controls.procArt_offsetX:HasFocus(), false, "fade-out releases an existing keyboard focus")
+    equal(section.content.cuiSectionLocked, true)
+    equal(panel.procEditor:GetHeight(), expandedHeight, "fade-out keeps its layout footprint until completion")
+    equal(panel.procScroll.cuiRange, expandedRange)
+    FinishSection(section)
+    equal(section:GetHeight(), 42)
+    equal(section.content:IsShown(), false)
+    equal(panel.procEditor:GetHeight(), expandedHeight - section.expandedHeight + 42,
+        "settled callback recomputes the actual Proc layout")
+    equal(panel.procScroll.cuiRange, math.max(0, panel.procEditor:GetHeight() - panel.procScroll:GetHeight()))
+    equal(panel.procScroll:GetVerticalScroll(), panel.procScroll.cuiRange, "collapse clamps a bottom-scrolled editor")
+    controls.procAdvanced:Click()
+    FinishSection(section)
+    equal(section.expandAnimation, expandGroup); equal(section.collapseAnimation, collapseGroup)
+    same(addon.db, before, "motion and an unsubmitted numeric draft never write SavedVariables")
 end)
 
 test("modern gallery tiles retain audited paging selection and bounded object reuse", function()

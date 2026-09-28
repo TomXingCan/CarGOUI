@@ -10,6 +10,15 @@ local function Open()
     return env, addon, state, panel, controls
 end
 
+-- Deliver the native completion boundary before interacting with revealed inputs.
+local function FinishSection(section)
+    local group = section.collapsed and section.collapseAnimation or section.expandAnimation
+    truthy(group and group:IsPlaying(), "shared section animation is active")
+    group.playing = false
+    group:GetScript("OnFinished")(group)
+    equal(section.transition, nil, "section has settled before editing")
+end
+
 local function Choose(control, value)
     if control.menu then control:Click() end
     for _, button in ipairs(control.choices) do
@@ -42,6 +51,7 @@ test("appearance region editor progressively discloses only custom controls", fu
     equal(panel.procAdvancedSection.content:IsShown(), false)
     local saved = copy(addon.db)
     controls.procAdvanced:Click()
+    FinishSection(panel.procAdvancedSection)
     truthy(panel.procAdvancedSection.content:IsShown())
     same(addon.db, saved, "Advanced is session-only disclosure")
     Choose(controls.procArt_mode, "timer")
@@ -138,6 +148,7 @@ test("appearance controls separate artwork RGB offset typography and timer setti
     controls.procArtRGB_r:SetText("0.8"); controls.procArtRGB_g:SetText("0.6")
     Enter(controls.procArtRGB_b, "0.4")
     controls.procAdvanced:Click()
+    FinishSection(panel.procAdvancedSection)
     Enter(controls.procArt_offsetX, 125); Enter(controls.procArt_offsetY, -99)
     local appearance = addon:GetProcRegionAppearance(entry)
     same(appearance.artColor, { r = 0.8, g = 0.6, b = 0.4 })

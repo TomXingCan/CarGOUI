@@ -2,6 +2,10 @@ local _, addon = ...
 local D, C = addon.DesignSystem, {}
 addon.CUI = C
 
+-- Neutral client pixel fallback, not Blizzard slider chrome. Retail requires
+-- a TextureAsset here; only GetThumbTexture returns the slider-owned texture.
+local neutralThumbAsset = "Interface\\Buttons\\WHITE8X8"
+
 local function Panel(parent)
     local current = parent
     while current do
@@ -15,6 +19,7 @@ local function Register(control, kind, panel)
     panel = panel or Panel(control)
     control.cuiPanel, control.cuiKind = panel, kind
     if panel and addon.RegisterOptionsThemeControl then addon:RegisterOptionsThemeControl(panel, control, kind) end
+    if C.GuardSectionControl then C.GuardSectionControl(control) end
     return control
 end
 
@@ -373,8 +378,9 @@ function C.Slider(panel, parent, text, y, range, step, buildPatch, errorText)
     track:SetPoint("RIGHT", slider, "RIGHT", 0, 0); track:SetHeight(4); D.Fill(track, "surfaceHover")
     local fill = slider:CreateTexture(nil, "ARTWORK"); fill:SetPoint("LEFT", slider, "LEFT", 0, 0)
     fill:SetHeight(4); D.ApplyGradient(fill)
-    local thumb = slider:CreateTexture(nil, "OVERLAY"); thumb:SetSize(12, 18); D.Fill(thumb, "textPrimary")
-    slider:SetThumbTexture(thumb); slider.fill, slider.track = fill, track
+    slider:SetThumbTexture(neutralThumbAsset)
+    local thumb = slider:GetThumbTexture(); thumb:SetSize(12, 18); D.Fill(thumb, "textPrimary")
+    slider.fill, slider.track = fill, track
     C.Label(parent, tostring(range.min), 0, y - 54, 56)
     local maximum = C.Label(parent, tostring(range.max), trackWidth - 56, y - 54, 56); maximum:SetJustifyH("RIGHT")
     local edit = C.EditBox(panel, parent, editX, y - 24, 112); slider.editBox = edit
@@ -402,6 +408,121 @@ function C.Slider(panel, parent, text, y, range, step, buildPatch, errorText)
     return Register(slider, "slider", panel)
 end
 
+-- Keep logical control states separate from a disclosure's temporary input lock.
+-- Native enable callbacks can touch sibling inputs, so forced state changes must
+-- not overwrite the most recent state requested by the page refresh.
+local sectionEnforcement = 0
+local function SectionLocked(control)
+    local current = control
+    while current do
+        local section = current.cuiSectionContent
+        if section and (current.cuiSectionLocked or not section:IsVisible()) then return true end
+        current = current.GetParent and current:GetParent()
+    end
+    return false
+end
+
+local function SectionNativeEnabled(control, guard, value)
+    if guard.setEnabled then guard.setEnabled(control, value)
+    elseif value and guard.enable then guard.enable(control)
+    elseif not value and guard.disable then guard.disable(control) end
+end
+
+local function ApplySectionGuard(control)
+    local guard = control.cuiSectionGuard
+    if not guard then return end
+    local locked = SectionLocked(control)
+    sectionEnforcement = sectionEnforcement + 1
+    SectionNativeEnabled(control, guard, not locked and guard.enabled)
+    if guard.enableMouse then guard.enableMouse(control, not locked and guard.mouse) end
+    if locked and guard.clearFocus then guard.clearFocus(control) end
+    if locked and control.menu then CloseMenu(control, true) end
+    sectionEnforcement = sectionEnforcement - 1
+end
+
+function C.GuardSectionControl(control, defer)
+    if control.cuiSectionGuard then return end
+    local current, owner = control
+    while current do
+        owner = owner or current.cuiSectionContent
+        current = current.GetParent and current:GetParent()
+    end
+    if not owner then return end
+    local kind = control:GetObjectType()
+    local input = kind == "Button" or kind == "CheckButton" or kind == "Slider" or kind == "EditBox"
+    local guard = { enabled = not input or control:IsEnabled(), mouse = control:IsMouseEnabled(),
+        enableMouse = control.EnableMouse, setScript = control.SetScript }
+    control.cuiSectionGuard = guard
+    if input then
+        guard.setEnabled = control.SetEnabled
+        guard.enable, guard.disable = control.Enable, control.Disable
+        local function RequestEnabled(self, value)
+            value = value == true
+            if sectionEnforcement == 0 then
+                guard.enabled = value
+                -- A locked slider is already physically disabled, so its native
+                -- OnDisable may not fire again for a new logical page state.
+                if kind == "Slider" and self.editBox then
+                    if value then self.editBox:Enable() else self.editBox:Disable() end
+                end
+            end
+            -- Run the normal enable/disable callbacks for a page-requested state,
+            -- then clamp the physical widget while the disclosure is locked.
+            SectionNativeEnabled(self, guard, value)
+            ApplySectionGuard(self)
+        end
+        if guard.setEnabled then control.SetEnabled = RequestEnabled end
+        if guard.enable then control.Enable = function(self) RequestEnabled(self, true) end end
+        if guard.disable then control.Disable = function(self) RequestEnabled(self, false) end end
+    end
+    if guard.enableMouse then
+        function control:EnableMouse(value)
+            if sectionEnforcement == 0 then guard.mouse = value == true end
+            guard.enableMouse(self, not SectionLocked(self) and guard.mouse)
+        end
+    end
+    if kind == "EditBox" then
+        guard.clearFocus, guard.setFocus = control.ClearFocus, control.SetFocus
+        function control:SetFocus(...) if not SectionLocked(self) then return guard.setFocus(self, ...) end end
+    end
+    local events = { OnMouseWheel = true, OnMouseDown = true, OnMouseUp = true }
+    if kind == "Button" or kind == "CheckButton" then events.OnClick = true end
+    if kind == "EditBox" then
+        events.OnEnterPressed, events.OnTabPressed, events.OnChar = true, true, true
+        events.OnTextChanged = "text"
+    elseif kind == "Slider" then events.OnValueChanged = "value" end
+    local function GuardScript(event, callback)
+        local mode = events[event]
+        if not callback or not mode then return callback end
+        return function(self, ...)
+            local userInput = mode == "text" and select(1, ...) or mode == "value" and select(2, ...)
+            if SectionLocked(control) and (mode == true or userInput == true) then return end
+            return callback(self, ...)
+        end
+    end
+    for event in pairs(events) do
+        local callback = control:GetScript(event)
+        if callback then guard.setScript(control, event, GuardScript(event, callback)) end
+    end
+    function control:SetScript(event, callback) guard.setScript(self, event, GuardScript(event, callback)) end
+    if not defer then ApplySectionGuard(control) end
+end
+
+local function SetSectionInput(section, locked)
+    section.content.cuiSectionLocked = locked == true
+    local controls = {}
+    local function Visit(frame)
+        controls[#controls + 1] = frame
+        for _, child in ipairs({ frame:GetChildren() }) do Visit(child) end
+    end
+    Visit(section.content)
+    -- Capture every descendant before disable hooks can affect another input.
+    sectionEnforcement = sectionEnforcement + 1
+    for _, control in ipairs(controls) do C.GuardSectionControl(control, true) end
+    for _, control in ipairs(controls) do ApplySectionGuard(control) end
+    sectionEnforcement = sectionEnforcement - 1
+end
+
 function C.Section(parent, text, x, y, width, opts)
     opts = opts or {}
     local section = CreateFrame("Frame", nil, parent)
@@ -417,21 +538,55 @@ function C.Section(parent, text, x, y, width, opts)
     section.content:SetPoint("BOTTOMRIGHT", section, "BOTTOMRIGHT", -12, 12)
     section.content:SetWidth(width - 24)
     section.expandedHeight = opts.height or 80
-    function section:SetCollapsed(value)
-        value = value == true
-        if self.collapsed == value then return end
-        if value then self.expandedHeight = self:GetHeight() end
-        self.collapsed = value; self.content:SetShown(not value); self.divider:SetShown(not value)
-        self:SetHeight(value and 42 or self.expandedHeight)
-        if self.collapseButton then self.collapseButton:SetText(value and "+" or "-") end
-        if opts.onToggle then opts.onToggle(self, value) end
-    end
+    section.collapsed = false
     if opts.collapsible then
+        section.content.cuiSectionContent = section
+        local function Settle()
+            local transitioning = section.transition ~= nil
+            section.motionRevision = (section.motionRevision or 0) + 1
+            section.transition = nil
+            section.expandAnimation:Stop(); section.collapseAnimation:Stop()
+            section.content:SetAlpha(1)
+            section.content:SetShown(not section.collapsed); section.divider:SetShown(not section.collapsed)
+            section:SetHeight(section.collapsed and 42 or section.expandedHeight)
+            SetSectionInput(section, section.collapsed or not section:IsVisible())
+            if transitioning and opts.onSettled then opts.onSettled(section, section.collapsed) end
+        end
+        local function Animation(expanding)
+            local group = section.content:CreateAnimationGroup()
+            local fade = group:CreateAnimation("Alpha")
+            fade:SetOrder(1); fade:SetDuration(D.motionNormal); fade:SetSmoothing("OUT")
+            fade:SetFromAlpha(expanding and 0 or 1); fade:SetToAlpha(expanding and 1 or 0)
+            return Track(Panel(section), group, Settle)
+        end
+        section.expandAnimation, section.collapseAnimation = Animation(true), Animation(false)
+        function section:SetCollapsed(value, immediate)
+            value = value == true
+            if self.collapsed == value then if immediate then Settle() end; return end
+            if value and not self.transition then self.expandedHeight = self:GetHeight() end
+            self.collapsed = value
+            self.expandAnimation:Stop(); self.collapseAnimation:Stop()
+            self.transition = value and "collapsing" or "expanding"
+            self.motionRevision = (self.motionRevision or 0) + 1
+            local revision = self.motionRevision
+            local animation = value and self.collapseAnimation or self.expandAnimation
+            animation:SetScript("OnFinished", function()
+                if self.motionRevision == revision and self.transition then Settle() end
+            end)
+            self:SetHeight(self.expandedHeight)
+            self.content:Show(); self.divider:Show(); self.content:SetAlpha(1)
+            SetSectionInput(self, true)
+            self.collapseButton:SetText(value and "+" or "-")
+            if opts.onToggle then opts.onToggle(self, value) end
+            if immediate or not self:IsVisible() then Settle()
+            elseif self.transition then (self.collapsed and self.collapseAnimation or self.expandAnimation):Play() end
+        end
         section.title:SetWidth(width - 68)
         section.collapseButton = C.Button(section, "-", width - 40, -6, 30, function() section:SetCollapsed(not section.collapsed) end)
+        section:HookScript("OnHide", Settle)
+        section:HookScript("OnShow", function() if not section.transition then SetSectionInput(section, section.collapsed) end end)
+        if opts.collapsed then section:SetCollapsed(true, true) end
     end
-    section.collapsed = false
-    if opts.collapsed then section:SetCollapsed(true) end
     return Register(section, "section")
 end
 
@@ -470,8 +625,9 @@ function C.ScrollFrame(panel, parent, x, y, width, height)
     bar:SetPoint("TOPLEFT", scroll, "TOPRIGHT", 6, 0); bar:SetSize(6, height)
     bar:SetOrientation("VERTICAL"); bar:SetMinMaxValues(0, 0); bar:SetValueStep(1); bar:EnableMouse(true)
     local track = bar:CreateTexture(nil, "BACKGROUND"); track:SetAllPoints(bar); D.Fill(track, "surfaceRaised")
-    local thumb = bar:CreateTexture(nil, "ARTWORK"); thumb:SetSize(6, 30); D.Fill(thumb, "borderStrong")
-    bar:SetThumbTexture(thumb); scroll.scrollBar, scroll.thumb = bar, thumb
+    bar:SetThumbTexture(neutralThumbAsset)
+    local thumb = bar:GetThumbTexture(); thumb:SetSize(6, 30); D.Fill(thumb, "borderStrong")
+    scroll.scrollBar, scroll.thumb = bar, thumb
     function scroll:RefreshRange()
         local child = self:GetScrollChild()
         local maximum = math.max(0, (child and child:GetHeight() or 0) - self:GetHeight())
@@ -494,6 +650,7 @@ function C.ScrollFrame(panel, parent, x, y, width, height)
     end)
     bar:SetScript("OnEnter", function() D.Fill(thumb, "accentGlow") end)
     bar:SetScript("OnLeave", function() D.Fill(thumb, "borderStrong") end)
+    C.GuardSectionControl(scroll); C.GuardSectionControl(bar)
     return scroll
 end
 

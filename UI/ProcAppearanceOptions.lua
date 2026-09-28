@@ -207,7 +207,12 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         collapsible = true, collapsed = true,
         onToggle = function(_, collapsed)
             session.advanced = not collapsed
-            if panel.procAdvancedSection and not panel.refreshing then addon:RefreshOptions() end
+            if panel.procAdvancedSection and not panel.refreshing then addon:RefreshProcAppearanceOptions() end
+        end,
+        onSettled = function()
+            -- Collapse keeps its expanded footprint during the shared fade;
+            -- recompute the scroll range only once its final height is ready.
+            if panel.procAdvancedSection and not panel.refreshing then addon:RefreshProcAppearanceOptions() end
         end,
     })
     panel.procAdvancedSection = advanced

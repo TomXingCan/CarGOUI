@@ -34,9 +34,15 @@ Automatic faction Header and class/spec Body identity remain separate concepts. 
 
 The shared layer does not use `UIPanelButtonTemplate`, `UICheckButtonTemplate`, `InputBoxTemplate`, `UIPanelScrollFrameTemplate` or stock dropdown visual chrome. `BackdropTemplate` is only a structural capability. The component layer has no gameplay queries or direct SavedVariables access; page callbacks retain their existing setting validation and transaction rules.
 
+### Native slider thumb contract
+
+Both the horizontal slider and vertical scrollbar pass the neutral client primitive `Interface\\Buttons\\WHITE8X8` to `SetThumbTexture`, then obtain the slider-owned `SimpleTexture` through `GetThumbTexture` and apply CarGOUI size/color tokens. This fallback adds no binary asset and does not restore Blizzard slider artwork, templates or chrome. The [pinned Retail API documentation](https://github.com/Gethe/wow-ui-source/blob/09b9db7948abc9b9648dedaab51eb0cf3ee67b31/Interface/AddOns/Blizzard_APIDocumentationGenerated/SimpleSliderAPIDocumentation.lua) declares the setter's argument as `TextureAsset` and the getter's result as `SimpleTexture`; they are not interchangeable. The offline fixture rejects Texture objects and returns a reused texture owned by the receiving Slider, so it cannot conceal the previous signature mismatch.
+
 ## Motion and cleanup
 
 Dropdown opening uses a reusable AnimationGroup with a 120 ms fade and 8-unit translation. Closing uses a 90 ms reverse transition and hides after completion. Outgoing rows are disabled immediately, including callback guards; transferring ownership to another menu cannot leave invisible clickable rows. Rapid open/close, page change and parent close settle existing groups without allocating another set of rows or animations.
+
+Collapsible sections use two reusable 120 ms Alpha animation groups. Expansion reserves the expanded layout footprint and fades content from 0 to 1; collapse fades from 1 to 0 while retaining that footprint, then hides content and settles to the 42-unit header. Inputs remain locked during either transition and while collapsed, including focus, outgoing dropdowns and stale callbacks. The latest requested collapse state is session-only. `StopMotion` and parent `OnHide` stop both groups and settle immediately to that state, so rapid toggles and close/Esc/combat/page/spec boundaries cannot leave a half-open interactive editor. Proc Advanced uses this shared primitive and its completion callback to recompute the scroll range; it has no private animation engine.
 
 Hover and toggle feedback use short native animation groups; presses use an immediate restrained surface change. No component uses OnUpdate, a ticker, or inertial-scroll simulation. Close, Esc, combat, page and specialization boundaries stop/settle UI-only motion and close menus. A completion callback cannot reopen Options or apply a setting. Closed Options has no menu animation, decorative polling or background UI ticker. Existing branding motion remains bounded to the visible Options lifecycle.
 

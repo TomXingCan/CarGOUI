@@ -459,6 +459,13 @@ local function setup(saved, loggedIn, client)
     local object = {}
     function object:GetName() return self.name end
     function object:GetParent() return self.parent end
+    function object:GetChildren()
+        local children = {}
+        for _, frame in ipairs(state.frames) do
+            if frame.parent == self then children[#children + 1] = frame end
+        end
+        return unpack(children)
+    end
     function object:SetParent(parent) self.parent = parent end
     function object:GetObjectType() return self.kind end
     function object:SetPoint(point, relative, relativePoint, x, y)
@@ -728,14 +735,16 @@ local function setup(saved, loggedIn, client)
     end
     function object:HasFocus() return self.focused or false end
     function object:HighlightText(...) self.highlight = { ... } end
-    function object:SetEnabled(value)
+    local function nativeSetEnabled(self, value)
         local wasEnabled = self:IsEnabled()
         self.enabled = not not value
         local script = self.enabled and "OnEnable" or "OnDisable"
         if wasEnabled ~= self.enabled and self.scripts[script] then self.scripts[script](self) end
     end
-    function object:Enable() self:SetEnabled(true) end
-    function object:Disable() self:SetEnabled(false) end
+    function object:SetEnabled(value) nativeSetEnabled(self, value) end
+    -- Native Enable/Disable do not dispatch through a Lua SetEnabled override.
+    function object:Enable() nativeSetEnabled(self, true) end
+    function object:Disable() nativeSetEnabled(self, false) end
     function object:IsEnabled() return self.enabled ~= false end
     function object:SetChecked(value) self.checked = not not value end
     function object:GetChecked() return self.checked or false end
@@ -745,13 +754,18 @@ local function setup(saved, loggedIn, client)
     function object:SetObeyStepOnDrag(value) self.obeyStep = value end
     function object:SetOrientation(value) self.orientation = value end
     function object:SetThumbTexture(value)
-        if type(value) == "table" then self.thumbTexture = value
-        else
-            self.thumbTexture = self:CreateTexture(nil, "ARTWORK")
-            self.thumbTexture:SetTexture(value)
-        end
+        assert(self.kind == "Slider", "SetThumbTexture is a native Slider API")
+        -- TextureAsset is a path/FileDataID, never an existing SimpleTexture.
+        assert(type(value) == "string" or type(value) == "number",
+            "Slider:SetThumbTexture requires a TextureAsset string or number")
+        self.thumbTextureAsset = value
+        self.thumbTexture = self.thumbTexture or self:CreateTexture(nil, "ARTWORK")
+        self.thumbTexture:SetTexture(value)
     end
-    function object:GetThumbTexture() return self.thumbTexture end
+    function object:GetThumbTexture()
+        assert(self.kind == "Slider", "GetThumbTexture is a native Slider API")
+        return self.thumbTexture
+    end
     function object:SetValue(value)
         if self.minValue then value = math.max(self.minValue, value) end
         if self.maxValue then value = math.min(self.maxValue, value) end
@@ -7802,7 +7816,7 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     nativeText = nativeText, procText = procText })
 
 for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua",
-    "modern_controls.lua", "modern_shell.lua", "modern_pages.lua" }) do
+    "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,
         root = root, metadata = metadata, login = login, setup = setup, options = options,

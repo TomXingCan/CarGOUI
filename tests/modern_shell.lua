@@ -17,6 +17,7 @@ local function settled(panel)
     for _, dropdown in ipairs(panel.dropdowns) do
         truthy(not dropdown.menu:IsShown(), "no hidden-page menu remains visible")
         equal(dropdown.menu.cuiInteractive, false, "closed menu has no active input ownership")
+        equal(dropdown.menu:IsMouseEnabled(), false, "closed menu releases its mouse input")
     end
 end
 
@@ -142,6 +143,71 @@ test("MODERN SHELL page specialization combat and Escape settle all control and 
     panel.controls.x:GetScript("OnEscapePressed")()
     truthy(not panel:IsShown()); settled(panel)
     for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil) end
+end)
+
+test("MODERN SHELL real Proc Advanced transitions settle immediately at every navigation boundary", function()
+    local function FinishSection(section)
+        local group = section.collapsed and section.collapseAnimation or section.expandAnimation
+        truthy(group:IsPlaying())
+        group.playing = false
+        group:GetScript("OnFinished")(group)
+    end
+    local function EffectiveVisible(frame)
+        while frame do
+            if frame.IsShown and not frame:IsShown() then return false end
+            frame = frame.GetParent and frame:GetParent() or nil
+        end
+        return true
+    end
+    for _, boundary in ipairs({ "page", "spec", "escape", "combat", "hide" }) do
+        for _, collapsing in ipairs({ false, true }) do
+            local _, addon, state = h.login(nil, false, { specID = 62, proc = {} })
+            local panel = h.options(addon)
+            -- Materialize both real spec contexts before checking that a UI-only
+            -- transition and its cleanup never add cosmetic SavedVariables.
+            state.specID = 63; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player"); state:flushTimers()
+            state.specID = 62; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player"); state:flushTimers()
+            addon:SelectOptionsCategory("proc")
+            local controls, section = panel.controls, panel.procAdvancedSection
+            for _, choice in ipairs(controls.procArt_mode.choices) do
+                if choice.value == "custom" then choice:Click(); break end
+            end
+            local before = copy(addon.db)
+            controls.procAdvanced:Click()
+            if collapsing then
+                FinishSection(section)
+                controls.procArt_offsetX:SetFocus()
+                controls.procArt_offsetX:SetText("149")
+                controls.procArt_offsetX:GetScript("OnTextChanged")(controls.procArt_offsetX, true)
+                controls.procAdvanced:Click()
+            end
+            equal(section.transition, collapsing and "collapsing" or "expanding")
+            equal(section.content.cuiSectionLocked, true)
+            equal(controls.procArt_offsetX:IsMouseEnabled(), false, "transition releases descendant mouse input")
+            local pending = collapsing and section.collapseAnimation or section.expandAnimation
+            local lateCompletion = pending:GetScript("OnFinished")
+            if boundary == "page" then addon:SelectOptionsCategory("general")
+            elseif boundary == "spec" then state.specID = 63; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
+            elseif boundary == "escape" then controls.procArt_alpha:GetScript("OnEscapePressed")(controls.procArt_alpha)
+            elseif boundary == "combat" then state.inCombat = true; state:fire("PLAYER_REGEN_DISABLED")
+            else panel:Hide() end
+            equal(section.transition, nil, boundary .. " settles immediately without waiting for a frame")
+            truthy(not section.expandAnimation:IsPlaying() and not section.collapseAnimation:IsPlaying())
+            equal(section.collapsed, collapsing, "cleanup respects the latest requested session state")
+            equal(section:GetHeight(), collapsing and 42 or section.expandedHeight)
+            equal(controls.procArt_offsetX:HasFocus(), false)
+            truthy(not EffectiveVisible(controls.procArt_offsetX) or not controls.procArt_offsetX:IsEnabled(),
+                "a hidden editor retains no reachable input target")
+            settled(panel)
+            local shown, category = panel:IsShown(), panel.activeCategory
+            lateCompletion(pending)
+            equal(panel:IsShown(), shown, "a stale native completion cannot reopen Options")
+            equal(panel.activeCategory, category, "a stale completion cannot restore an old page")
+            equal(section.transition, nil)
+            equal(controls.procArt_offsetX:HasFocus(), false)
+            same(addon.db, before, boundary .. " cleanup does not save disclosure or draft state")
+        end
+    end
 end)
 
 test("MODERN SHELL navigation viewport and hidden editors add no cosmetic SavedVariables", function()
