@@ -5,6 +5,7 @@ local function PrintHelp()
     addon:Print(addon:Text("Optional commands: /cui help | status | show | hide | reset"))
     addon:Print(addon:Text("/cui position <x> <y>  (-10000 to 10000; right/up are positive)"))
     addon:Print(addon:Text("Mobility Appearance is per class; Proc Appearance is per current class and specialization."))
+    addon:Print("Research: /cui ctlog <arcane|combustion|altertime> on | off | status | clear | dump")
 end
 
 local function PrintStatus()
@@ -25,7 +26,10 @@ function addon:HandleSlashCommand(message)
     end
     local command, patch = args[1]
 
-    if command == "help" and #args == 1 then
+    if command == "ctlog" then
+        self.ClassToolsRawCapture:HandleCommand(args)
+        return
+    elseif command == "help" and #args == 1 then
         PrintHelp()
         return
     elseif command == "status" and #args == 1 then
