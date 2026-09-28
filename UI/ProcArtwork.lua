@@ -164,7 +164,7 @@ local function Acquire(self, entry, preview)
     frame:SetFrameStrata("MEDIUM"); frame:SetFrameLevel(9); frame:EnableMouse(false)
     if not frame.texture then frame.texture = frame:CreateTexture(nil, "ARTWORK") end
     frame.texture:SetAllPoints(frame)
-    frame.texture:SetBlendMode("ADD")
+    frame.texture:SetBlendMode("BLEND")
     return frame
 end
 

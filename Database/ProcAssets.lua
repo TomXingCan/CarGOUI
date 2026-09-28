@@ -173,26 +173,85 @@ local sources = {
 }
 
 local long, short = 256 * .8, 128 * .8
-local function Geometry(source)
-    local location = source.locationTypeName
+-- Canonical presentation is an explicit catalog policy, not an intrinsic
+-- FileDataID property. Shape and orientation come only from the layout;
+-- recommended scale is the largest audited source scale for the asset.
+-- Preserve every native source and location variant for provenance. The
+-- fixed order resolves assets used with different locations or aspect ratios
+-- without depending on declaration order, class names, or Proc names.
+local locationOrder = { "Left", "Right", "LeftOutside", "RightOutside",
+    "LeftRight", "LeftRightOutside", "Top", "Bottom", "TopBottom",
+    "Center", "TopLeft", "TopRight" }
+local locationPriority = {}
+for priority, location in ipairs(locationOrder) do locationPriority[location] = priority end
+
+local function Geometry(location)
     local width, height = long, short
+    local aspect = "horizontal"
     if location == "Left" or location == "Right" or location == "LeftRight"
         or location == "LeftOutside" or location == "RightOutside" or location == "LeftRightOutside" then
-        width, height = short, long
-    elseif location == "Center" then width, height = long, long
-    elseif location == "TopLeft" or location == "TopRight" then width, height = short, short end
-    return { width = width * source.scale, height = height * source.scale,
-        flipH = location == "Right" or location == "RightOutside", flipV = location == "Bottom" }
+        width, height, aspect = short, long, "vertical"
+    elseif location == "Center" then width, height, aspect = long, long, "square"
+    elseif location == "TopLeft" or location == "TopRight" then width, height, aspect = short, short, "square" end
+    return { width = width, height = height,
+        flipH = location == "Right" or location == "RightOutside", flipV = location == "Bottom" }, aspect
+end
+
+local function SourceBefore(a, b)
+    for _, field in ipairs({ "class", "specID", "procID", "sourceSpellID", "auraID", "locationTypeName", "scale", "procName" }) do
+        if a[field] ~= b[field] then return a[field] < b[field] end
+    end
+    return false
+end
+
+-- Pure metadata construction. Only the audited static table above is
+-- registered; building metadata never adds an asset or a trigger capability.
+function addon:BuildProcAssetMetadata(textureID, references)
+    local ordered, byLocation, variants, recommendedScale = {}, {}, {}, 0
+    for _, reference in ipairs(references) do
+        local source = {}
+        for key, value in pairs(reference) do source[key] = value end
+        ordered[#ordered + 1] = source
+        local location = source.locationTypeName
+        assert(locationPriority[location], "Unsupported audited asset location")
+        local variant = byLocation[location]
+        if not variant then
+            local geometry, aspect = Geometry(location)
+            variant = { locationTypeName = location, aspect = aspect, geometry = geometry, scales = {} }
+            byLocation[location], variants[#variants + 1] = variant, variant
+        end
+        variant.scales[source.scale] = true
+        recommendedScale = math.max(recommendedScale, source.scale)
+    end
+    table.sort(ordered, SourceBefore)
+    table.sort(variants, function(a, b)
+        return locationPriority[a.locationTypeName] < locationPriority[b.locationTypeName]
+    end)
+    for _, variant in ipairs(variants) do
+        local scales = {}
+        for scale in pairs(variant.scales) do scales[#scales + 1] = scale end
+        table.sort(scales)
+        variant.scales = scales
+    end
+    local canonical, source = assert(variants[1])
+    -- This representative supplies gallery labels and provenance only; it
+    -- never determines geometry or recommended scale. Display a real source
+    -- of the chosen location, with stable ordering to break source-label ties.
+    for _, candidate in ipairs(ordered) do
+        if candidate.locationTypeName == canonical.locationTypeName then source = candidate; break end
+    end
+    assert(source, "Canonical asset variant requires an audited source")
+    return { key = "blizzard_" .. textureID, textureID = textureID,
+        label = source.procName, class = source.class, specID = source.specID,
+        procID = source.procID, procName = source.procName, auraID = source.auraID,
+        sourceSpellID = source.sourceSpellID, locationTypeName = canonical.locationTypeName,
+        canonicalVariant = canonical.locationTypeName, recommendedScale = recommendedScale,
+        geometry = canonical.geometry, variants = variants, sources = ordered }
 end
 
 addon.procAssets, addon.procAssetList, addon.procAssetsByTexture = {}, {}, {}
 for textureID, references in pairs(sources) do
-    local source = references[1]
-    local asset = { key = "blizzard_" .. textureID, textureID = textureID,
-        label = source.procName, class = source.class, specID = source.specID,
-        procID = source.procID, procName = source.procName, auraID = source.auraID,
-        sourceSpellID = source.sourceSpellID, locationTypeName = source.locationTypeName,
-        scale = source.scale, geometry = Geometry(source), sources = references }
+    local asset = addon:BuildProcAssetMetadata(textureID, references)
     addon.procAssets[asset.key], addon.procAssetsByTexture[textureID] = asset, asset
     addon.procAssetList[#addon.procAssetList + 1] = asset
 end

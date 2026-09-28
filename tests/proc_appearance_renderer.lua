@@ -407,6 +407,37 @@ test("Proc animations reuse groups reset on configuration and restore on native 
     for _, group in ipairs(state.animations) do equal(group:GetScript("OnUpdate"), nil) end
 end)
 
+test("Proc live and TEST use BLEND while retaining artwork color transforms and animation", function()
+    local _, addon, state, _, _, Set, Show = Fixture()
+    state.proc.cvars.spellActivationOverlayOpacity = "0.6"
+    Set(leftID, { mode = "custom", artColor = { r = .2, g = .4, b = .6 },
+        alpha = .5, desaturation = .7, rotation = 90, mirrorX = true, mirrorY = true,
+        animation = { entrance = "fade", active = "pulse", intensity = .4 } })
+    local overlay = Show()
+    h.options(addon)
+    local nativeWrites = #state.nativeTextureWrites
+    truthy(addon:SetPreview("single", leftID))
+    local live, preview = addon.procArtworkFrames[leftID], addon.procPreviewArtworkFrames[leftID]
+    truthy(live.texture ~= preview.texture, "shared blend defaults preserve independent textures")
+    for _, frame in ipairs({ live, preview }) do
+        equal(frame.texture.blendMode, "BLEND", "owned artwork uses ordinary alpha blending")
+        same(frame.texture.vertexColor, { .2, .4, .6 }, "RGB tint survives the blend default")
+        equal(frame.texture.desaturation, .7)
+        equal(frame.texture.rotation, math.pi / 2)
+        same(frame.texture.texCoord, { 1, 0, 1, 0 })
+        equal(frame.phase, "entrance")
+        truthy(frame.groups.entrance_fade:IsPlaying())
+        frame.groups.entrance_fade:GetScript("OnFinished")()
+        equal(frame.phase, "active")
+        truthy(frame.groups.active_pulse:IsPlaying(), "native AnimationGroups remain active")
+        equal(frame.texture.blendMode, "BLEND", "animation does not replace the blend default")
+    end
+    equal(live.alpha, .3, "live opacity remains CVar opacity times artwork alpha")
+    equal(preview.alpha, .5, "TEST retains its independent sample alpha")
+    equal(overlay.texture.alpha, 0, "live replacement retains native suppression")
+    equal(#state.nativeTextureWrites, nativeWrites, "TEST and its animation never write native texture state")
+end)
+
 test("Proc preview owns separate textures and never changes live suppression", function()
     local _, addon, state, _, entry, Set, Show = Fixture()
     Set(leftID, { mode = "custom", animation = { entrance = "fade", active = "pulse" } })

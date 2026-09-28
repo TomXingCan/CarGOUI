@@ -122,6 +122,9 @@ assert 'hooksecurefunc(root, "ShowOverlay"' in artwork and 'hooksecurefunc(root,
 assert 'procSuppressedOverlays' in artwork and 'RestoreProcNativeOverlay' in artwork
 assert 'procPreviewArtworkFrames' in artwork and 'procArtworkFrames' in artwork
 assert 'CreateAnimationGroup()' in artwork and 'CreateTexture(nil, "ARTWORK")' in artwork
+assert 'frame.texture:SetBlendMode("BLEND")' in artwork
+absent(artwork, [r'SetBlendMode\s*\(\s*"ADD"\s*\)'],
+       "Live and TEST artwork keep the native-equivalent default blend behavior")
 assert 'ResolveProcAppearance' in artwork and 'ProcPublicColor' in proc_runtime
 assert 'StopProcArtwork()' in proc_runtime and 'GetProcArtworkDiagnostic(entry)' in proc_runtime
 absent(artwork, [r"(?:overlay|record|owned)\.texture\s*:\s*(?:SetTexture|SetVertexColor|SetTexCoord|SetPoint|SetSize|CreateAnimationGroup)\s*\("],

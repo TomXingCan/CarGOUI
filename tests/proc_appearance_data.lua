@@ -89,6 +89,96 @@ test("PROC ART catalog is exactly the audited source artwork union with no dupli
     equal(addon:GetProcAsset(603339), nil)
 end)
 
+test("PROC ART shared Heating Up artwork recommends full scale while own-native remains source specific", function()
+    local _, addon = h.login(nil, false, { specID = 63, proc = {} })
+    local asset = addon:GetProcAsset("blizzard_449490")
+    equal(asset.recommendedScale, 1, "Hot Streak scale is not reduced by Heating Up metadata order")
+    same(asset.geometry, { width = 128 * .8, height = 256 * .8, flipH = false, flipV = false }, "base geometry contains no source scale")
+    equal(asset.canonicalVariant, "LeftRight")
+    same(asset.variants[1].scales, { .5, 1 }, "both audited source scales remain explicit")
+    local entry = region(addon, "mage_fire_heating_up_left")
+    equal(entry.nativeScale, .5)
+    local custom = { mode = "custom", assetKey = asset.key, artColor = { r = 1, g = 1, b = 1 } }
+    local _, selected = addon:ResolveProcAppearance(entry, custom, { textureID = 449490, scale = .5 })
+    equal(selected.width, 128 * .8, "catalog selection uses asset recommendation even on Heating Up")
+    equal(selected.height, 256 * .8)
+    custom.assetKey = nil
+    local _, own = addon:ResolveProcAppearance(entry, custom, { textureID = 449490, scale = .5 })
+    equal(own.width, 128 * .8 * .5, "own-native keeps the current Proc source scale")
+    equal(own.height, 256 * .8 * .5)
+    local _, nativePreview = addon:ResolveProcAppearance(entry, { mode = "native" }, nil, true)
+    equal(nativePreview.width, own.width, "Native TEST also retains source-specific artwork dimensions")
+end)
+
+test("PROC ART nonunit scales and multiple locations keep explicit deterministic catalog variants", function()
+    local _, addon = h.transferSeed()
+    local entry = region(addon)
+    for _, row in ipairs({ { 603339, .85000002384, "Right", 128 * .8, 256 * .8 },
+        { 2851788, .80000001192, "Top", 256 * .8, 128 * .8 },
+        { 656728, 1.29999995232, "LeftRight", 128 * .8, 256 * .8 },
+        { 6160021, 1.5, "LeftRightOutside", 128 * .8, 256 * .8 },
+        { 457658, .7, "Top", 256 * .8, 128 * .8 } }) do
+        local asset = addon:GetProcAssetByTexture(row[1])
+        equal(asset.recommendedScale, row[2]); equal(asset.canonicalVariant, row[3])
+        equal(asset.geometry.width, row[4]); equal(asset.geometry.height, row[5])
+        local _, resolved = addon:ResolveProcAppearance(entry, { mode = "custom", assetKey = asset.key }, nil, true)
+        equal(resolved.width, row[4] * row[2], "selected artwork applies recommendation exactly once")
+        equal(resolved.height, row[5] * row[2])
+    end
+    for _, row in ipairs({ { 449487, "Top", "horizontal", { "Top", "Bottom" } },
+        { 449489, "Left", "vertical", { "Left", "Right" } },
+        { 450932, "Left", "vertical", { "Left", "Right" } },
+        { 450933, "Left", "vertical", { "Left", "Right" } },
+        { 458740, "Left", "vertical", { "Left", "Right" } },
+        { 459313, "Left", "vertical", { "Left", "Right" } },
+        { 592058, "Left", "vertical", { "Left", "Right", "LeftRight" } } }) do
+        local asset, locations = addon:GetProcAssetByTexture(row[1]), {}
+        equal(asset.canonicalVariant, row[2]); equal(asset.locationTypeName, row[2])
+        for _, variant in ipairs(asset.variants) do
+            locations[#locations + 1] = variant.locationTypeName
+            equal(variant.aspect, row[3]); same(variant.scales, { 1 })
+        end
+        same(locations, row[4], "fixed location order is explicit")
+        local representative
+        for _, source in ipairs(asset.sources) do
+            if source.class == asset.class and source.specID == asset.specID and source.procID == asset.procID
+                and source.sourceSpellID == asset.sourceSpellID and source.locationTypeName == asset.locationTypeName then
+                representative = source
+            end
+        end
+        truthy(representative, "gallery representative actually uses the canonical location")
+    end
+    -- Shape-conflict policy is tested without admitting another catalog key.
+    local references = {}
+    for index, location in ipairs({ "Center", "TopRight", "Top", "Left" }) do
+        references[index] = copy(addon:GetProcAssetByTexture(449490).sources[1])
+        references[index].locationTypeName, references[index].scale = location, index * .5
+    end
+    local metadata = addon:BuildProcAssetMetadata(9999999, references)
+    equal(metadata.canonicalVariant, "Left", "fixed location policy resolves mixed aspects")
+    equal(metadata.recommendedScale, 2, "maximum audited-reference scale policy is independent of aspect")
+    equal(metadata.geometry.width, 128 * .8); equal(metadata.geometry.height, 256 * .8)
+    same({ metadata.variants[1].aspect, metadata.variants[2].aspect,
+        metadata.variants[3].aspect, metadata.variants[4].aspect }, { "vertical", "horizontal", "square", "square" })
+    equal(addon:GetProcAsset(metadata.key), nil, "metadata construction cannot expand the whitelist")
+end)
+
+test("PROC ART every catalog asset is unchanged when audited source order is reversed or rotated", function()
+    local _, addon = h.transferSeed()
+    for _, asset in ipairs(addon:GetProcAssets()) do
+        local references = copy(asset.sources)
+        local before, reversed = copy(references), {}
+        for index = #references, 1, -1 do reversed[#reversed + 1] = references[index] end
+        same(addon:BuildProcAssetMetadata(asset.textureID, reversed), asset, "reverse preserves canonical metadata")
+        for shift = 1, #references do
+            local rotated = {}
+            for index = 1, #references do rotated[index] = references[(index + shift - 1) % #references + 1] end
+            same(addon:BuildProcAssetMetadata(asset.textureID, rotated), asset, "all rotations preserve canonical metadata")
+        end
+        same(references, before, "builder leaves original provenance unchanged")
+    end
+end)
+
 test("PROC ART setter validates bounded detached patches and reset preserves all timer ownership", function()
     local _, addon, state = h.transferSeed()
     local entry, config = region(addon), addon:GetProcConfig()
@@ -148,7 +238,8 @@ test("PROC ART shared resolver isolates timer fields and supports public RGB cro
     equal(asset.textureID, 603339, "a Mage can select audited Warrior artwork")
     same(asset.color, value.artColor, "custom artwork RGB wins over public color")
     equal(asset.x, entry.anchor.x); equal(asset.y, entry.anchor.y)
-    equal(asset.width, addon:GetProcAsset(value.assetKey).geometry.width)
+    local selected = addon:GetProcAsset(value.assetKey)
+    equal(asset.width, selected.geometry.width * selected.recommendedScale)
     equal(resolved.width, .75); equal(resolved.height, 1.3)
     value.artColor, value.assetKey = nil, nil
     resolved, asset = addon:ResolveProcAppearance(entry, value,

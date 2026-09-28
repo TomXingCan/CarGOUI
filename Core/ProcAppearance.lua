@@ -135,8 +135,8 @@ function addon:ResolveProcAppearance(entry, appearance, publicState, preview)
     if not selected and not native then return result, nil, "native-asset-unavailable" end
     local asset = { key = selected and selected.key or nil,
         textureID = selected and selected.textureID or textureID,
-        width = selected and selected.geometry.width or guide.width,
-        height = selected and selected.geometry.height or guide.height,
+        width = selected and selected.geometry.width * selected.recommendedScale or guide.width,
+        height = selected and selected.geometry.height * selected.recommendedScale or guide.height,
         flipH = guide.flipH == true, flipV = guide.flipV == true,
         x = anchor.x, y = anchor.y }
     if not selected and not preview and Plain(publicState)
