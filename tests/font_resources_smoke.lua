@@ -368,7 +368,7 @@ test("FONT large shared registries stay selectable through bounded reusable pick
     local frameCount, seen, count = #state.frames, {}, 0
     for page = 1, dropdown.pageCount do
         dropdown:SetPage(page)
-        truthy(dropdown.menu:GetHeight() <= 8 * 28 + 48, "font popup height stays bounded")
+        truthy(dropdown.menu:GetHeight() <= 8 * addon.DesignSystem.controlHeight + 48, "font popup height stays bounded")
         truthy(#dropdown.choices <= 8, "one bounded set of row buttons is reused")
         equal(dropdown.previousPage:IsEnabled(), page > 1)
         equal(dropdown.nextPage:IsEnabled(), page < dropdown.pageCount)
@@ -386,6 +386,9 @@ test("FONT large shared registries stay selectable through bounded reusable pick
         if button.value == "LSM:Paging 41" then button:Click(); break end
     end
     equal(addon:GetMobilityConfig().style.font.face, "LSM:Paging 41", "last page selection writes the intended stable identity")
+    equal(dropdown.menu.cuiState, "closing", "selection starts the owned close transition")
+    equal(dropdown.menu.cuiInteractive, false, "outgoing font rows cannot receive input")
+    dropdown.menu.closeAnimation:GetScript("OnFinished")()
     equal(dropdown.menu:IsShown(), false, "selection closes the font picker")
     equal(#state.errors, 0)
 end)

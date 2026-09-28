@@ -19,6 +19,7 @@ The font picker separates Blizzard / Client fonts from SharedMedia fonts registe
 Saved font choices stay intact. A missing SharedMedia choice keeps its name through export/import and can resolve again when its provider registers it. The picker shows the selected preference separately from the effective client fallback; hover a font button to read long names in full. Live reminders and Preview update immediately. New translations require native-speaker and client visual review; report missing glyphs, clipped labels or incorrect wording with locale/build.
 
 - Faction Header and class/spec Body themes are automatic; there is no Themes page.
+- Options uses the shared Modern CUI shell and controls. Proc Display uses Native / Custom / Timer Only segments, with section cards and session-only Advanced disclosure. Class Tools has no page in this release.
 - Mobility shares settings within each class. Free move shares appearance but has separate XY. Proc typography is class+spec; regions have independent XY and optional RGB. Mobility/Free move remain fixed class color.
 - Inputs save on Enter; sliders/menus update immediately. Proc colors preview until Okay; Cancel/close/context changes discard drafts.
 - Blank Header/Body/sidebar/static areas drag Options; controls retain normal input. Reminders are not draggable.

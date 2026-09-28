@@ -7,7 +7,7 @@ local wordmarkUV = { 4 / 512, 508 / 512, 7 / 128, 120 / 128 }
 local contentWidth, contentHeight = 504, 113
 local wordmarkWidth = math.min(224, 44 * contentWidth / contentHeight)
 local wordmarkHeight = wordmarkWidth * contentHeight / contentWidth
-local accent = { 0.78, 0.94, 1 }
+local accent = addon.DesignSystem.Token("accentStart")
 
 local function ResetHighlight(panel)
     local header = panel.brandingHeader
@@ -57,7 +57,7 @@ function addon:CreateOptionsBranding(panel)
     if panel.brandingHeader then return panel.brandingHeader end
     local header = CreateFrame("Frame", nil, panel)
     header:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, 0)
-    header:SetSize(720, 76)
+    header:SetSize(panel.shellGrid.width, panel.shellGrid.headerHeight)
     header:EnableMouse(true)
     panel.brandingHeader = header
 
@@ -77,16 +77,17 @@ function addon:CreateOptionsBranding(panel)
     header.wordmark = wordmark
 
     local line = header:CreateTexture(nil, "BORDER")
-    line:SetPoint("TOPLEFT", header, "TOPLEFT", 24, -75)
-    line:SetSize(672, 1)
-    line:SetColorTexture(1, 1, 1, 0.13)
+    line:SetPoint("TOPLEFT", header, "TOPLEFT", panel.shellGrid.padding, -panel.shellGrid.headerHeight + 1)
+    line:SetSize(panel.shellGrid.width - panel.shellGrid.padding * 2, 1)
+    addon.DesignSystem.ApplyGradient(line, .65)
     header.accentLine = line
 
     local subtitle = header:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     subtitle:SetPoint("TOPRIGHT", header, "TOPRIGHT", -24, -20)
-    subtitle:SetSize(250, 18)
+    subtitle:SetSize(340, 36)
     subtitle:SetJustifyH("RIGHT")
-    subtitle:SetTextColor(0.68, 0.74, 0.78)
+    subtitle:SetWordWrap(true)
+    subtitle:SetTextColor(unpack(addon.DesignSystem.Token("textSecondary")))
     subtitle:SetText(self.L.options .. " / " .. self.version)
     header.subtitle = subtitle
 

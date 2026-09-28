@@ -104,8 +104,9 @@ local function setup(saved, loggedIn, client)
     env.CarGOUIDB = saved
     env.SlashCmdList = {}
     env.UISpecialFrames = {}
-    env.UIParent = { name = "UIParent", GetWidth = function() return 1920 end,
-        GetHeight = function() return 1080 end, GetEffectiveScale = function() return 1 end }
+    env.UIParent = { name = "UIParent", GetWidth = function() return client.uiWidth or 1920 end,
+        GetHeight = function() return client.uiHeight or 1080 end,
+        GetEffectiveScale = function() return client.uiScale or 1 end }
     function env.UIParent:GetCenter() return self:GetWidth() / 2, self:GetHeight() / 2 end
     env.STANDARD_TEXT_FONT = client.standardFont or "Fonts\\FRIZQT__.ttf"
     env.GameFontNormal = { template = "GameFontNormal" }
@@ -471,14 +472,23 @@ local function setup(saved, loggedIn, client)
     function object:GetNumPoints() return self.point and 1 or 0 end
     function object:SetAllPoints(relative) self.allPoints = relative or self.parent end
     function object:SetScrollChild(child) self.scrollChild = child end
+    function object:GetScrollChild() return self.scrollChild end
     function object:UpdateScrollChildRect() self.scrollChildUpdates = (self.scrollChildUpdates or 0) + 1 end
     function object:EnableMouseWheel(value) self.mouseWheelEnabled = value end
-    function object:SetVerticalScroll(value) self.verticalScroll = value end
+    function object:SetVerticalScroll(value)
+        local changed = self.verticalScroll ~= value
+        self.verticalScroll = value
+        if changed and self.scripts.OnVerticalScroll then self.scripts.OnVerticalScroll(self, value) end
+    end
     function object:GetVerticalScroll() return self.verticalScroll or 0 end
     function object:GetVerticalScrollRange() return self.scrollChild and math.max(0, self.scrollChild:GetHeight() - self:GetHeight()) or 0 end
-    function object:SetSize(width, height) self.width, self.height = width, height end
-    function object:SetWidth(width) self.width = width end
-    function object:SetHeight(height) self.height = height end
+    function object:SetSize(width, height)
+        local changed = self.width ~= width or self.height ~= height
+        self.width, self.height = width, height
+        if changed and self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self, width, height) end
+    end
+    function object:SetWidth(width) self:SetSize(width, self.height) end
+    function object:SetHeight(height) self:SetSize(self.width, height) end
     function object:GetWidth() return self.width or (self.allPoints and self.allPoints:GetWidth()) end
     function object:GetHeight() return self.height or (self.allPoints and self.allPoints:GetHeight()) end
     function object:SetScale(scale) self.scale = scale end
@@ -538,19 +548,33 @@ local function setup(saved, loggedIn, client)
     function object:SetFrameLevel(level) self.frameLevel = level end
     function object:GetFrameLevel() return self.frameLevel or 1 end
     function object:EnableMouse(enabled) self.mouseEnabled = enabled end
+    function object:IsMouseEnabled() return self.mouseEnabled == true end
+    function object:SetButtonState(value) self.buttonState = value end
+    function object:GetButtonState() return self.buttonState or "NORMAL" end
     function object:SetScript(event, callback)
         assert(event ~= "OnUpdate" or callback == nil
             or (self.name == "LibDBIcon10_CarGOUI" and self.isMouseDown == true),
             "Only the vendored icon's active mouse drag may use a transient OnUpdate")
-        self.scripts[event] = callback
+        self.baseScripts = self.baseScripts or {}
+        self.baseScripts[event] = callback
+        local hooks = self.scriptHooks and self.scriptHooks[event]
+        if hooks then
+            self.scripts[event] = function(...)
+                if callback then callback(...) end
+                for _, hook in ipairs(hooks) do hook(...) end
+            end
+        else self.scripts[event] = callback end
     end
     function object:GetScript(event) return self.scripts[event] end
     function object:HookScript(event, callback)
-        local previous = self.scripts[event]
-        self:SetScript(event, function(...)
-            if previous then previous(...) end
-            callback(...)
-        end)
+        -- Native post-hooks survive later SetScript replacements. Keep the
+        -- event dispatcher available to fixture calls that simulate events.
+        local previous
+        if self.baseScripts then previous = self.baseScripts[event] else previous = self.scripts[event] end
+        self.scriptHooks = self.scriptHooks or {}
+        self.scriptHooks[event] = self.scriptHooks[event] or {}
+        self.scriptHooks[event][#self.scriptHooks[event] + 1] = callback
+        self:SetScript(event, previous)
     end
     function object:RegisterEvent(event) self.events[event] = true end
     function object:UnregisterEvent(event) self.events[event] = nil end
@@ -583,8 +607,9 @@ local function setup(saved, loggedIn, client)
             "FontString requires a font before setting or measuring text")
     end
     function object:SetText(text)
-        requireFont(self)
+        requireFont(self.buttonLabel or self)
         self.textValue = text
+        if self.buttonLabel then self.buttonLabel:SetText(text) end
         if self.nativeDurationText then self.nativeRenderedText = text end
         state.textWrites = state.textWrites + 1
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
@@ -600,6 +625,10 @@ local function setup(saved, loggedIn, client)
             self.buttonLabel:SetText(self.textValue or "")
         end
         return self.buttonLabel
+    end
+    function object:SetFontString(fontString)
+        assert(self.kind == "Button" or self.kind == "CheckButton", "SetFontString is a native Button API")
+        self.buttonLabel = fontString
     end
     function object:GetStringWidth()
         if self.nativeDurationText then
@@ -699,7 +728,12 @@ local function setup(saved, loggedIn, client)
     end
     function object:HasFocus() return self.focused or false end
     function object:HighlightText(...) self.highlight = { ... } end
-    function object:SetEnabled(value) self.enabled = not not value end
+    function object:SetEnabled(value)
+        local wasEnabled = self:IsEnabled()
+        self.enabled = not not value
+        local script = self.enabled and "OnEnable" or "OnDisable"
+        if wasEnabled ~= self.enabled and self.scripts[script] then self.scripts[script](self) end
+    end
     function object:Enable() self:SetEnabled(true) end
     function object:Disable() self:SetEnabled(false) end
     function object:IsEnabled() return self.enabled ~= false end
@@ -711,8 +745,11 @@ local function setup(saved, loggedIn, client)
     function object:SetObeyStepOnDrag(value) self.obeyStep = value end
     function object:SetOrientation(value) self.orientation = value end
     function object:SetThumbTexture(value)
-        self.thumbTexture = self:CreateTexture(nil, "ARTWORK")
-        self.thumbTexture:SetTexture(value)
+        if type(value) == "table" then self.thumbTexture = value
+        else
+            self.thumbTexture = self:CreateTexture(nil, "ARTWORK")
+            self.thumbTexture:SetTexture(value)
+        end
     end
     function object:GetThumbTexture() return self.thumbTexture end
     function object:SetValue(value)
@@ -729,7 +766,9 @@ local function setup(saved, loggedIn, client)
     function object:Click()
         if not self:IsEnabled() then return end
         if self.scripts.PreClick then self.scripts.PreClick(self, "LeftButton", false) end
-        if self.kind == "CheckButton" then self:SetChecked(not self:GetChecked()) end
+        -- Retail toggles CheckButton state natively before invoking OnClick;
+        -- it does not call an addon override of the Lua SetChecked method.
+        if self.kind == "CheckButton" then self.checked = not self:GetChecked() end
         if self.scripts.OnClick then self.scripts.OnClick(self, "LeftButton", false) end
         if self.scripts.PostClick then self.scripts.PostClick(self, "LeftButton", false) end
     end
@@ -1335,6 +1374,11 @@ local function choose(dropdown, value)
     for _, option in ipairs(dropdown.choices) do
         if option.value == value then
             option:Click()
+            if dropdown.menu.cuiState == "closing" then
+                equal(dropdown.menu.cuiInteractive, false, "outgoing menu cannot accept another action")
+                equal(option:IsEnabled(), false, "outgoing rows are disabled during the close animation")
+                dropdown.menu.closeAnimation:GetScript("OnFinished")()
+            end
             equal(dropdown.menu:IsShown(), false, "dropdown closes after selection")
             return
         end
@@ -1646,7 +1690,8 @@ test("zhCN clients use automatic localization and retain saved appearance on rel
         local panel, controls = addon.optionsFrame, addon.optionsFrame.controls
         local categories = {}
         for _, category in ipairs(panel.categories) do categories[category.key] = category end
-        equal(categories.general:GetText(), "> " .. addon.L.general, "active category follows locale")
+        equal(categories.general:GetText(), addon.L.general, "active category follows locale")
+        truthy(categories.general.selected, "selection is an owned visual state, not an ASCII prefix")
         equal(categories.mobility:GetText(), addon.L.mobility, "Mobility category follows locale")
         equal(controls.close:GetText(), "关闭", "close button uses Simplified Chinese")
         truthy(panel.feedback:GetText():find("Enter", 1, true), "opening guidance teaches Enter")
@@ -2252,7 +2297,8 @@ test("branding callbacks stay isolated and ordinary settings do not resize or re
     panel.header:GetScript("OnDragStop")(panel.header)
     panel.mockCenter = nil
     equal(group.plays, initialPlays, "settings, categories and dragging do not restart playing sweep")
-    equal(group.stops, initialStops, "ordinary settings never interrupt sweep")
+    equal(group.stops, initialStops + 1, "page changes settle the active UI sweep once")
+    equal(group:IsPlaying(), false, "page navigation cannot leave old UI motion active")
     equal(header.wordmark:GetWidth(), base.width, "reminder font/scale do not change brand width")
     equal(header.wordmark:GetHeight(), base.height, "reminder font/scale do not change brand height")
     equal(header.wordmark:GetScale(), base.scale, "reminder scale does not change brand scale")
@@ -3327,7 +3373,7 @@ test("updating Proc spec style updates all its regions while leaving Mobility fo
     end
 end)
 
-test("Alliance Arcane resolves an Alliance-only blue Header and separate violet Arcane Body", function()
+test("Alliance Arcane preserves faction and spec identity inside the graphite CUI design", function()
     local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
     equal(state.factionReads, 0, "hidden Options performs no decorative identity reads")
     local before = copy(addon.db)
@@ -3339,10 +3385,11 @@ test("Alliance Arcane resolves an Alliance-only blue Header and separate violet 
     equal(info.themeKey, "alliance_arcane", "specified combination selected")
     equal(info.headerKey, "alliance", "Header identity depends only on faction")
     equal(info.bodyKey, "arcane", "Body identity depends only on current class and spec")
-    same(panel.theme.header.gradient.first, { 0.025, 0.075, 0.18, 1 }, "header starts in deep Alliance blue")
-    same(panel.theme.header.gradient.last, { 0.06, 0.28, 0.52, 1 }, "header remains blue rather than blending spec color")
-    same(panel.theme.body.gradient.first, { 0.064, 0.031, 0.11, 1 }, "body starts in deep Arcane violet")
-    same(panel.theme.body.gradient.last, { 0.17, 0.078, 0.245, 1 }, "body has a restrained violet gradient")
+    same(panel.theme.header.gradient.first, { 0.025, 0.075, 0.18, .3 }, "header retains a restrained faction identity layer")
+    same(panel.theme.header.gradient.last, { 0.06, 0.28, 0.52, .3 }, "header identity remains independent of spec")
+    local base, raised = addon.DesignSystem.surfaceBase, addon.DesignSystem.surfaceRaised
+    same(panel.theme.body.gradient.first, { base[1], base[2], base[3], 1 }, "body uses central graphite surface")
+    same(panel.theme.body.gradient.last, { raised[1], raised[2], raised[3], 1 }, "body depth uses the raised surface token")
     same(panel.brandingHeader.sweep.vertexColor, { 0.30, 0.66, 1.00 }, "brand emphasis belongs to faction Header")
     equal(panel.brandingHeader.wordmark.vertexColor, nil, "blue/gold wordmark receives no tint")
     same(addon.db, before, "automatic theme never writes saved reminder settings")
@@ -7596,7 +7643,9 @@ test("RC2 drag cleanup preserves foreign global callbacks and ignores unrelated 
     for _, event in ipairs(events) do addon:RegisterEvent(event, foreign) end
     local baseline = copy(addon:GetEventDiagnostics())
     panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
-    for _, event in ipairs(events) do equal(addon:GetEventDiagnostics().perEvent[event], 2, "drag adds only its own callback") end
+    for _, event in ipairs(events) do
+        equal(addon:GetEventDiagnostics().perEvent[event], baseline.perEvent[event] + 1, "drag adds only its own callback")
+    end
     for _, event in ipairs({ "GLOBAL_MOUSE_UP", "GLOBAL_MOUSE_DOWN" }) do
         for _, button in ipairs({ "RightButton", "MiddleButton", secret("LeftButton") }) do
             state:fire(event, button)
@@ -7752,7 +7801,8 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
 
-for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua" }) do
+for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua",
+    "modern_controls.lua", "modern_shell.lua", "modern_pages.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,
         root = root, metadata = metadata, login = login, setup = setup, options = options,

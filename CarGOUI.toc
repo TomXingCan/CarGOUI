@@ -47,6 +47,9 @@ Modules\Mobility\Runtime.lua
 Modules\Mobility\FreeMove.lua
 Core\Diagnostics.lua
 UI\Preview.lua
+UI\DesignSystem.lua
+UI\Controls.lua
+UI\OptionsShell.lua
 UI\Branding.lua
 UI\Theme.lua
 UI\ProcColorPicker.lua

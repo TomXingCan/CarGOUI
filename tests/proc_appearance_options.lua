@@ -11,7 +11,7 @@ local function Open()
 end
 
 local function Choose(control, value)
-    control:Click()
+    if control.menu then control:Click() end
     for _, button in ipairs(control.choices) do
         if button.value == value and button:IsShown() and button:IsEnabled() then
             button:Click()
@@ -38,10 +38,11 @@ test("appearance region editor progressively discloses only custom controls", fu
     Choose(controls.procArt_mode, "custom")
     truthy(panel.procArtworkSection:IsShown()); truthy(panel.procTransformSection:IsShown())
     truthy(panel.procAnimationSection:IsShown())
-    equal(panel.procAdvancedSection:IsShown(), false)
+    truthy(panel.procAdvancedSection:IsShown(), "Advanced header remains available")
+    equal(panel.procAdvancedSection.content:IsShown(), false)
     local saved = copy(addon.db)
     controls.procAdvanced:Click()
-    truthy(panel.procAdvancedSection:IsShown())
+    truthy(panel.procAdvancedSection.content:IsShown())
     same(addon.db, saved, "Advanced is session-only disclosure")
     Choose(controls.procArt_mode, "timer")
     equal(panel.procArtworkSection:IsShown(), false); equal(panel.procAdvancedSection:IsShown(), false)
@@ -60,7 +61,7 @@ test("appearance Proc selector scopes visible stable regions and region switches
         Choose(controls.procSelector, key)
         for _, region in ipairs(controls.procEntry.choices) do
             if region:IsShown() then
-                truthy(region:IsEnabled())
+                truthy(region.cuiAvailable, "matching region is available when its menu opens")
                 Choose(controls.procEntry, region.value)
                 local entry = addon:GetSelectedProcColorEntry()
                 equal(entry.id, region.value)
@@ -115,7 +116,8 @@ test("appearance gallery uses audited thumbnails bounded pages and cross-class a
     local entry = addon:GetSelectedProcColorEntry()
     tile:Click()
     equal(addon:GetProcRegionAppearance(entry).assetKey, tile.asset.key)
-    truthy(tile.selected:IsShown())
+    truthy(tile.selected, "tile gradient is selected")
+    truthy(tile.selectionLabel:IsShown(), "selected text badge is visible")
     equal(entry.class, "MAGE", "choosing artwork does not change trigger ownership")
     controls.procOwnArtwork:Click()
     equal(addon:GetProcRegionAppearance(entry).assetKey, nil)

@@ -1,0 +1,220 @@
+-- Native widget fixtures prove ownership and event lifecycle, not client pixels.
+local h = ...
+local test, equal, truthy, same, copy = h.test, h.equal, h.truthy, h.same, h.copy
+
+local function Fixture()
+    local env, addon, state = h.login()
+    local panel = env.CreateFrame("Frame", nil, env.UIParent)
+    panel:SetSize(900, 640); panel:SetPoint("CENTER", env.UIParent, "CENTER", 0, 0)
+    panel.cuiPanel, panel.editBoxes, panel.dropdowns = panel, {}, {}
+    panel.feedback = addon.CUI.Label(panel, "", 24, -600, 600, 20)
+    panel.submissions = {}
+    panel.submit = function(patch)
+        panel.submissions[#panel.submissions + 1] = patch
+        return true
+    end
+    return env, addon, state, panel, addon.CUI
+end
+
+local function Finish(group)
+    group:Stop()
+    local finished = group:GetScript("OnFinished")
+    if finished then finished(group) end
+end
+
+test("CUI buttons own graphite states gradient selection and bounded hover motion", function()
+    local _, addon, state, panel, C = Fixture()
+    local clicked = 0
+    local button = C.Button(panel, "Reusable control", 24, -100, 220, function() clicked = clicked + 1 end)
+    equal(button.template, nil, "button has no stock visual template")
+    same(button.cuiSkin.fill.color, { addon.DesignSystem.surfaceRaised[1], addon.DesignSystem.surfaceRaised[2], addon.DesignSystem.surfaceRaised[3], 1 })
+    local groups = #state.animations
+    button:GetScript("OnEnter")(button)
+    truthy(button.hoverAnimation:IsPlaying()); truthy(button.cuiHovered)
+    button:GetScript("OnMouseDown")(button); truthy(button.cuiPressed)
+    button:GetScript("OnMouseUp")(button); equal(button.cuiPressed, false)
+    button:SetSelected(true); truthy(button.themeSelection:IsShown())
+    same(button.themeSelection.gradient.first, { .105, .810, .790, .20 })
+    button:Click(); equal(clicked, 1)
+    button:Disable(); button:Click(); equal(clicked, 1, "disabled button cannot submit")
+    truthy(not button.hoverAnimation:IsPlaying())
+    button:Enable(); button:GetScript("OnEnter")(button); button:Hide()
+    truthy(not button.hoverAnimation:IsPlaying())
+    button:GetScript("OnLeave")(button)
+    truthy(not button.hoverAnimation:IsPlaying(), "late hidden mouse-leave cannot restart motion")
+    equal(#state.animations, groups, "state transitions reuse native groups")
+end)
+
+test("CUI toggle reuses owned track thumb and native transition without settings side effects", function()
+    local _, addon, state, panel, C = Fixture()
+    local before, value = copy(addon.db), nil
+    local toggle = C.Toggle(panel, panel, "Switch", 24, -100, function(checked) value = checked end)
+    equal(toggle.template, nil)
+    toggle:SetChecked(false); truthy(not toggle.accent:IsShown())
+    local groups = #state.animations
+    toggle:Click(); equal(value, true); truthy(toggle.accent:IsShown())
+    truthy(toggle.toggleAnimation:IsPlaying())
+    Finish(toggle.toggleAnimation)
+    local _, _, _, x = toggle.thumb:GetPoint(1); equal(x, 24)
+    toggle:Click(); equal(value, false); Finish(toggle.toggleAnimation)
+    _, _, _, x = toggle.thumb:GetPoint(1); equal(x, 4)
+    equal(#state.animations, groups)
+    same(addon.db, before, "primitive callbacks do not choose gameplay settings")
+end)
+
+test("CUI dropdown motion transfers ownership and disables outgoing rows before hiding", function()
+    local _, _, state, panel, C = Fixture()
+    local count = 0
+    local entries = { { value = "first", label = "First" }, { value = "second", label = "Second" } }
+    local first = C.Dropdown(panel, panel, "First selector", 24, -100, entries, nil, function() count = count + 1 end)
+    local second = C.Dropdown(panel, panel, "Second selector", 500, -100, entries, nil, function() count = count + 1 end)
+    truthy(not first.menu:IsShown()); equal(first.menu.cuiState, "closed")
+    truthy(not first.choices[1]:IsEnabled() and not first.choices[1]:IsMouseEnabled())
+    first.choices[1]:GetScript("OnClick")(first.choices[1]); equal(count, 0)
+    local frames, groups = #state.frames, #state.animations
+    first:Click()
+    equal(panel.activeDropdown, first); equal(first.menu.cuiState, "opening")
+    truthy(first.menu.openAnimation:IsPlaying())
+    equal(first.menu.openAnimation.animations[1].duration, .12)
+    equal(first.menu.openAnimation.animations[1].fromAlpha, 0)
+    equal(first.menu.openAnimation.animations[1].toAlpha, 1)
+    same(first.menu.openAnimation.animations[2].offset, { 0, 8 })
+    Finish(first.menu.openAnimation); equal(first.menu.cuiState, "open")
+    second:Click()
+    equal(panel.activeDropdown, second)
+    equal(first.menu.cuiState, "closing"); truthy(first.menu:IsShown(), "outgoing menu hides after animation")
+    truthy(not first.menu.cuiInteractive and not first.choices[1]:IsMouseEnabled())
+    first.choices[1]:GetScript("OnClick")(first.choices[1]); equal(count, 0, "stale outgoing callback is guarded")
+    equal(first.menu.closeAnimation.animations[1].duration, .09)
+    Finish(first.menu.closeAnimation); truthy(not first.menu:IsShown())
+    second.choices[2]:Click(); equal(count, 1)
+    equal(second.menu.cuiState, "closing"); equal(panel.activeDropdown, nil)
+    Finish(second.menu.closeAnimation)
+    for _ = 1, 10 do first:Click(); Finish(first.menu.openAnimation); C.CloseMenus(panel, true) end
+    equal(#state.frames, frames); equal(#state.animations, groups, "menus and rows do not churn")
+end)
+
+test("CUI dropdown paging filters resize and disabled lifecycle preserve reusable rows", function()
+    local _, _, state, panel, C = Fixture()
+    local entries = {}
+    for index = 1, 25 do entries[index] = { value = index, label = "Localized resource " .. index } end
+    local picker = C.Dropdown(panel, panel, "Resources", 680, -400, entries, nil, function() end, 8)
+    picker:SetWidth(196)
+    local frames, groups = #state.frames, #state.animations
+    equal(#picker.choices, 8); equal(picker.pageCount, 4)
+    picker:SetPage(4); equal(picker.choices[1].value, 25)
+    picker:SetPage(1); picker:SelectValue(17); equal(picker.page, 3)
+    picker:SetEntryLabel(17, "Updated localized label")
+    equal(picker.choices[1].fontTooltip, "Updated localized label")
+    picker:Click(); truthy(picker.menu:GetWidth() <= panel:GetWidth() - 24)
+    picker:Disable()
+    equal(picker.menu.cuiState, "closed"); truthy(not picker.menu:IsShown())
+    for _, row in ipairs(picker.choices) do truthy(not row:IsMouseEnabled()) end
+    picker:Enable(); picker:FilterChoices({ [17] = true })
+    picker:Click(); truthy(picker.choices[1]:IsEnabled())
+    for index = 2, #picker.choices do truthy(not picker.choices[index]:IsEnabled()) end
+    C.StopMotion(panel)
+    equal(#state.frames, frames); equal(#state.animations, groups)
+end)
+
+test("CUI input focus invalid feedback and slider Enter validation preserve drafts", function()
+    local _, addon, _, panel, C = Fixture()
+    local saved
+    panel.submit = function(patch)
+        if type(patch.value) ~= "number" or patch.value < 0 or patch.value > 10 then
+            C.Feedback(panel, "Invalid number", true); return false
+        end
+        saved = patch.value; C.Feedback(panel, "Saved", false); return true
+    end
+    local slider = C.Slider(panel, panel, "Bounded number", -100, { min = 0, max = 10 }, .5, function(value) return { value = value } end)
+    local edit = slider.editBox
+    equal(slider.template, nil); equal(edit.template, nil)
+    equal(slider:GetThumbTexture().kind, "Texture", "thumb uses owned solid geometry")
+    edit:SetFocus(); equal(panel.focusedInput, edit)
+    edit:SetText("invalid"); edit:GetScript("OnTextChanged")(edit, true)
+    equal(saved, nil, "typing does not save")
+    edit:GetScript("OnEnterPressed")()
+    truthy(edit.dirty and edit.invalid and edit:HasFocus(), "failed Enter keeps draft and invalid focus")
+    same(edit.cuiSkin.border[1].color, { addon.DesignSystem.danger[1], addon.DesignSystem.danger[2], addon.DesignSystem.danger[3], 1 })
+    edit:SetText("4.5"); edit:GetScript("OnTextChanged")(edit, true)
+    equal(edit.invalid, false, "typing clears stale invalid presentation")
+    edit:GetScript("OnEnterPressed")(); equal(saved, 4.5); truthy(not edit.dirty and not edit:HasFocus())
+    slider:SetValue(6.26); equal(saved, 6.5, "slider retains bounded half-unit rounding")
+    same(slider.fill.gradient.last, { .400, .395, .920, 1 })
+    slider:Disable()
+    same(edit.textColor, addon.DesignSystem.textDisabled, "disabled numeric input has visible disabled feedback")
+    slider:Enable()
+    same(edit.textColor, addon.DesignSystem.textPrimary, "enabled input restores its readable token")
+end)
+
+test("CUI sections and segmented controls are reusable session-only editors", function()
+    local _, addon, _, panel, C = Fixture()
+    local before, selected = copy(addon.db), nil
+    local section = C.Section(panel, "Advanced", 24, -100, 640, { height = 220, collapsible = true, collapsed = true })
+    truthy(section.collapsed); equal(section:GetHeight(), 42); truthy(not section.content:IsShown())
+    section.collapseButton:Click(); equal(section.collapsed, false); equal(section:GetHeight(), 220)
+    local segments = C.Segmented(panel, section.content, "Editor", 0, 0, 616,
+        { { value = "common", label = "Common Tools" }, { value = "spec", label = "Spec Tools" } },
+        function(value) selected = value end)
+    segments:SelectValue("common")
+    truthy(segments.choices[1].selected and not segments.choices[2].selected)
+    segments.choices[2]:Click(); equal(selected, "spec")
+    segments:SelectValue("spec"); truthy(segments.choices[2].themeSelection:IsShown())
+    segments:SetEnabled(false); segments.choices[1]:Click(); equal(selected, "spec")
+    section:SetCollapsed(true)
+    same(addon.db, before, "disclosure/selection do not add SavedVariables")
+end)
+
+test("CUI page containers preserve transparent identity layers while section cards retain owned skins", function()
+    local _, addon = h.login()
+    local panel = h.options(addon)
+    for _, page in pairs(panel.pages) do
+        local record = page.optionsThemeRecord
+        truthy(record and record.kind == "content", "production pages remain registered theme controls")
+        equal(page.cuiSkin, nil, "content containers have no opaque full-page skin")
+        equal(record.fill:GetHeight(), 1, "content decoration is only the title divider")
+        equal(record.fill.allPoints, nil, "divider never covers the complete page")
+        equal(#record.border, 0)
+        local registered = false
+        for _, existing in ipairs(panel.themeControls) do if existing == record then registered = true end end
+        truthy(registered, "transparent pages retain the shared theme lifecycle")
+    end
+    local count = #panel.themeControls
+    addon:RegisterOptionsThemeControl(panel, panel.pages.general, "content")
+    equal(#panel.themeControls, count, "re-registration does not allocate another divider")
+    local section = addon.CUI.Section(panel.pages.general, "Owned card", 0, -40, 640, { height = 120 })
+    truthy(section.cuiSkin and section.optionsThemeRecord == section.cuiSkin)
+    equal(section.cuiSkin.fill.allPoints, section, "cards retain their complete raised surface")
+    equal(#section.cuiSkin.border, 4)
+end)
+
+test("CUI thin scrolling clamps wheel and child-resize positions without polling", function()
+    local env, _, state, panel, C = Fixture()
+    local scroll = C.ScrollFrame(panel, panel, 24, -100, 640, 300)
+    local content = env.CreateFrame("Frame", nil, scroll); content:SetSize(640, 900)
+    scroll:SetScrollChild(content); scroll:RefreshRange()
+    equal(scroll.template, nil); equal(scroll.scrollBar.template, nil)
+    equal(scroll.cuiRange, 600); truthy(scroll.scrollBar:IsShown())
+    scroll:GetScript("OnMouseWheel")(scroll, -3); equal(scroll:GetVerticalScroll(), 90)
+    scroll:GetScript("OnMouseWheel")(scroll, -100); equal(scroll:GetVerticalScroll(), 600)
+    content:SetHeight(340); scroll:RefreshRange(); equal(scroll:GetVerticalScroll(), 40)
+    content:SetHeight(200); scroll:RefreshRange(); equal(scroll:GetVerticalScroll(), 0)
+    truthy(not scroll.scrollBar:IsShown())
+    equal(state:activeTimers(), 0)
+end)
+
+test("CUI cleanup stops every UI motion and solid gradient fallback remains usable", function()
+    local _, addon, state, panel, C = Fixture()
+    local button = C.Button(panel, "Hover", 24, -100, 160, function() end)
+    local toggle = C.Toggle(panel, panel, "Toggle", 24, -150, function() end)
+    local menu = C.Dropdown(panel, panel, "Menu", 24, -200, { { value = 1, label = "One" } }, nil, function() end)
+    button:GetScript("OnEnter")(button); toggle:Click(); menu:Click()
+    C.StopMotion(panel)
+    for _, record in ipairs(panel.cuiMotion) do truthy(not record.group:IsPlaying()) end
+    truthy(not menu.menu:IsShown() and not menu.menu:IsMouseEnabled())
+    local texture = button:CreateTexture(nil, "ARTWORK")
+    texture.SetGradient = false
+    addon.DesignSystem.ApplyGradient(texture, .6)
+    same(texture.color, { .105, .810, .790, .6 }, "older-client gradient fallback is solid and readable")
+    for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil) end
+end)

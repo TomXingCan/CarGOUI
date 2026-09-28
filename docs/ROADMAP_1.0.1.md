@@ -13,6 +13,7 @@ Appearance v2 is implemented separately from base `f40b854e04ffe13914e1669eba4f3
 | --- | --- |
 | [#6: Font selector and LibSharedMedia](https://github.com/TomXingCan/CarGOUI/issues/6) | Fix the ineffective font selector behavior and support fonts registered through LibSharedMedia while preserving existing saved preferences and safe client fallback. |
 | [#7: Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7) | A Blizzard FileDataID asset catalog, cross-class Blizzard Proc artwork, independent per-region visual customization, and animation presets. |
+| [#13: Modern CUI shell foundation](https://github.com/TomXingCan/CarGOUI/issues/13) | A unified Options shell, design tokens, reusable owned controls and page registry, stacked on #12. See [architecture and acceptance](MODERN_UI_1.0.1.md). |
 
 Proc Appearance v2 changes presentation only. Existing verified native Proc
 trigger semantics remain authoritative. The catalog ships metadata referring
@@ -25,7 +26,7 @@ transfer format 1 and both production TOC versions remain unchanged.
 Production Class Tools development is paused and must not block 1.0.1. The
 following are outside this release:
 
-- Production Class Tools infrastructure and interface.
+- Production Class Tools gameplay, settings and interface. The generic Options page registry reserves future capacity without registering a Class Tools page.
 - Arcane Missiles Chain Check.
 - Combustion Counter (Pyroblast / Flamestrike).
 - Alter Time Recovery Feedback.

@@ -23,8 +23,7 @@ local function OnOptionsDragBoundary(self, event, button)
     if event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then
         local panel = self.optionsFrame
         if panel and panel:IsShown() then
-            panel:SetScale(math.min(1, UIParent:GetWidth() / 752, UIParent:GetHeight() / 592))
-            self:ApplyOptionsPosition(true)
+            self:ClampOptionsShell()
         end
     end
 end
@@ -32,6 +31,13 @@ end
 local function WatchOptionsDrag(self, enabled)
     local method = enabled and self.RegisterEvent or self.UnregisterEvent
     for _, event in ipairs(dragBoundaryEvents) do method(self, event, OnOptionsDragBoundary) end
+end
+
+local function OnOptionsViewportChanged(self)
+    local panel = self.optionsFrame
+    -- A live drag keeps its existing boundary handler as the sole position
+    -- owner. Ordinary viewport changes only clamp the visible presentation.
+    if panel and panel:IsShown() and not panel.dragging then self:ClampOptionsShell() end
 end
 
 function addon:BeginOptionsDrag(button, surface)
@@ -86,61 +92,10 @@ local function ThemeControl(control, kind)
     end
 end
 
-local function Label(parent, text, x, y, width, height, template)
-    local label = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
-    label:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    label:SetSize(width, height or 20)
-    label:SetJustifyH("LEFT")
-    label:SetJustifyV("TOP")
-    label:SetWordWrap(true)
-    label:SetText(text)
-    return label
-end
-
-local function Backdrop(frame, r, g, b)
-    frame:SetBackdrop({
-        bgFile = "Interface\\Buttons\\WHITE8X8",
-        edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 1,
-    })
-    frame:SetBackdropColor(r, g, b, 0.98)
-    frame:SetBackdropBorderColor(0.22, 0.30, 0.34, 1)
-end
-
-local function Button(parent, text, x, y, width, callback)
-    local button = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
-    button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    button:SetSize(width, 28)
-    button:SetText(text)
-    -- Only owned, ordinary Options labels are measured/wrapped. Native timer
-    -- FontStrings never enter this path. Keep the normal font size and UTF-8.
-    local label = button:GetFontString()
-    if label then
-        label:SetWidth(width - 12)
-        label:SetHeight(26)
-        label:SetWordWrap(true)
-        button:HookScript("OnSizeChanged", function(self)
-            label:SetWidth(math.max(1, self:GetWidth() - 12))
-        end)
-    end
-    button:SetScript("OnClick", callback)
-    ThemeControl(button, "button")
-    return button
-end
-
-local function Feedback(panel, text, error)
-    panel.feedback:SetText(text)
-    if error then
-        panel.feedback:SetTextColor(1, 0.40, 0.35)
-    else
-        panel.feedback:SetTextColor(0.55, 0.87, 0.79)
-    end
-end
-
-local function CloseMenus(panel)
-    for _, dropdown in ipairs(panel.dropdowns) do
-        dropdown.menu:Hide()
-    end
-end
+local CUI = addon.CUI
+local Label, Button, EditBox = CUI.Label, CUI.Button, CUI.EditBox
+local CheckBox, Dropdown, Slider = CUI.CheckBox, CUI.Dropdown, CUI.Slider
+local Backdrop, Feedback, CloseMenus = CUI.Backdrop, CUI.Feedback, CUI.CloseMenus
 
 local function ClearEdits(panel)
     panel.positionDirty = false
@@ -149,6 +104,7 @@ local function ClearEdits(panel)
     for _, edit in ipairs(panel.editBoxes) do
         edit.dirty = false
         edit:ClearFocus()
+        if edit.SetInvalid then edit:SetInvalid(false) end
     end
 end
 
@@ -168,34 +124,8 @@ local function Submit(panel, patch, errorText)
     return ok
 end
 
-local function EditBox(panel, parent, x, y, width)
-    local edit = CreateFrame("EditBox", nil, parent, "InputBoxTemplate")
-    edit:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    edit:SetSize(width, 28)
-    edit:SetAutoFocus(false)
-    edit:SetMaxLetters(16)
-    edit:SetFontObject("ChatFontNormal")
-    edit:SetTextInsets(6, 6, 0, 0)
-    edit:SetScript("OnEscapePressed", function() panel:Hide() end)
-    ThemeControl(edit, "input")
-    panel.editBoxes[#panel.editBoxes + 1] = edit
-    return edit
-end
-
-local function CheckBox(panel, parent, text, x, y, buildPatch)
-    local check = CreateFrame("CheckButton", nil, parent, "UICheckButtonTemplate")
-    check:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-    check:SetSize(26, 26)
-    ThemeControl(check, "check")
-    Label(parent, text, x + 32, y - 5, 390, 22, "GameFontHighlight")
-    check:SetScript("OnClick", function(self)
-        Submit(panel, buildPatch(not not self:GetChecked()))
-    end)
-    return check
-end
-
 local function FontTooltip(control)
-    control:SetScript("OnEnter", function(self)
+    control:HookScript("OnEnter", function(self)
         if not self.fontTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(self.fontTooltip, 1, 1, 1, 1, true)
@@ -204,172 +134,8 @@ local function FontTooltip(control)
     local function HideTooltip(self)
         if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
     end
-    control:SetScript("OnLeave", HideTooltip)
+    control:HookScript("OnLeave", HideTooltip)
     control:HookScript("OnHide", HideTooltip)
-end
-
-local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect, pageSize)
-    Label(parent, text, x, y, 400, 22, "GameFontNormal")
-    local dropdown = Button(parent, "", x, y - 26, 280, nil)
-    local menu = CreateFrame("Frame", nil, panel, "BackdropTemplate")
-    menu:Hide()
-    menu:SetPoint("TOPLEFT", dropdown, "BOTTOMLEFT", 0, -3)
-    menu:SetSize(474, #entries * 28 + 12)
-    menu:SetFrameLevel(panel:GetFrameLevel() + 20)
-    menu:EnableMouse(true)
-    Backdrop(menu, 0.07, 0.09, 0.12)
-    ThemeControl(menu, "menu")
-    dropdown.menu = menu
-    dropdown.choices = {}
-    dropdown.page = 1
-    function dropdown:SetEntries(newEntries)
-        entries = newEntries
-        self.pageCount = pageSize and math.max(1, math.ceil(#entries / pageSize)) or 1
-        self.page = math.max(1, math.min(self.page, self.pageCount))
-        local first = pageSize and (self.page - 1) * pageSize + 1 or 1
-        local count = pageSize and math.min(pageSize, #entries - first + 1) or #entries
-        for index = 1, count do
-            local entry = entries[first + index - 1]
-            local value = entry.value
-            local choice = self.choices[index]
-            if not choice then
-                choice = Button(menu, entry.label, 6, -6 - (index - 1) * 28, 462, nil)
-                if pageSize then FontTooltip(choice) end
-                self.choices[index] = choice
-            end
-            choice.value = value
-            if pageSize then choice.fontTooltip = entry.label end
-            choice:SetText(entry.label)
-            choice:SetScript("OnClick", function()
-                if onSelect then onSelect(value) else Submit(panel, buildPatch(value)) end
-                menu:Hide()
-            end)
-            choice:Show()
-        end
-        for index = count + 1, #self.choices do
-            self.choices[index].value = nil
-            self.choices[index]:Hide()
-        end
-        menu:SetHeight(math.max(1, count) * 28 + (pageSize and 48 or 12))
-        if self.previousPage then
-            self.previousPage:SetEnabled(self.page > 1)
-            self.nextPage:SetEnabled(self.page < self.pageCount)
-            self.pageLabel:SetText(string.format("%d / %d", self.page, self.pageCount))
-        end
-    end
-    function dropdown:SetPage(page)
-        self.page = page
-        self:SetEntries(entries)
-    end
-    if pageSize then
-        -- A bounded font picker reuses one page of buttons; no polling or extra
-        -- framework is needed for large shared-media registries.
-        dropdown.previousPage = Button(menu, addon:Text("Previous"), 6, 0, 140, function()
-            dropdown:SetPage(dropdown.page - 1)
-        end)
-        dropdown.nextPage = Button(menu, addon:Text("Next"), 328, 0, 140, function()
-            dropdown:SetPage(dropdown.page + 1)
-        end)
-        dropdown.pageLabel = Label(menu, "", 160, 0, 150, 24)
-        for _, control in ipairs({ dropdown.previousPage, dropdown.nextPage, dropdown.pageLabel }) do
-            control:ClearAllPoints()
-        end
-        dropdown.previousPage:SetPoint("BOTTOMLEFT", menu, "BOTTOMLEFT", 6, 6)
-        dropdown.nextPage:SetPoint("BOTTOMRIGHT", menu, "BOTTOMRIGHT", -6, 6)
-        dropdown.pageLabel:SetPoint("BOTTOM", menu, "BOTTOM", 0, 8)
-        dropdown.pageLabel:SetJustifyH("CENTER")
-    end
-    dropdown:SetEntries(entries)
-    dropdown:SetScript("OnClick", function()
-        local opening = not menu:IsShown()
-        CloseMenus(panel)
-        if opening then menu:Show() end
-    end)
-    function dropdown:SelectValue(value)
-        for index, entry in ipairs(entries) do
-            if entry.value == value then
-                self:SetText(entry.label .. "  v")
-                self.value = value
-                if pageSize then self:SetPage(math.ceil(index / pageSize)) end
-                return
-            end
-        end
-    end
-    function dropdown:SetEntryLabel(value, label)
-        for _, entry in ipairs(entries) do
-            if entry.value == value then
-                if entry.label == label then return end
-                entry.label = label
-                for _, choice in ipairs(self.choices) do
-                    if choice.value == value then choice:SetText(label); break end
-                end
-                if self.value == value then self:SetText(label .. "  v") end
-                return
-            end
-        end
-    end
-    function dropdown:FilterChoices(allowed)
-        local count = 0
-        for _, choice in ipairs(self.choices) do
-            local available = allowed[choice.value] == true
-            choice:SetShown(available)
-            choice:SetEnabled(available)
-            if available then
-                choice:ClearAllPoints()
-                choice:SetPoint("TOPLEFT", menu, "TOPLEFT", 6, -6 - count * 28)
-                count = count + 1
-            end
-        end
-        menu:SetHeight(math.max(1, count) * 28 + 12)
-        self:SetEnabled(count > 0)
-        if count == 0 then self:SetText(addon:Text("No entries")); self.value = nil; menu:Hide() end
-    end
-    panel.dropdowns[#panel.dropdowns + 1] = dropdown
-    return dropdown
-end
-
-local function Slider(panel, parent, text, y, range, step, buildPatch, errorText)
-    Label(parent, text, 0, y, 470, 22, "GameFontNormal")
-    local slider = CreateFrame("Slider", nil, parent)
-    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 30)
-    slider:SetSize(330, 18)
-    slider:SetOrientation("HORIZONTAL")
-    slider:SetMinMaxValues(range.min, range.max)
-    slider:SetValueStep(step)
-    slider:SetObeyStepOnDrag(true)
-    slider:EnableMouse(true)
-    local track = slider:CreateTexture(nil, "BACKGROUND")
-    track:SetPoint("LEFT", slider, "LEFT", 0, 0)
-    track:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
-    track:SetHeight(6)
-    track:SetColorTexture(0.20, 0.27, 0.30, 1)
-    slider:SetThumbTexture("Interface\\Buttons\\UI-SliderBar-Button-Horizontal")
-    slider:GetThumbTexture():SetSize(18, 24)
-    ThemeControl(slider, "slider")
-    Label(parent, tostring(range.min), 0, y - 54, 56)
-    local maximum = Label(parent, tostring(range.max), 274, y - 54, 56)
-    maximum:SetJustifyH("RIGHT")
-    local edit = EditBox(panel, parent, 362, y - 24, 112)
-    slider.editBox = edit
-    edit:SetScript("OnTextChanged", function(self, userInput)
-        if userInput and not panel.refreshing then self.dirty = true end
-    end)
-    local function CommitEdit()
-        edit.dirty = false
-        if Submit(panel, buildPatch(tonumber(edit:GetText())), errorText) then
-            edit:ClearFocus()
-        else
-            edit.dirty = true
-        end
-    end
-    edit:SetScript("OnEnterPressed", CommitEdit)
-    slider:SetScript("OnValueChanged", function(_, value)
-        if panel.refreshing or not panel:IsShown() then return end
-        local rounded = tonumber(string.format("%.2f", math.floor(value / step + 0.5) * step))
-        edit.dirty = false
-        Submit(panel, buildPatch(rounded), errorText)
-    end)
-    return slider
 end
 
 local function SetSlider(slider, value)
@@ -567,9 +333,7 @@ function addon:ShowMobilityDiagnostics()
         ThemeControl(dialog, "dialog")
         Label(dialog, L.diagnosticsTitle, 20, -16, 620, 24, "GameFontNormalLarge")
         Label(dialog, L.diagnosticsHint, 20, -48, 620, 36)
-        local scroll = CreateFrame("ScrollFrame", nil, dialog, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", dialog, "TOPLEFT", 20, -88)
-        scroll:SetSize(594, 288)
+        local scroll = CUI.ScrollFrame(panel, dialog, 20, -88, 620, 288)
         self:RegisterOptionsDragSurface(scroll)
         local edit = CreateFrame("EditBox", nil, scroll)
         edit:SetSize(588, 288)
@@ -580,6 +344,7 @@ function addon:ShowMobilityDiagnostics()
         edit:SetTextInsets(4, 4, 4, 4)
         edit:SetJustifyH("LEFT")
         edit:SetJustifyV("TOP")
+        addon.DesignSystem.Skin(edit, "input")
         scroll:SetScrollChild(edit)
         dialog.editBox = edit
         edit:SetScript("OnEscapePressed", function() dialog:Hide() end)
@@ -591,6 +356,7 @@ function addon:ShowMobilityDiagnostics()
             dialog.snapshot = addon.GetMobilityDiagnostics and addon:GetMobilityDiagnostics() or L.diagnosticsUnavailable
             local _, lines = string.gsub(dialog.snapshot, "\n", "")
             edit:SetHeight(math.max(288, (lines + 1) * 20))
+            scroll:RefreshRange()
             edit:SetText(dialog.snapshot)
             edit:SetFocus()
             edit:HighlightText()
@@ -647,7 +413,6 @@ function addon:RefreshOptions()
     controls.procStop:SetEnabled(self.previewState.mode ~= "off")
     panel.refreshing = false
     self:ApplyOptionsPosition()
-    self:RefreshTitleAnimation()
 
     local entries, allowed = self:GetPreviewEntries(), {}
     for _, entry in ipairs(entries) do allowed[entry.id] = true end
@@ -714,31 +479,23 @@ function addon:SelectOptionsCategory(key)
     local panel = self.optionsFrame
     if not panel then return end
     if InCombat() then self:CloseOptions(); return end
-    if not panel.pages[key] then key = "general" end
+    if not self.optionsPageRegistry[key] then key = "general" end
     if self.ClearSettingsTransferPage then self:ClearSettingsTransferPage() end
     self:CancelProcColorPicker()
-    CloseMenus(panel)
+    CUI.StopMotion(panel)
     if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
     ClearEdits(panel)
     CancelReset(panel)
     panel.activeCategory = key
-    if key == "importExport" then
-        self:CreateSettingsTransferPage(panel, panel.pages.importExport, {
-            Label = Label, Button = Button, Dropdown = Dropdown,
-            ThemeControl = ThemeControl, Feedback = Feedback,
-        })
-    end
+    self:BuildOptionsPage(key)
     for pageKey, page in pairs(panel.pages) do
         page:SetShown(pageKey == key)
     end
-    for _, button in ipairs(panel.categories) do
-        if panel.pages[button.key] then
-            local selected = button.key == key or (key == "appearance" and button.key == panel.appearanceKind)
-            button:SetText((selected and "> " or "") .. L[button.key])
-            self:ApplyOptionsCategoryTheme(button, selected)
-        end
-    end
-    Feedback(panel, key == "importExport" and L.transferHint or L.immediate)
+    self:RefreshOptionsNavigationSelection()
+    local descriptor = self.optionsPageRegistry[key]
+    local hint = descriptor.hint
+    if type(hint) == "function" then hint = hint(self, panel, descriptor) end
+    Feedback(panel, hint or L.immediate)
     self:RefreshOptions()
 end
 
@@ -747,7 +504,7 @@ local function OnOptionsSpecializationChanged(self, _, unit)
     if unit and unit ~= "player" then return end
     if self.ClearSettingsTransferPage then self:ClearSettingsTransferPage() end
     self:CancelProcColorPicker()
-    CloseMenus(self.optionsFrame)
+    CUI.StopMotion(self.optionsFrame)
     ClearEdits(self.optionsFrame)
     self:RefreshOptions()
 end
@@ -801,80 +558,16 @@ local function OnOptionsCombatChanged(self)
     self:CloseOptions()
 end
 
-function addon:CreateOptions()
-    if InCombat() then self:QueueOptionsOpen(); return nil end
-    if not self.initialized or not self.db then return nil end
-    if self.optionsFrame then return self.optionsFrame end
-    local panel = CreateFrame("Frame", "CarGOUIOptionsFrame", UIParent, "BackdropTemplate")
-    panel:Hide()
-    panel:SetSize(720, 560)
-    panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
-    panel:SetFrameStrata("DIALOG")
-    panel:SetClampedToScreen(true)
-    panel:SetMovable(true)
-    -- SavedVariables is the sole persistence owner, not the native layout cache.
-    if panel.SetDontSavePosition then panel:SetDontSavePosition(true) end
-    if panel.SetUserPlaced then panel:SetUserPlaced(false) end
-    panel:EnableMouse(true)
-    Backdrop(panel, 0.045, 0.06, 0.075)
-    panel.controls, panel.pages, panel.categories = {}, {}, {}
-    panel.editBoxes, panel.dropdowns = {}, {}
-    panel.activeCategory = "general"
-    self.optionsFrame = panel
-    self:RegisterOptionsDragSurface(panel)
-    local header = self:CreateOptionsBranding(panel)
-    panel.header = header
-    self:RegisterOptionsDragSurface(header)
-    local divider = panel:CreateTexture(nil, "ARTWORK")
-    divider:SetColorTexture(0.22, 0.30, 0.34, 1)
-    divider:SetPoint("TOPLEFT", panel, "TOPLEFT", 192, -82)
-    divider:SetSize(1, 380)
-    panel.themeDivider = divider
-
-    for _, key in ipairs({ "general", "appearance", "preview", "mobility", "proc", "importExport" }) do
-        local page = CreateFrame("Frame", nil, panel)
-        page:SetPoint("TOPLEFT", panel, "TOPLEFT", 216, -88)
-        page:SetSize(480, 374)
-        page:Hide()
-        self:RegisterOptionsDragSurface(page)
-        ThemeControl(page, "content")
-        panel.pages[key] = page
-        Label(page, L[key], 0, 0, 470, 24, "GameFontNormalLarge")
-    end
-    for index, key in ipairs({ "general", "preview", "mobility", "proc", "importExport" }) do
-        local category = key
-        local button = Button(panel, L[key], 16, -88 - (index - 1) * 40, 162, function()
-            addon:SelectOptionsCategory(category)
-        end)
-        button.key = key
-        panel.categories[#panel.categories + 1] = button
-    end
-    self:CreateOptionsTheme(panel)
-    panel.feedback = Label(panel, "", 24, -476, 672, 32)
-    panel.controls.reset = Button(panel, L.reset, 24, -516, 170, function()
-        CloseMenus(panel)
-        if not panel.resetArmed then
-            panel.resetArmed = true
-            panel.controls.reset:SetText(L.confirmReset)
-            Feedback(panel, L.resetHint)
-            return
-        end
-        ClearEdits(panel)
-        if addon.ClearSettingsTransferPage then addon:ClearSettingsTransferPage() end
-        addon:ResetDatabase()
-        CancelReset(panel)
-        Feedback(panel, L.resetDone)
-    end)
-    panel.controls.close = Button(panel, L.close, 580, -516, 116, function() panel:Hide() end)
-
-    local general = panel.pages.general
-    Label(general, L.generalHint, 0, -32, 470, 32)
+local function BuildGeneral(self, panel, general)
+    local width = panel.shellGrid.contentWidth
+    local half, right = (width - 24) / 2, (width + 24) / 2
+    Label(general, L.generalHint, 0, -32, width, 32)
     panel.controls.enabled = CheckBox(panel, general, L.enabled, 0, -70,
         function(value) return { enabled = value } end)
-    Label(general, L.x, 0, -112, 222, 22, "GameFontNormal")
-    Label(general, L.y, 248, -112, 226, 22, "GameFontNormal")
-    panel.controls.x = EditBox(panel, general, 0, -138, 222)
-    panel.controls.y = EditBox(panel, general, 248, -138, 226)
+    Label(general, L.x, 0, -112, half, 22, "GameFontNormal")
+    Label(general, L.y, right, -112, half, 22, "GameFontNormal")
+    panel.controls.x = EditBox(panel, general, 0, -138, half)
+    panel.controls.y = EditBox(panel, general, right, -138, half)
     local function CommitPosition()
         panel.positionDirty = false
         local c = panel.controls
@@ -893,27 +586,28 @@ function addon:CreateOptions()
             if userInput and not panel.refreshing then panel.positionDirty = true end
         end)
     end
-    panel.controls.centerPosition = Button(general, addon:Text("Reset Mobility offsets"), 0, -214, 180, function()
+    panel.controls.centerPosition = Button(general, addon:Text("Reset Mobility offsets"), 0, -214, half, function()
         panel.positionDirty = false
         Submit(panel, { position = { x = 0, y = 0 } })
     end)
-    Label(general, L.positionHint, 0, -174, 470, 36)
-    Label(general, addon:Text("Mobility settings belong to your current class. Proc styles belong to your current class and specialization."), 0, -250, 470, 40)
+    Label(general, L.positionHint, 0, -174, width, 36)
+    Label(general, addon:Text("Mobility settings belong to your current class. Proc styles belong to your current class and specialization."), 0, -250, width, 40)
     panel.controls.animatedTitle = CheckBox(panel, general, L.animatedTitle, 0, -332,
         function(value) return { options = { animatedTitle = value } } end)
-    panel.controls.centerOptions = Button(general, L.centerOptions, 316, -332, 158, function()
+    panel.controls.centerOptions = Button(general, L.centerOptions, 0, -390, half, function()
         Submit(panel, { options = { position = { x = 0, y = 0 } } })
     end)
     panel.controls.showMinimapIcon = CheckBox(panel, general, L.showMinimapIcon, 0, -296,
         function(value) return { options = { minimap = { hide = not value } } } end)
+end
 
-    local appearance = panel.pages.appearance
-    local scroll = CreateFrame("ScrollFrame", nil, appearance, "UIPanelScrollFrameTemplate")
-    scroll:SetPoint("TOPLEFT", appearance, "TOPLEFT", 0, -32)
-    scroll:SetSize(448, 336)
+local function BuildAppearance(self, panel, appearance)
+    local width = panel.shellGrid.contentWidth - 20
+    local scroll = CUI.ScrollFrame(panel, appearance, 0, -36,
+        panel.shellGrid.contentWidth, panel.shellGrid.contentHeight - 36)
     self:RegisterOptionsDragSurface(scroll)
     local editor = CreateFrame("Frame", nil, scroll)
-    editor:SetSize(448, 720)
+    editor:SetSize(panel.shellGrid.contentWidth - 20, 720)
     self:RegisterOptionsDragSurface(editor)
     scroll:SetScrollChild(editor)
     panel.appearanceScroll = scroll
@@ -923,16 +617,16 @@ function addon:CreateOptions()
     end
     panel.controls.appearanceEntry = Dropdown(panel, editor, addon:Text("Configuration context (automatic)"), 0, 0, appearanceChoices, nil, function() end)
     panel.controls.appearanceEntry:Disable()
-    panel.appearanceHint = Label(editor, "", 0, -64, 438, 44)
+    panel.appearanceHint = Label(editor, "", 0, -64, width, 44)
     local function StylePatch(patch)
         local key = panel.selectedAppearanceKey
         return key and { styles = { [key] = patch } } or { styles = false }
     end
     panel.controls.appearanceFont = Dropdown(panel, editor, L.font, 0, -122, addon:GetReminderFontOptions(),
         function(value) return StylePatch({ font = { face = value } }) end, nil, 8)
-    panel.controls.appearanceFont:SetWidth(430)
+    panel.controls.appearanceFont:SetWidth(width)
     FontTooltip(panel.controls.appearanceFont)
-    panel.controls.appearanceFontStatus = Label(editor, "", 0, -184, 430, 60)
+    panel.controls.appearanceFontStatus = Label(editor, "", 0, -184, width, 60)
     panel.controls.appearanceFontSize = Slider(panel, editor, L.fontSize, -266, addon.limits.fontSize, 1,
         function(value) return StylePatch({ font = { size = value or false } }) end, L.invalidFontSize)
     panel.controls.appearanceOutline = Dropdown(panel, editor, L.outline, 0, -352, {
@@ -943,18 +637,13 @@ function addon:CreateOptions()
         function(value) return StylePatch({ shadow = { enabled = value } }) end)
     panel.controls.appearanceScale = Slider(panel, editor, L.scale, -476, addon.limits.scale, 0.05,
         function(value) return StylePatch({ scale = value or false }) end, L.invalidScale)
-    for _, slider in ipairs({ panel.controls.appearanceFontSize, panel.controls.appearanceScale }) do
-        slider:SetWidth(288)
-        slider.editBox:ClearAllPoints()
-        slider.editBox:SetPoint("TOPLEFT", editor, "TOPLEFT", 318, slider == panel.controls.appearanceFontSize and -290 or -500)
-    end
-    Label(editor, L.appearanceHint, 0, -556, 430, 40)
-    panel.controls.appearanceReset = Button(editor, addon:Text("Reset this context's style"), 0, -606, 220, function()
+    Label(editor, L.appearanceHint, 0, -556, width, 40)
+    panel.controls.appearanceReset = Button(editor, addon:Text("Reset this context's style"), 0, -606, (width - 24) / 2, function()
         ClearEdits(panel)
         CancelReset(panel)
         if addon:ResetReminderStyle(panel.selectedAppearanceKey) then Feedback(panel, L.saved) end
     end)
-    panel.controls.appearancePreview = Button(editor, addon:Text("Preview current reminder"), 232, -606, 198, function()
+    panel.controls.appearancePreview = Button(editor, addon:Text("Preview current reminder"), (width + 24) / 2, -606, (width - 24) / 2, function()
         local ok, message = addon:StartAppearancePreview(panel.selectedAppearanceKey)
         addon:RefreshOptions()
         if not ok then Feedback(panel, message, true) end
@@ -962,9 +651,12 @@ function addon:CreateOptions()
     panel.controls.appearanceBack = Button(editor, addon:Text("Back"), 0, -658, 140, function()
         addon:SelectOptionsCategory(panel.appearanceKind or "mobility")
     end)
+end
 
-    local page = panel.pages.preview
-    Label(page, L.previewHint, 0, -32, 470, 44)
+local function BuildPreview(self, panel, page)
+    local width = panel.shellGrid.contentWidth
+    local third, stride = (width - 48) / 3, (width + 24) / 3
+    Label(page, L.previewHint, 0, -32, width, 44)
     local previewEntries = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
         previewEntries[#previewEntries + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
@@ -977,22 +669,22 @@ function addon:CreateOptions()
         if addon.previewState and addon.previewState.mode == "single" then addon:SetPreview("single", id) end
         addon:RefreshOptions()
     end)
-    panel.controls.previewEntry:SetWidth(474)
+    panel.controls.previewEntry:SetWidth(width)
     local function StartPreview(mode)
         local ok, message = addon:SetPreview(mode, panel.selectedPreviewEntry)
         addon:RefreshOptions()
         if ok == false then Feedback(panel, message or L.noEntries, true) end
     end
-    panel.controls.previewSingle = Button(page, L.previewSingle, 0, -154, 148, function() StartPreview("single") end)
-    panel.controls.previewAll = Button(page, L.previewAll, 160, -154, 158, function() StartPreview("all") end)
-    panel.controls.previewStop = Button(page, L.previewStop, 330, -154, 144, function()
+    panel.controls.previewSingle = Button(page, L.previewSingle, 0, -154, third, function() StartPreview("single") end)
+    panel.controls.previewAll = Button(page, L.previewAll, stride, -154, third, function() StartPreview("all") end)
+    panel.controls.previewStop = Button(page, L.previewStop, stride * 2, -154, third, function()
         addon:StopPreview()
         addon:RefreshOptions()
     end)
-    Label(page, L.entryX, 0, -198, 140, 22, "GameFontNormal")
-    Label(page, L.entryY, 158, -198, 140, 22, "GameFontNormal")
-    panel.controls.entryX = EditBox(panel, page, 0, -224, 140)
-    panel.controls.entryY = EditBox(panel, page, 158, -224, 140)
+    Label(page, L.entryX, 0, -198, third, 22, "GameFontNormal")
+    Label(page, L.entryY, stride, -198, third, 22, "GameFontNormal")
+    panel.controls.entryX = EditBox(panel, page, 0, -224, third)
+    panel.controls.entryY = EditBox(panel, page, stride, -224, third)
     local function CommitEntryPosition()
         local id = panel.selectedPreviewEntry
         if not id then return end
@@ -1009,31 +701,36 @@ function addon:CreateOptions()
             if userInput and not panel.refreshing then panel.entryPositionDirty = true end
         end)
     end
-    panel.controls.entryReset = Button(page, L.entryReset, 316, -224, 158, function()
+    panel.controls.entryReset = Button(page, L.entryReset, stride * 2, -224, third, function()
         local id = panel.selectedPreviewEntry
         if not id then return end
         panel.entryPositionDirty = false
         Submit(panel, { reminders = { [id] = { position = { x = 0, y = 0 } } } })
     end)
-    Label(page, L.entryHint, 0, -266, 470, 44)
-    panel.previewStatus = Label(page, "", 0, -324, 470, 48)
+    Label(page, L.entryHint, 0, -266, width, 44)
+    panel.previewStatus = Label(page, "", 0, -324, width, 48)
+end
 
+local function BuildProc(self, panel, page)
     self:CreateProcAppearanceOptions(panel, {
         Label = Label, Button = Button, Dropdown = Dropdown, EditBox = EditBox,
         CheckBox = CheckBox, ThemeControl = ThemeControl, Backdrop = Backdrop,
         Feedback = Feedback, ClearEdits = ClearEdits,
     })
+end
 
-    local mobility = panel.pages.mobility
+local function BuildMobility(self, panel, mobility)
+    local width = panel.shellGrid.contentWidth
+    local half, right = (width - 24) / 2, (width + 24) / 2
     panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,
         function(value) return { mobility = { enabled = value } } end)
-    panel.mobilitySpell = Label(mobility, "", 0, -72, 470, 22, "GameFontNormal")
-    panel.mobilityStatus = Label(mobility, "", 0, -98, 470, 48)
-    Label(mobility, L.mobilityPosition, 0, -152, 470, 22)
-    Label(mobility, L.entryX, 0, -178, 226, 22, "GameFontNormal")
-    Label(mobility, L.entryY, 248, -178, 226, 22, "GameFontNormal")
-    panel.controls.mobilityX = EditBox(panel, mobility, 0, -202, 226)
-    panel.controls.mobilityY = EditBox(panel, mobility, 248, -202, 226)
+    panel.mobilitySpell = Label(mobility, "", 0, -72, width, 22, "GameFontNormal")
+    panel.mobilityStatus = Label(mobility, "", 0, -98, width, 48)
+    Label(mobility, L.mobilityPosition, 0, -152, width, 22)
+    Label(mobility, L.entryX, 0, -178, half, 22, "GameFontNormal")
+    Label(mobility, L.entryY, right, -178, half, 22, "GameFontNormal")
+    panel.controls.mobilityX = EditBox(panel, mobility, 0, -202, half)
+    panel.controls.mobilityY = EditBox(panel, mobility, right, -202, half)
     local function CommitMobilityPosition()
         local id = panel.mobilityEntryId
         if not id then return end
@@ -1050,48 +747,116 @@ function addon:CreateOptions()
             if userInput and not panel.refreshing then panel.mobilityPositionDirty = true end
         end)
     end
-    panel.controls.mobilityGeneral = Button(mobility, L.mobilityGeneral, 0, -242, 226,
+    panel.controls.mobilityGeneral = Button(mobility, L.mobilityGeneral, 0, -242, half,
         function() addon:SelectOptionsCategory("general") end)
-    panel.controls.mobilityTypography = Button(mobility, L.mobilityTypography, 248, -242, 226,
+    panel.controls.mobilityTypography = Button(mobility, L.mobilityTypography, right, -242, half,
         function()
             addon:OpenAppearance("mobility")
         end)
-    panel.controls.mobilityPreview = Button(mobility, L.mobilityPreview, 0, -282, 226, function()
+    panel.controls.mobilityPreview = Button(mobility, L.mobilityPreview, 0, -282, half, function()
         local entry = addon.GetMobilityEntry and addon:GetMobilityEntry()
         local ok, message = false, L.mobilityNoSpell
         if entry then ok, message = addon:SetPreview("single", entry.id) end
         addon:RefreshMobilityOptions()
         if ok == false then Feedback(panel, message or L.noEntries, true) end
     end)
-    panel.controls.mobilityStop = Button(mobility, L.previewStop, 248, -282, 226, function()
+    panel.controls.mobilityStop = Button(mobility, L.previewStop, right, -282, half, function()
         addon:StopPreview()
         addon:RefreshMobilityOptions()
     end)
-    panel.controls.mobilityDiagnostics = Button(mobility, L.mobilityDiagnostics, 0, -326, 200,
+    panel.controls.mobilityDiagnostics = Button(mobility, L.mobilityDiagnostics, 0, -326, half,
         function() addon:ShowMobilityDiagnostics() end)
-    panel.mobilityPreviewNote = Label(mobility, "", 220, -326, 254, 46)
+    panel.mobilityPreviewNote = Label(mobility, "", right, -326, half, 46)
+end
+
+local function BuildSettingsTransfer(self, panel, page)
+    self:CreateSettingsTransferPage(panel, page, {
+        Label = Label, Button = Button, Dropdown = Dropdown,
+        ThemeControl = ThemeControl, Feedback = Feedback,
+    })
+end
+
+addon:RegisterOptionsPage({ key = "general", order = 10, builder = BuildGeneral })
+addon:RegisterOptionsPage({ key = "mobility", order = 20, builder = BuildMobility })
+addon:RegisterOptionsPage({ key = "proc", order = 30, builder = BuildProc })
+addon:RegisterOptionsPage({ key = "preview", order = 40, builder = BuildPreview })
+addon:RegisterOptionsPage({ key = "importExport", order = 50, lazy = true,
+    hint = function() return L.transferHint end, builder = BuildSettingsTransfer })
+addon:RegisterOptionsPage({ key = "appearance", order = 60, hidden = true,
+    navParent = function(_, panel) return panel.appearanceKind or "mobility" end, builder = BuildAppearance })
+
+function addon:CreateOptions()
+    if InCombat() then self:QueueOptionsOpen(); return nil end
+    if not self.initialized or not self.db then return nil end
+    if self.optionsFrame then return self.optionsFrame end
+    local panel = CreateFrame("Frame", "CarGOUIOptionsFrame", UIParent, "BackdropTemplate")
+    panel:Hide()
+    panel:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
+    panel:SetFrameStrata("DIALOG")
+    panel:SetClampedToScreen(true)
+    panel:SetMovable(true)
+    -- SavedVariables is the sole persistence owner, not the native layout cache.
+    if panel.SetDontSavePosition then panel:SetDontSavePosition(true) end
+    if panel.SetUserPlaced then panel:SetUserPlaced(false) end
+    panel:EnableMouse(true)
+    panel.controls, panel.pages, panel.categories = {}, {}, {}
+    panel.editBoxes, panel.dropdowns = {}, {}
+    panel.activeCategory = "general"
+    self.optionsFrame, panel.cuiPanel = panel, panel
+    panel.submit = function(patch, errorText) return Submit(panel, patch, errorText) end
+    self:RegisterOptionsDragSurface(panel)
+    self:CreateOptionsShell(panel)
+    local header = self:CreateOptionsBranding(panel)
+    panel.header = header
+    self:RegisterOptionsDragSurface(header)
+    self:CreateOptionsTheme(panel)
+    local footerY = -panel.shellGrid.height + panel.shellGrid.footerHeight - 16
+    panel.feedback = Label(panel, "", panel.shellGrid.contentX, footerY,
+        panel.shellGrid.contentWidth - 140, 32)
+    panel.controls.reset = Button(panel, L.reset, 24, footerY, 144, function()
+        CloseMenus(panel)
+        if not panel.resetArmed then
+            panel.resetArmed = true
+            panel.controls.reset:SetText(L.confirmReset)
+            Feedback(panel, L.resetHint)
+            return
+        end
+        ClearEdits(panel)
+        if addon.ClearSettingsTransferPage then addon:ClearSettingsTransferPage() end
+        addon:ResetDatabase()
+        CancelReset(panel)
+        Feedback(panel, L.resetDone)
+    end)
+    panel.controls.close = Button(panel, L.close, panel.shellGrid.width - 140, footerY, 116, function() panel:Hide() end)
+
+    self:RefreshOptionsNavigation()
 
     panel:SetScript("OnShow", function()
         -- Re-evaluate only when opened; no frame or timer keeps the panel updating.
-        panel:SetScale(math.min(1, UIParent:GetWidth() / 752, UIParent:GetHeight() / 592))
-        addon:ApplyOptionsPosition(true)
+        addon:ClampOptionsShell()
+        if panel.navigationDirty then addon:RefreshOptionsNavigation() end
         addon:RegisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:RegisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
+        addon:RegisterEvent("UI_SCALE_CHANGED", OnOptionsViewportChanged)
+        addon:RegisterEvent("DISPLAY_SIZE_CHANGED", OnOptionsViewportChanged)
         addon:RefreshOptionsTheme()
         addon:SelectOptionsCategory(panel.activeCategory)
+        addon:RefreshTitleAnimation()
     end)
     panel:HookScript("OnHide", function()
         if addon.ClearSettingsTransferPage then addon:ClearSettingsTransferPage() end
         addon:CancelProcColorPicker()
         addon:UnregisterEvent("PLAYER_SPECIALIZATION_CHANGED", OnOptionsSpecializationChanged)
         addon:UnregisterEvent("PLAYER_REGEN_DISABLED", OnOptionsCombatChanged)
+        addon:UnregisterEvent("UI_SCALE_CHANGED", OnOptionsViewportChanged)
+        addon:UnregisterEvent("DISPLAY_SIZE_CHANGED", OnOptionsViewportChanged)
         addon:StopOptionsTheme()
         if panel.diagnosticsFrame then panel.diagnosticsFrame:Hide() end
         -- Restore live output only when it was actually suppressed by TEST.
         addon:StopPreview(addon.previewState.mode == "off")
         addon:StopTitleAnimation()
         addon:SaveOptionsPosition()
-        CloseMenus(panel)
+        CUI.StopMotion(panel)
         ClearEdits(panel)
         CancelReset(panel)
     end)

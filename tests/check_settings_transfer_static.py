@@ -134,7 +134,7 @@ cleanup = section(ui, "function addon:ClearSettingsTransferPage()", "function ad
 assert "CancelSettingsImport" in cleanup and 'edit:SetText("")' in cleanup and "edit:ClearFocus()" in cleanup
 assert 'panel.activeCategory == "importExport"' in ui and 'InCombatLockdown()' in ui
 assert 'Feedback(ok and (message or L.transferDone)' in ui
-assert 'if not panel.pages[key] then key = "general" end' in options
+assert 'if not self.optionsPageRegistry[key] then key = "general" end' in options
 absent(options, [r'pages\.themes', r'categoryButtons\.themes', r'RefreshOptionsThemeLabels', r'key\s*=\s*"themes"'],
        "Removed Themes route has no page or label updater; unknown old route falls back to General")
 locale = read("Config/Locale.lua")
