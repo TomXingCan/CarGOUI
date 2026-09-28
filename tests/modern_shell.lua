@@ -23,10 +23,12 @@ end
 
 test("MODERN SHELL registry builds only production pages in deterministic navigation order", function()
     local _, addon = h.login()
-    same(keys(addon:GetOptionsPageDescriptors()), { "general", "mobility", "proc", "preview", "importExport", "appearance" })
+    same(keys(addon:GetOptionsPageDescriptors()), { "general", "mobility", "proc", "importExport", "appearance" })
+    equal(addon.optionsPageRegistry.preview, nil, "Test Mode has no production descriptor")
     equal(addon.optionsPageRegistry.classTools, nil, "future Class Tools has no production descriptor")
     local panel = h.options(addon)
-    same(keys(panel.categories), { "general", "mobility", "proc", "preview", "importExport" })
+    same(keys(panel.categories), { "general", "mobility", "proc", "importExport" })
+    equal(panel.categoryButtons.preview, nil); equal(panel.pages.preview, nil)
     equal(panel.categoryButtons.classTools, nil)
     equal(panel.categoryButtons.appearance, nil, "typography is a contextual hidden route")
     truthy(panel.pages.general.built and panel.pages.mobility.built and panel.pages.proc.built)
@@ -54,7 +56,7 @@ test("MODERN SHELL future page builders register without changing layout or navi
         end }))
     local panel = h.options(addon)
     local grid, width, height = copy(panel.shellGrid), panel:GetWidth(), panel:GetHeight()
-    same(keys(panel.categories), { "general", "mobility", "mockClassTools", "proc", "preview", "importExport" })
+    same(keys(panel.categories), { "general", "mobility", "mockClassTools", "proc", "importExport" })
     addon:SelectOptionsCategory("mockClassTools")
     truthy(panel.pages.mockClassTools:IsShown() and panel.pages.mockClassTools.fixture)
     equal(built.mockClassTools, 1)
@@ -64,7 +66,7 @@ test("MODERN SHELL future page builders register without changing layout or navi
         truthy(addon:RegisterOptionsPage({ key = key, order = 35, title = key,
             builder = function(_, _, page) built[page.descriptor.key] = true end }))
     end
-    same(keys(panel.categories), { "general", "mobility", "mockClassTools", "proc", "mockAlpha", "mockZulu", "preview", "importExport" })
+    same(keys(panel.categories), { "general", "mobility", "mockClassTools", "proc", "mockAlpha", "mockZulu", "importExport" })
     truthy(built.mockAlpha and built.mockZulu, "registration after opening invokes each new real builder")
     truthy(panel.categoryButtons.mockClassTools.selected, "registration preserves current navigation ownership")
     equal(addon:RegisterOptionsPage({ key = "mockAlpha", order = 99, builder = function() end }), false)
@@ -140,7 +142,7 @@ test("MODERN SHELL page specialization combat and Escape settle all control and 
     truthy(not addon:OpenOptions()); truthy(addon.pendingOptionsOpen)
     state.inCombat = false; state:fire("PLAYER_REGEN_ENABLED"); state:flushTimers()
     truthy(panel:IsShown()); equal(addon.pendingOptionsOpen, nil)
-    panel.controls.x:GetScript("OnEscapePressed")()
+    panel.controls.mobilityX:GetScript("OnEscapePressed")()
     truthy(not panel:IsShown()); settled(panel)
     for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil) end
 end)
@@ -222,4 +224,45 @@ test("MODERN SHELL navigation viewport and hidden editors add no cosmetic SavedV
     panel:Hide(); addon:OpenOptions()
     same(addon.db, before, "shell state remains session-only")
     equal(env.CarGOUIDB.schemaVersion, 5)
+end)
+
+test("MODERN SHELL RC2 navigation branding and clipped identity retain the fixed grid", function()
+    local _, addon, state = h.login(nil, false, { classToken = "MAGE", specID = 62 })
+    local panel = h.options(addon)
+    local D, header, theme = addon.DesignSystem, panel.brandingHeader, panel.theme
+    equal(panel:GetWidth(), 900); equal(panel:GetHeight(), 640)
+    equal(header.emblem:GetWidth(), 30); equal(header.emblem:GetHeight(), 30)
+    equal(header.wordmark:GetHeight(), 33)
+    truthy(math.abs(header.wordmark:GetWidth() / header.wordmark:GetHeight() - 504 / 113) < .001)
+    equal(header.accentLine:GetHeight(), 2)
+    same(header.accentLine.vertexColor, { 1, 1, 1 }, "faction tint does not muddy the shared header gradient")
+    truthy(header.accentWash.gradient); same(header.subtitle.textColor, D.textMuted)
+    for _, button in ipairs(panel.categories) do
+        equal(button.variant, "ghost"); equal(button.selectionRail:GetWidth(), 2)
+        equal(button.selectionRail.gradient.orientation, "VERTICAL")
+        equal(button.selectionRail:IsShown(), button.selected)
+        equal(button.selectionGlow:IsShown(), button.selected)
+        for _, edge in ipairs(button.cuiSkin.border) do equal(edge.color[4], 0, "navigation has no boxed chrome") end
+        if not button.selected then
+            equal(button.cuiSkin.fill.color[4], 0)
+            same(button:GetFontString().textColor, D.textSecondary)
+        end
+    end
+    local visible, cropped = 0, false
+    for _, line in ipairs(theme.motif) do
+        if line:IsShown() then
+            visible = visible + 1
+            for _, point in ipairs({ line.startPoint, line.endPoint }) do
+                truthy(point[3] >= -300 and point[3] <= -24)
+                truthy(point[4] >= 80 and point[4] <= 310)
+                if math.abs(point[3] + 24) < .001 or math.abs(point[4] - 80) < .001 then cropped = true end
+            end
+            truthy(line.color[4] < addon.optionThemeOpacity.motif, "motif becomes a quiet background layer")
+        end
+    end
+    equal(visible, theme.motifVisibleCount); truthy(visible > 0 and visible < theme.motifCount)
+    truthy(cropped, "identity geometry is cropped rather than shown as a complete stamp")
+    local frames, animations = #state.frames, #state.animations
+    for _ = 1, 5 do addon:RefreshOptionsTheme(); addon:RefreshOptionsNavigationSelection() end
+    equal(#state.frames, frames); equal(#state.animations, animations)
 end)

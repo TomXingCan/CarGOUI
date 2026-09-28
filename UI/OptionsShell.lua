@@ -76,7 +76,8 @@ function addon:RefreshOptionsNavigation()
             local button = panel.categoryButtons[key]
             if not button then
                 button = self.CUI.Button(panel.sidebarContent, self:GetOptionsPageTitle(descriptor, panel),
-                    0, 0, panel.shellGrid.navigationWidth, function() addon:SelectOptionsCategory(key) end)
+                    0, 0, panel.shellGrid.navigationWidth, function() addon:SelectOptionsCategory(key) end, "ghost")
+                button:SetNavigationStyle()
                 button.key, button.descriptor = key, descriptor
                 if descriptor.icon then
                     button.iconSlot = button:CreateTexture(nil, "ARTWORK")

@@ -325,3 +325,58 @@ test("CUI cleanup stops every UI motion and solid gradient fallback remains usab
     same(texture.color, { .105, .810, .790, .6 }, "older-client gradient fallback is solid and readable")
     for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil) end
 end)
+
+test("CUI semantic button variants retain callbacks enabled states and pooled visuals", function()
+    local _, addon, state, panel, C = Fixture()
+    local D, clicks = addon.DesignSystem, 0
+    local secondary = C.Button(panel, "Default", 0, 0, 120, function() clicks = clicks + 1 end)
+    equal(secondary.variant, "secondary", "legacy calls keep the secondary hierarchy")
+    local primary = C.Button(panel, "Test", 0, -40, 120, function() clicks = clicks + 1 end, "primary")
+    local ghost = C.Button(panel, "Reset", 130, -40, 120, function() clicks = clicks + 1 end, "ghost")
+    local danger = C.Button(panel, "Delete", 260, -40, 120, function() clicks = clicks + 1 end, "danger")
+    truthy(primary.cuiEmphasis:IsShown() and danger.cuiEmphasis:IsShown())
+    same(primary.cuiEmphasis.gradient.first, { D.accentStart[1], D.accentStart[2], D.accentStart[3], .20 })
+    equal(ghost.cuiSkin.fill.color[4], 0)
+    for _, border in ipairs(ghost.cuiSkin.border) do equal(border.color[4], 0) end
+    local frames, groups = #state.frames, #state.animations
+    ghost:GetScript("OnEnter")(ghost); truthy(ghost.cuiSkin.fill.color[4] > 0)
+    ghost:GetScript("OnLeave")(ghost); equal(ghost.cuiSkin.fill.color[4], 0)
+    for _, button in ipairs({ secondary, primary, ghost, danger }) do
+        button:Click(); button:Disable(); button:Click(); button:Enable()
+    end
+    equal(clicks, 4)
+    secondary:SetVariant("primary"); equal(secondary.variant, "primary"); truthy(secondary.cuiEmphasis:IsShown())
+    secondary:SetVariant("unknown"); equal(secondary.variant, "secondary"); truthy(not secondary.cuiEmphasis:IsShown())
+    equal(#state.frames, frames); equal(#state.animations, groups)
+end)
+
+test("CUI RC2 inputs toggles cards and selection accents use distinct shared surfaces", function()
+    local _, addon, state, panel, C = Fixture()
+    local D = addon.DesignSystem
+    local edit = C.EditBox(panel, panel, 0, -100, 200)
+    same(edit.cuiSkin.fill.color, { D.surfaceInput[1], D.surfaceInput[2], D.surfaceInput[3], 1 })
+    truthy(not edit.focusAccent:IsShown() and not edit.focusGlow:IsShown())
+    edit:SetFocus(); truthy(edit.focusAccent:IsShown() and edit.focusGlow:IsShown())
+    same(edit.focusAccent.gradient.last, { D.accentEnd[1], D.accentEnd[2], D.accentEnd[3], .9 })
+    edit:SetInvalid(true); same(edit.focusAccent.color, { D.danger[1], D.danger[2], D.danger[3], 1 })
+    edit:SetInvalid(false); edit:ClearFocus(); truthy(not edit.focusAccent:IsShown() and not edit.focusGlow:IsShown())
+    local toggle = C.Toggle(panel, panel, "Switch", 0, -150, function() end)
+    toggle:SetChecked(false)
+    same(toggle.track.color, { D.toggleOff[1], D.toggleOff[2], D.toggleOff[3], 1 })
+    truthy(not toggle.glow:IsShown()); equal(toggle.thumb.gradient.orientation, "VERTICAL")
+    local frames, groups = #state.frames, #state.animations
+    toggle:Click(); truthy(toggle.glow:IsShown() and toggle.toggleAnimation:IsPlaying())
+    toggle:Disable(); truthy(not toggle.glow:IsShown() and not toggle.toggleAnimation:IsPlaying())
+    equal(#state.frames, frames); equal(#state.animations, groups)
+    local section = C.Section(panel, "Card", 0, -190, 400, { height = 100 })
+    same(section.cuiSkin.fill.color, { D.surfaceCard[1], D.surfaceCard[2], D.surfaceCard[3], 1 })
+    truthy(section.cuiSkin.headerWash.gradient and section.divider.gradient)
+    local tile = C.GalleryTile(panel, "Artwork", 410, -190, 100, 100, function() end)
+    tile:SetSelected(true); truthy(tile.themeSelection:IsShown() and tile.selectionAccent:IsShown())
+    tile:SetSelected(false); truthy(not tile.selectionAccent:IsShown())
+    C.Feedback(panel, "Instruction")
+    same(panel.feedback.textColor, D.textSecondary, "ordinary footer instructions are muted")
+    C.Feedback(panel, addon.L.saved); same(panel.feedback.textColor, D.success)
+    C.Feedback(panel, "Applied", false); same(panel.feedback.textColor, D.success)
+    C.Feedback(panel, "Invalid", true); same(panel.feedback.textColor, D.danger)
+end)

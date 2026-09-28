@@ -43,8 +43,8 @@ function C.Label(parent, text, x, y, width, height, template)
     return label
 end
 
-local function Border(skin, token)
-    for _, edge in ipairs(skin.border) do D.Fill(edge, token) end
+local function Border(skin, token, alpha)
+    for _, edge in ipairs(skin.border) do D.Fill(edge, token, alpha) end
 end
 
 local function Interactive(control, label, kind)
@@ -52,8 +52,21 @@ local function Interactive(control, label, kind)
     local selected = control:CreateTexture(nil, "BACKGROUND", nil, -1)
     selected:SetAllPoints(control); D.ApplyGradient(selected, .20); selected:Hide()
     control.themeSelection = selected
+    local emphasis = control:CreateTexture(nil, "BACKGROUND", nil, -1)
+    emphasis:SetAllPoints(control); emphasis:Hide()
+    control.cuiEmphasis = emphasis
+    if kind == "input" then
+        control.focusGlow = control:CreateTexture(nil, "BACKGROUND", nil, -1)
+        control.focusGlow:SetPoint("TOPLEFT", control, "TOPLEFT", -2, 2)
+        control.focusGlow:SetPoint("BOTTOMRIGHT", control, "BOTTOMRIGHT", 2, -2)
+        D.ApplyGradient(control.focusGlow, .055)
+        control.focusAccent = control:CreateTexture(nil, "BORDER")
+        control.focusAccent:SetPoint("BOTTOMLEFT", control, "BOTTOMLEFT", 1, 0)
+        control.focusAccent:SetPoint("BOTTOMRIGHT", control, "BOTTOMRIGHT", -1, 0)
+        control.focusAccent:SetHeight(2)
+    end
     local hover = control:CreateTexture(nil, "ARTWORK", nil, -2)
-    hover:SetAllPoints(control); D.Fill(hover, "accentGlow", .09); hover:SetAlpha(0)
+    hover:SetAllPoints(control); D.ApplyGradient(hover, .07); hover:SetAlpha(0)
     local animation = hover:CreateAnimationGroup()
     local fade = animation:CreateAnimation("Alpha")
     fade:SetOrder(1); fade:SetDuration(D.motionFast); fade:SetSmoothing("OUT")
@@ -72,17 +85,57 @@ local function Interactive(control, label, kind)
     end
     function control:cuiRefresh()
         local enabled = Enabled(self)
-        D.Fill(skin.fill, self.cuiPressed and "surfaceSelected" or self.selected and "surfaceSelected"
-            or self.cuiHovered and enabled and "surfaceHover" or kind == "input" and "surfaceBase" or "surfaceRaised")
+        local variant = self.variant or "secondary"
+        local ghost, primary, danger = variant == "ghost", variant == "primary", variant == "danger"
+        local active = enabled and (self.cuiHovered or self.cuiPressed)
+        local fill = kind == "input" and "surfaceInput" or primary and "surfacePrimary"
+            or danger and "surfaceDanger" or self.cuiPressed and "surfaceSelected"
+            or self.selected and "surfaceSelected" or active and "surfaceHover" or "surfaceRaised"
+        D.Fill(skin.fill, fill, ghost and (active and .55 or self.selected and .35 or 0) or 1)
         Border(skin, self.invalid and "danger" or self.cuiFocused and "accentGlow"
-            or self.selected and "accentGlow" or "borderSubtle")
+            or kind == "input" and (active and "borderSubtle" or "borderInput")
+            or danger and "danger" or self.selected and "accentGlow" or primary and "borderStrong" or "borderSubtle",
+            ghost and 0 or kind == "input" and not self.cuiFocused and not self.invalid and .7 or danger and .4 or 1)
+        if primary then D.ApplyGradient(emphasis, enabled and .20 or .06)
+        elseif danger then D.ApplyGradient(emphasis, enabled and .13 or .04, D.danger, D.surfaceDanger) end
+        emphasis:SetShown(primary or danger)
         selected:SetShown(self.selected == true)
-        if label then label:SetTextColor(unpack(not enabled and D.textDisabled or D.textPrimary)) end
+        if self.selectionRail then
+            self.selectionRail:SetShown(self.selected == true)
+            self.selectionGlow:SetShown(self.selected == true)
+        end
+        if label then label:SetTextColor(unpack(not enabled and D.textDisabled
+            or self.cuiNavigation and not self.selected and not active and D.textSecondary or D.textPrimary)) end
         if kind == "input" then self:SetTextColor(unpack(not enabled and D.textDisabled or D.textPrimary)) end
+        if self.focusAccent then
+            if self.invalid then D.Fill(self.focusAccent, "danger") else D.ApplyGradient(self.focusAccent, .9) end
+            self.focusAccent:SetShown(enabled and (self.cuiFocused or self.invalid) == true)
+            self.focusGlow:SetShown(enabled and self.cuiFocused == true)
+        end
         if not enabled then animation:Stop(); hover:SetAlpha(0) end
     end
     function control:SetSelected(value) self.selected = value == true; self:cuiRefresh() end
     function control:SetInvalid(value) self.invalid = value == true; self:cuiRefresh() end
+    function control:SetVariant(value)
+        self.variant = (value == "primary" or value == "ghost" or value == "danger") and value or "secondary"
+        self:cuiRefresh()
+    end
+    function control:SetNavigationStyle()
+        self.cuiNavigation = true
+        if not self.selectionRail then
+            self.selectionRail = self:CreateTexture(nil, "BORDER")
+            self.selectionRail:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -5)
+            self.selectionRail:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", 0, 5)
+            self.selectionRail:SetWidth(2)
+            D.ApplyGradient(self.selectionRail, .95, nil, nil, "VERTICAL")
+            self.selectionGlow = self:CreateTexture(nil, "ARTWORK", nil, -1)
+            self.selectionGlow:SetPoint("TOPLEFT", self, "TOPLEFT", 0, -5)
+            self.selectionGlow:SetPoint("BOTTOMLEFT", self, "BOTTOMLEFT", 0, 5)
+            self.selectionGlow:SetWidth(6); D.ApplyGradient(self.selectionGlow, .10, nil, nil, "VERTICAL")
+        end
+        D.ApplyGradient(selected, .12)
+        self:SetVariant("ghost")
+    end
     control:HookScript("OnEnter", function(self)
         if not Enabled(self) or not self:IsVisible() then return end
         self.cuiHovered = true; self:cuiRefresh(); Animate(true)
@@ -100,7 +153,7 @@ local function Interactive(control, label, kind)
     return skin
 end
 
-function C.Button(parent, text, x, y, width, callback)
+function C.Button(parent, text, x, y, width, callback, variant)
     local button = CreateFrame("Button", nil, parent)
     button:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y); button:SetSize(width, D.controlHeight)
     local label = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
@@ -109,6 +162,7 @@ function C.Button(parent, text, x, y, width, callback)
     button:SetFontString(label); button.textLabel = label; button:SetText(text)
     button:HookScript("OnSizeChanged", function(self) label:SetSize(math.max(1, self:GetWidth() - 16), math.max(1, self:GetHeight() - 4)) end)
     Interactive(button, label, "button")
+    button:SetVariant(variant)
     button:SetScript("OnClick", callback)
     return Register(button, "button")
 end
@@ -139,9 +193,13 @@ function C.Toggle(panel, parent, text, x, y, onChanged)
     local track = toggle:CreateTexture(nil, "BACKGROUND"); track:SetSize(42, 20)
     track:SetPoint("CENTER", toggle, "CENTER", 0, 0)
     local accent = toggle:CreateTexture(nil, "ARTWORK"); accent:SetAllPoints(track); D.ApplyGradient(accent)
-    local thumb = toggle:CreateTexture(nil, "OVERLAY"); thumb:SetSize(16, 16); D.Fill(thumb, "textPrimary")
+    local glow = toggle:CreateTexture(nil, "BACKGROUND", nil, -1)
+    glow:SetPoint("TOPLEFT", track, "TOPLEFT", -2, 2); glow:SetPoint("BOTTOMRIGHT", track, "BOTTOMRIGHT", 2, -2)
+    D.ApplyGradient(glow, .08)
+    local thumb = toggle:CreateTexture(nil, "OVERLAY"); thumb:SetSize(16, 16)
+    D.ApplyGradient(thumb, 1, D.thumbStart, D.thumbEnd, "VERTICAL")
     local label = C.Label(parent, text, x + 54, y - 4, math.max(1, (parent:GetWidth() or 470) - x - 54), 24, "GameFontHighlight")
-    toggle.label, toggle.track, toggle.thumb, toggle.accent = label, track, thumb, accent
+    toggle.label, toggle.track, toggle.thumb, toggle.accent, toggle.glow = label, track, thumb, accent, glow
     local group = thumb:CreateAnimationGroup()
     local move = group:CreateAnimation("Translation"); move:SetOrder(1); move:SetDuration(D.motionNormal); move:SetSmoothing("OUT")
     toggle.toggleAnimation = group
@@ -149,7 +207,8 @@ function C.Toggle(panel, parent, text, x, y, onChanged)
         thumb:ClearAllPoints(); thumb:SetPoint("LEFT", toggle, "LEFT", toggle:GetChecked() and 24 or 4, 0)
     end
     function toggle:cuiRefresh()
-        D.Fill(track, "surfaceHover"); accent:SetShown(self:GetChecked() == true)
+        D.Fill(track, "toggleOff"); accent:SetShown(self:GetChecked() == true)
+        accent:SetAlpha(Enabled(self) and .78 or .30); glow:SetShown(Enabled(self) and self:GetChecked() == true)
         label:SetTextColor(unpack(Enabled(self) and D.textPrimary or D.textDisabled))
         thumb:SetAlpha(Enabled(self) and 1 or .45)
         self.cuiToggleValue = self:GetChecked() == true
@@ -582,7 +641,7 @@ function C.Section(parent, text, x, y, width, opts)
             elseif self.transition then (self.collapsed and self.collapseAnimation or self.expandAnimation):Play() end
         end
         section.title:SetWidth(width - 68)
-        section.collapseButton = C.Button(section, "-", width - 40, -6, 30, function() section:SetCollapsed(not section.collapsed) end)
+        section.collapseButton = C.Button(section, "-", width - 40, -6, 30, function() section:SetCollapsed(not section.collapsed) end, "ghost")
         section:HookScript("OnHide", Settle)
         section:HookScript("OnShow", function() if not section.transition then SetSectionInput(section, section.collapsed) end end)
         if opts.collapsed then section:SetCollapsed(true, true) end
@@ -597,7 +656,7 @@ function C.Segmented(panel, parent, text, x, y, width, entries, onSelect)
     control.label = C.Label(control, text, 0, 0, width, 22, "GameFontNormal")
     local segmentWidth = (width - (#entries - 1) * D.spacingXS) / math.max(1, #entries)
     for index, entry in ipairs(entries) do
-        local choice = C.Button(control, entry.label, (index - 1) * (segmentWidth + D.spacingXS), -26, segmentWidth, nil)
+        local choice = C.Button(control, entry.label, (index - 1) * (segmentWidth + D.spacingXS), -26, segmentWidth, nil, "ghost")
         choice.value = entry.value
         choice:SetScript("OnClick", function(self)
             if not control.disabled and onSelect then onSelect(self.value) end
@@ -659,11 +718,18 @@ function C.GalleryTile(parent, text, x, y, width, height, onClick)
     tile:SetHeight(height)
     tile.textLabel:ClearAllPoints(); tile.textLabel:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 8, 6)
     tile.textLabel:SetSize(width - 16, 30)
+    tile.selectionAccent = tile:CreateTexture(nil, "BORDER")
+    tile.selectionAccent:SetPoint("BOTTOMLEFT", tile, "BOTTOMLEFT", 1, 1)
+    tile.selectionAccent:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -1, 1)
+    tile.selectionAccent:SetHeight(2); D.ApplyGradient(tile.selectionAccent, .8); tile.selectionAccent:Hide()
+    local setSelected = tile.SetSelected
+    function tile:SetSelected(value) setSelected(self, value); self.selectionAccent:SetShown(value == true) end
     return tile
 end
 
 function C.Backdrop(frame) return D.Skin(frame, "surface") end
 function C.Feedback(panel, text, failed)
-    panel.feedback:SetText(text); panel.feedback:SetTextColor(unpack(failed and D.danger or D.success))
+    local success = failed == false or text == addon.L.saved or text == addon.L.resetDone or text == addon.L.transferDone
+    panel.feedback:SetText(text); panel.feedback:SetTextColor(unpack(failed and D.danger or success and D.success or D.textSecondary))
     if panel.focusedInput and panel.focusedInput.SetInvalid then panel.focusedInput:SetInvalid(failed == true) end
 end

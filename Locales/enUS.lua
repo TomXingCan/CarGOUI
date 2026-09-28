@@ -406,4 +406,24 @@ addon:RegisterLocale("enUS", {
     ["Unknown artwork animation field."] = "Unknown artwork animation field.",
     ["Artwork transform is outside its finite bounds."] = "Artwork transform is outside its finite bounds.",
     ["Unknown artwork setting: "] = "Unknown artwork setting: ",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "Current Character / Quick Test",
+    ["Interface"] = "Interface",
+    ["Window"] = "Window",
+    ["Free Move position X"] = "Free Move position X",
+    ["Free Move position Y"] = "Free Move position Y",
+    ["Test Free Move"] = "Test Free Move",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "Free Move position is independent of ordinary Mobility offsets.",
+    ["Per-skill details are available in Copy diagnostics."] = "Per-skill details are available in Copy diagnostics.",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples.",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples.",
+    ["Custom color"] = "Custom color",
+    ["Timer X"] = "Timer X",
+    ["Timer Y"] = "Timer Y",
+    ["Reset timer position"] = "Reset timer position",
+    ["Test selected region"] = "Test selected region",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "Test Mobility",
 })

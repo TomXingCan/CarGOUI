@@ -92,7 +92,7 @@ test("FONT actual LibSharedMedia registrations appear and resolve by stable logi
     local library = media(env)
     truthy(library:Register("font", "Expressway", sharedPath))
     local item = assert(choice(addon, "LSM:Expressway"), "shared registration appears in picker choices")
-    truthy(item.label:find("Expressway", 1, true), "friendly registry name is displayed")
+    equal(item.label, "Expressway", "picker shows only the registered typeface name")
     equal(item.label:find("Interface", 1, true), nil, "picker does not expose filesystem paths")
     equal(addon:ResolveReminderFont(item.value), library:Fetch("font", "Expressway", true))
     truthy(addon:UpdateReminderStyle("mobility:MAGE", { font = { face = item.value } }))
@@ -100,6 +100,27 @@ test("FONT actual LibSharedMedia registrations appear and resolve by stable logi
     local status = addon:GetReminderFontStatus("LSM:Expressway")
     equal(status.selectedFace, "LSM:Expressway"); equal(status.effectiveFace, sharedPath)
     equal(status.fallbackReason, nil, "registered loadable face is available")
+end)
+
+test("FONT picker labels keep typeface names while client and LSM identities remain unchanged", function()
+    for _, locale in ipairs({ "enUS", "zhCN", "zhTW", "ruRU", "deDE", "frFR", "itIT", "esES" }) do
+        local env, addon = h.login(nil, false, { locale = locale })
+        local library = media(env)
+        truthy(library:Register("font", "TeX Gyre Adventor", sharedPath,
+            library.LOCALE_BIT_western + library.LOCALE_BIT_zhCN + library.LOCALE_BIT_zhTW + library.LOCALE_BIT_ruRU))
+        equal(choice(addon, "LSM:TeX Gyre Adventor").label, "TeX Gyre Adventor", "no provider prefix in any locale")
+        equal(choice(addon, env.STANDARD_TEXT_FONT).label, "Friz Quadrata", "known client face uses its font name")
+        for _, item in ipairs(addon:GetReminderFontOptions()) do
+            equal(item.label:find("SharedMedia:", 1, true), nil)
+            equal(item.label:find("Blizzard / Client:", 1, true), nil)
+            equal(item.label:find("LSM:", 1, true), nil, "logical identity is not a row label")
+        end
+        truthy(addon:UpdateReminderStyle("mobility:MAGE", { font = { face = "LSM:TeX Gyre Adventor" } }))
+        equal(addon:GetMobilityConfig().style.font.face, "LSM:TeX Gyre Adventor")
+        local saved = copy(addon.db)
+        local _, reloaded = h.login(copy(saved), false, { locale = locale })
+        same(reloaded.db, saved, "display labels never migrate saved font identity")
+    end
 end)
 
 test("FONT exact registry identities ignore unrelated global overrides and unknown assets", function()

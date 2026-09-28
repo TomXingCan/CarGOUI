@@ -72,7 +72,7 @@ end
 local function OnSpecializationChanged(self, _, unit)
     if issecretvalue and issecretvalue(unit) then return end
     if unit and unit ~= "player" then return end
-    self:RefreshPreview()
+    self:StopPreview(self.previewState.mode == "off")
     if self.RefreshOptions then self:RefreshOptions() end
 end
 

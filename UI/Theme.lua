@@ -137,9 +137,9 @@ local function SkinControl(record, body)
     if control.cuiRefresh then control:cuiRefresh(); return end
     if record.fill then
         if kind == "content" then D.ApplyGradient(record.fill, .35)
-        else D.Fill(record.fill, kind == "input" and "surfaceBase" or "surfaceRaised") end
+        else D.Fill(record.fill, kind == "input" and "surfaceInput" or kind == "section" and "surfaceCard" or "surfaceRaised") end
     end
-    for _, line in ipairs(record.border or {}) do D.Fill(line, "borderSubtle") end
+    for _, line in ipairs(record.border or {}) do D.Fill(line, "borderSubtle", kind == "section" and .55 or 1) end
     if kind == "input" and control.SetTextColor then control:SetTextColor(unpack(D.textPrimary)) end
 end
 
@@ -165,20 +165,42 @@ function addon:RegisterOptionsThemeControl(panel, control, kind)
     SkinControl(record, self.optionBodyThemes[info and info.bodyKey or "neutral"])
 end
 
+-- Clip each native line to the quiet lower-right background area. The source
+-- class/spec geometry remains unchanged and no overlay frame captures input.
+local function CropStroke(x1, y1, x2, y2)
+    local dx, dy, first, last = x2 - x1, y2 - y1, 0, 1
+    local function Edge(p, q)
+        if p == 0 then return q >= 0 end
+        local ratio = q / p
+        if p < 0 then if ratio > last then return false end; first = math.max(first, ratio)
+        else if ratio < first then return false end; last = math.min(last, ratio) end
+        return true
+    end
+    if not Edge(-dx, x1 + 300) or not Edge(dx, -24 - x1)
+        or not Edge(-dy, y1 - 80) or not Edge(dy, 310 - y1) or first >= last then return end
+    return x1 + dx * first, y1 + dy * first, x1 + dx * last, y1 + dy * last
+end
+
 local function ApplyWatermark(self, panel, surfaces, body)
     local pattern = self:BuildOptionsThemeMotif(body.motif)
-    surfaces.motifKey, surfaces.motifCount = body.motif, #pattern
+    surfaces.motifKey, surfaces.motifCount, surfaces.motifVisibleCount = body.motif, #pattern, 0
     for i, line in ipairs(surfaces.motif) do
         local stroke = pattern[i]
+        local x1, y1, x2, y2
         if stroke then
+            x1, y1, x2, y2 = CropStroke(-12 + stroke[1] * 1.45, 155 + stroke[2] * 1.45,
+                -12 + stroke[3] * 1.45, 155 + stroke[4] * 1.45)
+        end
+        if x1 then
             -- Endpoints define actual native geometry. Rotating WHITE8X8 UVs
             -- on a narrow rectangular texture would not establish that shape.
             line:ClearAllPoints()
-            line:SetStartPoint("BOTTOMRIGHT", panel, -122 + stroke[1], 202 + stroke[2])
-            line:SetEndPoint("BOTTOMRIGHT", panel, -122 + stroke[3], 202 + stroke[4])
+            line:SetStartPoint("BOTTOMRIGHT", panel, x1, y1)
+            line:SetEndPoint("BOTTOMRIGHT", panel, x2, y2)
             line:SetThickness(stroke[5])
-            line:SetColorTexture(body.accent[1], body.accent[2], body.accent[3], self.optionThemeOpacity.motif)
+            line:SetColorTexture(body.accent[1], body.accent[2], body.accent[3], self.optionThemeOpacity.motif * .55)
             line:Show()
+            surfaces.motifVisibleCount = surfaces.motifVisibleCount + 1
         else line:Hide() end
     end
 end
@@ -208,7 +230,7 @@ function addon:RefreshOptionsTheme()
     surfaces.key = info.themeKey
     if surfaces.headerKey ~= info.headerKey then
         surfaces.headerKey = info.headerKey
-        Gradient(surfaces.header, header, .30)
+        Gradient(surfaces.header, header, .18)
         self:UpdateBrandingTheme(header.accent)
     end
     if surfaces.bodyKey ~= info.bodyKey then

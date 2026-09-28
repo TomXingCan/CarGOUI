@@ -22,7 +22,7 @@ Automatic faction Header and class/spec Body identity remain separate concepts. 
 
 | Primitive | Behavior |
 | --- | --- |
-| Button | Owned surface/border/text with hover, press, selected and disabled feedback. |
+| Button | Primary, secondary, ghost and danger variants with hover, press, selected and disabled feedback. |
 | Toggle | Owned track, accent fill and moving thumb; existing boolean save semantics. |
 | Dropdown | Reused menu/rows, selected/focus accents, optional bounded pagination and guarded interaction. |
 | Input | Owned raw EditBox skin with normal, hover, focus, invalid and disabled states; Enter still commits. |
@@ -54,7 +54,35 @@ Only actual production pages are registered. `classTools` is deliberately absent
 
 Proc Appearance is the first fully composed modern page: automatic specialization context, Proc/Region selection, Display segments, Artwork, Transform, Animation, Timer, Position/Test and session-only Advanced disclosure. Native and Timer Only continue hiding irrelevant artwork controls. Timer typography remains a link to the existing editor. The audited gallery retains its filters, pagination, stable keys and direct client thumbnails.
 
-General, Mobility, Preview, typography, diagnostics and Import/Export retain their existing information architecture while adopting the same shared control skin. Import staging, confirmation, selection/copy, backup restore and unsubmitted-field semantics remain intact. Later releases may refine individual forms, accessibility and page composition; they should not require another global shell redesign.
+The RC2 navigation contains General, Mobility, Proc and Import / Export. Typography and diagnostics remain contextual detail pages. There is no registered `preview` descriptor, Test Mode sidebar row, placeholder or allocated Test Mode page. `UI/Preview.lua` remains loaded: removing its navigation does not remove `SetPreview`, `StopPreview`, `RefreshPreview`, the separate sample pool or the existing live/TEST boundary. Import staging, confirmation, selection/copy, backup restore and unsubmitted-field semantics remain intact.
+
+### RC2 page responsibilities and contextual testing
+
+General contains only app-level concerns, grouped into Current Character / Quick Test, Interface and Window cards. It shows current class/spec context, Test Current Spec and Stop Test, minimap visibility, animated-title preference and window centering. It has no Mobility enable switch or Mobility XY editor, and it introduces no global Enable CarGOUI preference.
+
+Test Current Spec calls the existing `SetPreview("all")` for the entries defined in the current context. Mobility calls `SetPreview("single", mobilityEntry.id)`; Proc calls `SetPreview("single", selectedProcEntry)`. Each feature owns a Stop action that calls `StopPreview()`. Typography keeps its contextual appearance preview. These actions do not call category navigation or change `panel.activeCategory`. Starting a different test replaces the prior sample selection through the same preview runtime. Close, Escape, combat and specialization changes stop samples; they cannot revive on reopening the window. A page switch cancels an owned color edit and settles UI motion while allowing an intentional sample to remain available for contextual typography adjustments.
+
+### Local position ownership
+
+Mobility is the sole ordinary Mobility settings editor, including its enabled preference, XY and position reset. Proc's Position / Test card directly edits Timer X/Y and resets only the selected region's `region.position`. Artwork X/Y remain Advanced artwork controls for `region.appearance.offset`; neither editor writes the other's field. The former Timer position / Test Mode navigation button is removed.
+
+Free Move / Time Spiral is a separate entry even though it shares Mobility typography and visibility semantics. When a current Free Move preview entry exists, Mobility shows a contextual subsection with independent XY, Reset and Test Free Move. The entire subsection is hidden when no entry exists. It uses the existing per-reminder position path and never folds Free Move offsets into ordinary Mobility group position. Changing either scope or resetting it preserves the other.
+
+### Typeface-first font labels
+
+Normal font picker rows display the typeface name without `SharedMedia:` or `Blizzard / Client:` prefixes. Known built-in client resources also use their actual font name; an unknown trusted client default retains its localized default label. Sorting, locale availability filtering and physical-resource deduplication are unchanged. The persisted logical identifier remains exactly `LSM:<name>`, and legacy client font paths remain valid. Provider/fallback information can remain in status or diagnostics. This is a presentation change with no schema migration.
+
+### Shared native color picker
+
+`UI/ProcColorPicker.lua` owns one native ColorPickerFrame session with an explicit `timer` or `artwork` target. Both targets reuse the existing picker ownership checks, native Okay/Cancel hooks, replacement protection and bounded cleanup. Timer sessions continue to use `Get/SetProcRegionColor`; artwork sessions use `GetProcRegionAppearance` and `SetProcRegionAppearance`. Draft rendering is transient presentation state, never a SavedVariables write or a transfer payload.
+
+Artwork has a swatch/native picker and the modes Blizzard event color (`artColor = nil`) and Custom color (`artColor = { r, g, b }`). Normal UI exposes no raw R/G/B numeric fields. Swatch changes update the draft and rendered sample; Okay commits to only that target, while Cancel restores the saved presentation. Opening the other target cancels the old draft before taking ownership. Region, page, specialization, Options close, Escape and combat boundaries cancel the current owned session, and stale callbacks cannot commit to another region or target. A different addon's newer picker session is never hidden or overwritten by cleanup.
+
+### RC2 visual hierarchy
+
+The 900 by 640 shell and Header / Sidebar / Content / Footer grid remain unchanged. Navigation uses lightweight rows with a narrow cyan-to-violet selection rail, restrained wash and brighter selected text rather than a box around every item. The smaller wordmark/emblem leave more space for the product accent; version/status remain secondary metadata. Class/spec motifs are clipped, faint background geometry drawn with the existing static Line pool.
+
+General, Mobility and Proc use consistent cards, title hierarchy and spacing. Primary actions receive stronger accent treatment, secondary actions retain a quiet surface, and Reset / Center / Back use ghost treatment; destructive confirmation can use danger. Inputs have a lower-contrast normal surface and a distinct focus border/bottom accent with soft glow. Toggles retain their reusable smooth motion with a darker OFF track, gradient ON track and polished thumb. Selected segments, slider fill and gallery selection repeat the restrained gradient language. Ordinary footer instructions use secondary/muted text; success green is reserved for actual saved/success feedback. No polling, new UI assets or persistent cosmetic preferences are needed for this pass.
 
 ## Compatibility and validation
 

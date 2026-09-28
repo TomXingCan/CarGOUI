@@ -98,9 +98,8 @@ local CheckBox, Dropdown, Slider = CUI.CheckBox, CUI.Dropdown, CUI.Slider
 local Backdrop, Feedback, CloseMenus = CUI.Backdrop, CUI.Feedback, CUI.CloseMenus
 
 local function ClearEdits(panel)
-    panel.positionDirty = false
-    panel.entryPositionDirty = false
     panel.mobilityPositionDirty = false
+    panel.freeMovePositionDirty = false
     for _, edit in ipairs(panel.editBoxes) do
         edit.dirty = false
         edit:ClearFocus()
@@ -219,7 +218,7 @@ local function RefreshAppearanceControls(panel)
         controls.appearanceFont.fontTooltip = nil
     end
     panel.appearanceHint:SetText(panel.appearanceKind == "proc"
-        and addon:Text("Native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples.")
+        and addon:Text("Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples.")
         or addon:Text("All Mobility skills and specializations in your current class share these settings. Live uses the detected skill."))
 end
 
@@ -240,20 +239,22 @@ local function SetPublicText(control, text)
     if control:GetText() ~= text then control:SetText(text) end
 end
 
-local function RefreshPreviewControls(panel)
-    local controls, selected, combat = panel.controls, panel.selectedPreviewEntry, InCombat()
-    controls.previewSingle:SetEnabled(selected ~= nil and not combat)
-    controls.previewAll:SetEnabled(selected ~= nil and not combat)
+local function RefreshContextualTests(panel)
+    local controls, combat = panel.controls, InCombat()
+    local entries = addon:GetPreviewEntries()
+    controls.generalTest:SetEnabled(#entries > 0 and not combat)
     local state = addon.previewState
     local mode = state and state.mode or "off"
-    controls.previewStop:SetEnabled(mode ~= "off")
-    SetPublicText(panel.previewStatus, combat and L.previewCombat or (not selected and L.noEntries
+    controls.generalStop:SetEnabled(mode ~= "off")
+    controls.mobilityStop:SetEnabled(mode ~= "off")
+    controls.procStop:SetEnabled(mode ~= "off")
+    SetPublicText(panel.generalTestStatus, combat and L.previewCombat or (#entries == 0 and L.noEntries
         or (mode == "off" and L.previewOff
         or string.format(L.previewRunning, mode == "all" and addon:Text("all defined entries for this spec") or addon:Text("selected entry")))))
 end
 
--- This method is safe to call from a state-change event: it only updates public
--- Mobility labels and existing controls, never the title, layout or other pages.
+-- State-change events update existing public context controls. No title rebuild,
+-- gameplay query, or new widget allocation is needed for this refresh.
 function addon:RefreshMobilityOptions()
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() then return end
@@ -284,11 +285,6 @@ function addon:RefreshMobilityOptions()
         if #names > 2 then text = text .. " (+" .. (#names - 2) .. ")" end
         SetPublicText(panel.mobilitySpell, addon:Text("Detected: ") .. text)
     else SetPublicText(panel.mobilitySpell, string.format(L.mobilitySpell, spellName)) end
-    if id and state.spellName then
-        local suffix = (state.status == "Unsupported" or state.status == "Restricted")
-            and addon:Text(" - Preview only (live unavailable)") or addon:Text(" - mobility sample")
-        controls.previewEntry:SetEntryLabel(id, spellName .. suffix)
-    end
     -- Keep machine status and detailed API reasons stable in Copy diagnostics.
     local descriptions = {
         Ready = "At least one use is available.",
@@ -301,20 +297,36 @@ function addon:RefreshMobilityOptions()
     if #states > 1 and self:GetMobilityConfig().enabled then
         SetPublicText(panel.mobilityStatus, addon:Format("Detected %d learned skills.", #names)
             .. "\n" .. (unavailable > 0 and addon:Format("%d unavailable/restricted; see Copy diagnostics.", unavailable)
-                or addon:Text("Per-skill details: Copy diagnostics. Samples: Test Mode entry menu.")))
+                or addon:Text("Per-skill details are available in Copy diagnostics.")))
     else SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, self:Text(state.status or "Unknown")) .. "\n" .. reason) end
-    local position = id and self:GetReminderPosition(entry)
-    controls.mobilityX:SetEnabled(position ~= nil)
-    controls.mobilityY:SetEnabled(position ~= nil)
+    local position = self:GetMobilityConfig().position
     if not panel.mobilityPositionDirty then
         SetPublicText(controls.mobilityX, position and string.format("%g", position.x) or "")
         SetPublicText(controls.mobilityY, position and string.format("%g", position.y) or "")
     end
     local combat = InCombat()
     controls.mobilityPreview:SetEnabled(id ~= nil and state.spellID ~= nil and not combat)
-    controls.mobilityStop:SetEnabled(self.previewState and self.previewState.mode ~= "off")
     SetPublicText(panel.mobilityPreviewNote, combat and L.previewCombat or addon:Text("TEST uses fixed samples, never live timing."))
-    RefreshPreviewControls(panel)
+    local freeEntry
+    for _, candidate in ipairs(self:GetPreviewEntries()) do
+        if candidate.freeMove then freeEntry = candidate; break end
+    end
+    local freeId = freeEntry and freeEntry.id
+    if panel.freeMoveEntryId ~= freeId then
+        panel.freeMoveEntryId, panel.freeMovePositionDirty = freeId, false
+        controls.freeMoveX:ClearFocus(); controls.freeMoveY:ClearFocus()
+    end
+    panel.freeMoveSection:SetShown(freeEntry ~= nil)
+    for _, key in ipairs({ "freeMoveX", "freeMoveY", "freeMoveReset" }) do controls[key]:SetEnabled(freeEntry ~= nil) end
+    controls.freeMovePreview:SetEnabled(freeEntry ~= nil and not combat)
+    if not panel.freeMovePositionDirty then
+        local freePosition = freeEntry and self:GetReminderPosition(freeEntry)
+        SetPublicText(controls.freeMoveX, freePosition and string.format("%g", freePosition.x) or "")
+        SetPublicText(controls.freeMoveY, freePosition and string.format("%g", freePosition.y) or "")
+    end
+    panel.mobilityEditor:SetHeight(freeEntry and 638 or 424)
+    panel.mobilityScroll:RefreshRange()
+    RefreshContextualTests(panel)
 end
 
 function addon:ShowMobilityDiagnostics()
@@ -366,7 +378,7 @@ function addon:ShowMobilityDiagnostics()
         dialog.selectAll = Button(dialog, L.diagnosticsSelect, 192, -386, 140, function()
             edit:SetFocus(); edit:HighlightText()
         end)
-        dialog.close = Button(dialog, L.close, 520, -386, 120, function() dialog:Hide() end)
+        dialog.close = Button(dialog, L.close, 520, -386, 120, function() dialog:Hide() end, "ghost")
         dialog:HookScript("OnHide", function() edit:ClearFocus() end)
         panel.diagnosticsFrame = dialog
     end
@@ -383,29 +395,23 @@ function addon:RefreshOptions()
     if self.RefreshSettingsTransferPage then self:RefreshSettingsTransferPage() end
     local controls, db = panel.controls, self.db
     panel.refreshing = true
-    local mobility = self:GetMobilityConfig()
-    controls.enabled:SetChecked(mobility.enabled)
     controls.animatedTitle:SetChecked(db.options.animatedTitle)
     controls.showMinimapIcon:SetChecked(not db.options.minimap.hide)
-    if not panel.positionDirty then
-        controls.x:SetText(string.format("%g", mobility.position.x))
-        controls.y:SetText(string.format("%g", mobility.position.y))
-    end
+    local _, spec = self:GetPlayerContext()
+    panel.generalCharacter:SetText(self:GetLocalizedClassName() .. "  /  "
+        .. (spec and self:GetLocalizedSpecName(spec) or self:Text("No defined style context")))
     RefreshAppearanceControls(panel)
-    local entries, procAllowed, procChoices, previewChoices = self:GetPreviewEntries(), {}, {}, {}
+    local entries, procChoices = self:GetPreviewEntries(), {}
     for _, entry in ipairs(entries) do
-        previewChoices[#previewChoices + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
         if entry.kind == "proc" then
-            procAllowed[entry.id] = true
             procChoices[#procChoices + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
         end
     end
     controls.procEnabled:SetEnabled(#procChoices > 0)
     controls.procEnabled:SetChecked(#procChoices > 0 and self:GetProcConfig().enabled or false)
     panel.procStatus:SetText(#procChoices > 0
-        and addon:Text("Displays countdowns on supported Blizzard Proc graphics. Test Mode shows separate samples.")
+        and addon:Text("Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples.")
         or addon:Text("No verified timed native Proc regions are available for this specialization / talent selection."))
-    controls.previewEntry:SetEntries(previewChoices)
     self:RefreshProcAppearanceOptions()
     self:RefreshProcColorControls()
     controls.procAppearance:SetEnabled(panel.selectedProcEntry ~= nil)
@@ -414,28 +420,6 @@ function addon:RefreshOptions()
     panel.refreshing = false
     self:ApplyOptionsPosition()
 
-    local entries, allowed = self:GetPreviewEntries(), {}
-    for _, entry in ipairs(entries) do allowed[entry.id] = true end
-    if not allowed[panel.selectedPreviewEntry] then
-        panel.selectedPreviewEntry = entries[1] and entries[1].id
-        panel.entryPositionDirty = false
-        controls.entryX:ClearFocus()
-        controls.entryY:ClearFocus()
-    end
-    local selected = panel.selectedPreviewEntry
-    controls.previewEntry:FilterChoices(allowed)
-    controls.previewEntry:SelectValue(selected)
-    controls.entryReset:SetEnabled(selected ~= nil)
-    if selected then controls.entryX:Enable(); controls.entryY:Enable()
-    else controls.entryX:Disable(); controls.entryY:Disable() end
-    if not panel.entryPositionDirty then
-        local position
-        for _, entry in ipairs(entries) do
-            if entry.id == selected then position = self:GetReminderPosition(entry); break end
-        end
-        controls.entryX:SetText(position and string.format("%g", position.x) or "")
-        controls.entryY:SetText(position and string.format("%g", position.y) or "")
-    end
     self:RefreshMobilityOptions()
 end
 
@@ -504,6 +488,7 @@ local function OnOptionsSpecializationChanged(self, _, unit)
     if unit and unit ~= "player" then return end
     if self.ClearSettingsTransferPage then self:ClearSettingsTransferPage() end
     self:CancelProcColorPicker()
+    self:StopPreview(self.previewState.mode == "off")
     CUI.StopMotion(self.optionsFrame)
     ClearEdits(self.optionsFrame)
     self:RefreshOptions()
@@ -560,45 +545,30 @@ end
 
 local function BuildGeneral(self, panel, general)
     local width = panel.shellGrid.contentWidth
-    local half, right = (width - 24) / 2, (width + 24) / 2
-    Label(general, L.generalHint, 0, -32, width, 32)
-    panel.controls.enabled = CheckBox(panel, general, L.enabled, 0, -70,
-        function(value) return { enabled = value } end)
-    Label(general, L.x, 0, -112, half, 22, "GameFontNormal")
-    Label(general, L.y, right, -112, half, 22, "GameFontNormal")
-    panel.controls.x = EditBox(panel, general, 0, -138, half)
-    panel.controls.y = EditBox(panel, general, right, -138, half)
-    local function CommitPosition()
-        panel.positionDirty = false
-        local c = panel.controls
-        local x, y = tonumber(c.x:GetText()), tonumber(c.y:GetText())
-        -- Use false for missing values so an invalid field cannot become an omitted patch key.
-        if Submit(panel, { position = { x = x or false, y = y or false } }, L.invalidPosition) then
-            c.x:ClearFocus()
-            c.y:ClearFocus()
-        else
-            panel.positionDirty = true
-        end
-    end
-    for _, edit in ipairs({ panel.controls.x, panel.controls.y }) do
-        edit:SetScript("OnEnterPressed", CommitPosition)
-        edit:SetScript("OnTextChanged", function(_, userInput)
-            if userInput and not panel.refreshing then panel.positionDirty = true end
-        end)
-    end
-    panel.controls.centerPosition = Button(general, addon:Text("Reset Mobility offsets"), 0, -214, half, function()
-        panel.positionDirty = false
-        Submit(panel, { position = { x = 0, y = 0 } })
+    local inner, gap = width - 24, 16
+    local half, right = (inner - gap) / 2, (inner + gap) / 2
+    local character = CUI.Section(general, addon:Text("Current Character / Quick Test"), 0, -32, width, { height = 158 })
+    local interface = CUI.Section(general, addon:Text("Interface"), 0, -198, width, { height = 128 })
+    local window = CUI.Section(general, addon:Text("Window"), 0, -338, width, { height = 100 })
+    panel.generalSections = { character, interface, window }
+    panel.generalCharacter = Label(character.content, "", 0, 0, inner, 24, "GameFontNormal")
+    panel.controls.generalTest = Button(character.content, L.previewAll, 0, -32, half, function()
+        local ok, message = addon:SetPreview("all")
+        addon:RefreshOptions()
+        if ok == false then Feedback(panel, message or L.noEntries, true) end
+    end, "primary")
+    panel.controls.generalStop = Button(character.content, L.previewStop, right, -32, half, function()
+        addon:StopPreview()
+        addon:RefreshOptions()
     end)
-    Label(general, L.positionHint, 0, -174, width, 36)
-    Label(general, addon:Text("Mobility settings belong to your current class. Proc styles belong to your current class and specialization."), 0, -250, width, 40)
-    panel.controls.animatedTitle = CheckBox(panel, general, L.animatedTitle, 0, -332,
-        function(value) return { options = { animatedTitle = value } } end)
-    panel.controls.centerOptions = Button(general, L.centerOptions, 0, -390, half, function()
-        Submit(panel, { options = { position = { x = 0, y = 0 } } })
-    end)
-    panel.controls.showMinimapIcon = CheckBox(panel, general, L.showMinimapIcon, 0, -296,
+    panel.generalTestStatus = Label(character.content, "", 0, -72, inner, 32)
+    panel.controls.showMinimapIcon = CheckBox(panel, interface.content, L.showMinimapIcon, 0, 0,
         function(value) return { options = { minimap = { hide = not value } } } end)
+    panel.controls.animatedTitle = CheckBox(panel, interface.content, L.animatedTitle, 0, -38,
+        function(value) return { options = { animatedTitle = value } } end)
+    panel.controls.centerOptions = Button(window.content, L.centerOptions, 0, 0, half, function()
+        Submit(panel, { options = { position = { x = 0, y = 0 } } })
+    end, "ghost")
 end
 
 local function BuildAppearance(self, panel, appearance)
@@ -642,73 +612,15 @@ local function BuildAppearance(self, panel, appearance)
         ClearEdits(panel)
         CancelReset(panel)
         if addon:ResetReminderStyle(panel.selectedAppearanceKey) then Feedback(panel, L.saved) end
-    end)
+    end, "ghost")
     panel.controls.appearancePreview = Button(editor, addon:Text("Preview current reminder"), (width + 24) / 2, -606, (width - 24) / 2, function()
         local ok, message = addon:StartAppearancePreview(panel.selectedAppearanceKey)
         addon:RefreshOptions()
         if not ok then Feedback(panel, message, true) end
-    end)
+    end, "primary")
     panel.controls.appearanceBack = Button(editor, addon:Text("Back"), 0, -658, 140, function()
         addon:SelectOptionsCategory(panel.appearanceKind or "mobility")
-    end)
-end
-
-local function BuildPreview(self, panel, page)
-    local width = panel.shellGrid.contentWidth
-    local third, stride = (width - 48) / 3, (width + 24) / 3
-    Label(page, L.previewHint, 0, -32, width, 44)
-    local previewEntries = {}
-    for _, entry in ipairs(self:GetPreviewEntries()) do
-        previewEntries[#previewEntries + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) }
-    end
-    panel.controls.previewEntry = Dropdown(panel, page, L.previewEntry, 0, -86, previewEntries, nil, function(id)
-        panel.selectedPreviewEntry = id
-        panel.entryPositionDirty = false
-        panel.controls.entryX:ClearFocus()
-        panel.controls.entryY:ClearFocus()
-        if addon.previewState and addon.previewState.mode == "single" then addon:SetPreview("single", id) end
-        addon:RefreshOptions()
-    end)
-    panel.controls.previewEntry:SetWidth(width)
-    local function StartPreview(mode)
-        local ok, message = addon:SetPreview(mode, panel.selectedPreviewEntry)
-        addon:RefreshOptions()
-        if ok == false then Feedback(panel, message or L.noEntries, true) end
-    end
-    panel.controls.previewSingle = Button(page, L.previewSingle, 0, -154, third, function() StartPreview("single") end)
-    panel.controls.previewAll = Button(page, L.previewAll, stride, -154, third, function() StartPreview("all") end)
-    panel.controls.previewStop = Button(page, L.previewStop, stride * 2, -154, third, function()
-        addon:StopPreview()
-        addon:RefreshOptions()
-    end)
-    Label(page, L.entryX, 0, -198, third, 22, "GameFontNormal")
-    Label(page, L.entryY, stride, -198, third, 22, "GameFontNormal")
-    panel.controls.entryX = EditBox(panel, page, 0, -224, third)
-    panel.controls.entryY = EditBox(panel, page, stride, -224, third)
-    local function CommitEntryPosition()
-        local id = panel.selectedPreviewEntry
-        if not id then return end
-        local x, y = tonumber(panel.controls.entryX:GetText()), tonumber(panel.controls.entryY:GetText())
-        panel.entryPositionDirty = false
-        if Submit(panel, { reminders = { [id] = { position = { x = x or false, y = y or false } } } }, L.invalidPosition) then
-            panel.controls.entryX:ClearFocus()
-            panel.controls.entryY:ClearFocus()
-        else panel.entryPositionDirty = true end
-    end
-    for _, edit in ipairs({ panel.controls.entryX, panel.controls.entryY }) do
-        edit:SetScript("OnEnterPressed", CommitEntryPosition)
-        edit:SetScript("OnTextChanged", function(_, userInput)
-            if userInput and not panel.refreshing then panel.entryPositionDirty = true end
-        end)
-    end
-    panel.controls.entryReset = Button(page, L.entryReset, stride * 2, -224, third, function()
-        local id = panel.selectedPreviewEntry
-        if not id then return end
-        panel.entryPositionDirty = false
-        Submit(panel, { reminders = { [id] = { position = { x = 0, y = 0 } } } })
-    end)
-    Label(page, L.entryHint, 0, -266, width, 44)
-    panel.previewStatus = Label(page, "", 0, -324, width, 48)
+    end, "ghost")
 end
 
 local function BuildProc(self, panel, page)
@@ -720,53 +632,81 @@ local function BuildProc(self, panel, page)
 end
 
 local function BuildMobility(self, panel, mobility)
-    local width = panel.shellGrid.contentWidth
-    local half, right = (width - 24) / 2, (width + 24) / 2
-    panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,
+    local width = panel.shellGrid.contentWidth - 20
+    local inner, gap = width - 24, 16
+    local half, right = (inner - gap) / 2, (inner + gap) / 2
+    local scroll = CUI.ScrollFrame(panel, mobility, 0, -32, width, mobility:GetHeight() - 32)
+    local editor = CreateFrame("Frame", nil, scroll)
+    editor:SetSize(width, 638); scroll:SetScrollChild(editor)
+    self:RegisterOptionsDragSurface(scroll); self:RegisterOptionsDragSurface(editor)
+    panel.mobilityScroll, panel.mobilityEditor = scroll, editor
+    local status = CUI.Section(editor, addon:Text("Mobility"), 0, 0, width, { height = 194 })
+    local position = CUI.Section(editor, addon:Text("Position / Test"), 0, -206, width, { height = 206 })
+    local free = CUI.Section(editor, addon:Text("Free move"), 0, -424, width, { height = 202 })
+    panel.mobilitySections, panel.freeMoveSection = { status, position, free }, free
+    panel.controls.mobilityEnabled = CheckBox(panel, status.content, L.mobilityEnabled, 0, 0,
         function(value) return { mobility = { enabled = value } } end)
-    panel.mobilitySpell = Label(mobility, "", 0, -72, width, 22, "GameFontNormal")
-    panel.mobilityStatus = Label(mobility, "", 0, -98, width, 48)
-    Label(mobility, L.mobilityPosition, 0, -152, width, 22)
-    Label(mobility, L.entryX, 0, -178, half, 22, "GameFontNormal")
-    Label(mobility, L.entryY, right, -178, half, 22, "GameFontNormal")
-    panel.controls.mobilityX = EditBox(panel, mobility, 0, -202, half)
-    panel.controls.mobilityY = EditBox(panel, mobility, right, -202, half)
-    local function CommitMobilityPosition()
-        local id = panel.mobilityEntryId
-        if not id then return end
-        local x, y = tonumber(panel.controls.mobilityX:GetText()), tonumber(panel.controls.mobilityY:GetText())
-        panel.mobilityPositionDirty = false
-        if Submit(panel, { reminders = { [id] = { position = { x = x or false, y = y or false } } } }, L.invalidPosition) then
-            panel.controls.mobilityX:ClearFocus()
-            panel.controls.mobilityY:ClearFocus()
-        else panel.mobilityPositionDirty = true end
+    panel.mobilitySpell = Label(status.content, "", 0, -36, inner, 24, "GameFontNormal")
+    panel.mobilityStatus = Label(status.content, "", 0, -66, inner, 42)
+    panel.controls.mobilityTypography = Button(status.content, L.mobilityTypography, 0, -110, half,
+        function() addon:OpenAppearance("mobility") end)
+    panel.controls.mobilityDiagnostics = Button(status.content, L.mobilityDiagnostics, right, -110, half,
+        function() addon:ShowMobilityDiagnostics() end, "ghost")
+
+    -- Both editors submit an atomic pair, but only the Free move pair uses its
+    -- independent reminder identity. Ordinary offsets belong to the class group.
+    local function PositionPair(parent, prefix, dirtyKey, xLabel, yLabel, buildPatch)
+        Label(parent, xLabel, 0, 0, half, 32, "GameFontNormal")
+        Label(parent, yLabel, right, 0, half, 32, "GameFontNormal")
+        local xEdit, yEdit = EditBox(panel, parent, 0, -36, half), EditBox(panel, parent, right, -36, half)
+        panel.controls[prefix .. "X"], panel.controls[prefix .. "Y"] = xEdit, yEdit
+        local function Commit()
+            local patch = buildPatch(tonumber(xEdit:GetText()) or false, tonumber(yEdit:GetText()) or false)
+            if not patch then return end
+            panel[dirtyKey] = false
+            if Submit(panel, patch, L.invalidPosition) then xEdit:ClearFocus(); yEdit:ClearFocus()
+            else panel[dirtyKey] = true end
+        end
+        for _, edit in ipairs({ xEdit, yEdit }) do
+            edit:SetScript("OnEnterPressed", Commit)
+            edit:SetScript("OnTextChanged", function(_, userInput)
+                if userInput and not panel.refreshing then panel[dirtyKey] = true end
+            end)
+        end
+        panel.controls[prefix .. "Reset"] = Button(parent, L.entryReset, right, -76, half, function()
+            local patch = buildPatch(0, 0)
+            if not patch then return end
+            panel[dirtyKey] = false
+            xEdit:ClearFocus(); yEdit:ClearFocus()
+            Submit(panel, patch)
+        end, "ghost")
     end
-    for _, edit in ipairs({ panel.controls.mobilityX, panel.controls.mobilityY }) do
-        edit:SetScript("OnEnterPressed", CommitMobilityPosition)
-        edit:SetScript("OnTextChanged", function(_, userInput)
-            if userInput and not panel.refreshing then panel.mobilityPositionDirty = true end
+    PositionPair(position.content, "mobility", "mobilityPositionDirty", L.entryX, L.entryY,
+        function(x, y) return { mobility = { position = { x = x, y = y } } } end)
+    PositionPair(free.content, "freeMove", "freeMovePositionDirty",
+        addon:Text("Free Move position X"), addon:Text("Free Move position Y"), function(x, y)
+            local id = panel.freeMoveEntryId
+            return id and { reminders = { [id] = { position = { x = x, y = y } } } } or nil
         end)
-    end
-    panel.controls.mobilityGeneral = Button(mobility, L.mobilityGeneral, 0, -242, half,
-        function() addon:SelectOptionsCategory("general") end)
-    panel.controls.mobilityTypography = Button(mobility, L.mobilityTypography, right, -242, half,
-        function()
-            addon:OpenAppearance("mobility")
-        end)
-    panel.controls.mobilityPreview = Button(mobility, L.mobilityPreview, 0, -282, half, function()
+    panel.controls.mobilityPreview = Button(position.content, addon:Text("Test Mobility"), 0, -76, half, function()
         local entry = addon.GetMobilityEntry and addon:GetMobilityEntry()
         local ok, message = false, L.mobilityNoSpell
         if entry then ok, message = addon:SetPreview("single", entry.id) end
         addon:RefreshMobilityOptions()
         if ok == false then Feedback(panel, message or L.noEntries, true) end
-    end)
-    panel.controls.mobilityStop = Button(mobility, L.previewStop, right, -282, half, function()
+    end, "primary")
+    panel.controls.mobilityStop = Button(position.content, L.previewStop, 0, -118, half, function()
         addon:StopPreview()
         addon:RefreshMobilityOptions()
     end)
-    panel.controls.mobilityDiagnostics = Button(mobility, L.mobilityDiagnostics, 0, -326, half,
-        function() addon:ShowMobilityDiagnostics() end)
-    panel.mobilityPreviewNote = Label(mobility, "", right, -326, half, 46)
+    panel.mobilityPreviewNote = Label(position.content, "", right, -118, half, 36)
+    panel.controls.freeMovePreview = Button(free.content, addon:Text("Test Free Move"), 0, -76, half, function()
+        if not panel.freeMoveEntryId then return end
+        local ok, message = addon:SetPreview("single", panel.freeMoveEntryId)
+        addon:RefreshMobilityOptions()
+        if ok == false then Feedback(panel, message or L.noEntries, true) end
+    end, "primary")
+    Label(free.content, addon:Text("Free Move position is independent of ordinary Mobility offsets."), 0, -118, inner, 30)
 end
 
 local function BuildSettingsTransfer(self, panel, page)
@@ -779,7 +719,6 @@ end
 addon:RegisterOptionsPage({ key = "general", order = 10, builder = BuildGeneral })
 addon:RegisterOptionsPage({ key = "mobility", order = 20, builder = BuildMobility })
 addon:RegisterOptionsPage({ key = "proc", order = 30, builder = BuildProc })
-addon:RegisterOptionsPage({ key = "preview", order = 40, builder = BuildPreview })
 addon:RegisterOptionsPage({ key = "importExport", order = 50, lazy = true,
     hint = function() return L.transferHint end, builder = BuildSettingsTransfer })
 addon:RegisterOptionsPage({ key = "appearance", order = 60, hidden = true,
@@ -826,8 +765,8 @@ function addon:CreateOptions()
         addon:ResetDatabase()
         CancelReset(panel)
         Feedback(panel, L.resetDone)
-    end)
-    panel.controls.close = Button(panel, L.close, panel.shellGrid.width - 140, footerY, 116, function() panel:Hide() end)
+    end, "ghost")
+    panel.controls.close = Button(panel, L.close, panel.shellGrid.width - 140, footerY, 116, function() panel:Hide() end, "ghost")
 
     self:RefreshOptionsNavigation()
 

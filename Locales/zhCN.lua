@@ -408,4 +408,24 @@ addon:RegisterLocale("zhCN", {
     ["Unknown artwork animation field."] = "未知的图像动画字段。",
     ["Artwork transform is outside its finite bounds."] = "图像变换数值超出允许的有限范围。",
     ["Unknown artwork setting: "] = "未知的图像设置：",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "当前角色 / 快速测试",
+    ["Interface"] = "界面",
+    ["Window"] = "窗口",
+    ["Free Move position X"] = "自由移动位置 X",
+    ["Free Move position Y"] = "自由移动位置 Y",
+    ["Test Free Move"] = "测试自由移动",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "自由移动位置独立于普通位移提示偏移。",
+    ["Per-skill details are available in Copy diagnostics."] = "各技能详情可通过“复制诊断信息”查看。",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "原生触发计时器共用本专精的样式。各区域偏移独立；本页测试使用单独的样本。",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "在受支持的暴雪触发图形上显示倒计时。本页测试显示单独的样本。",
+    ["Custom color"] = "自定义颜色",
+    ["Timer X"] = "计时器 X",
+    ["Timer Y"] = "计时器 Y",
+    ["Reset timer position"] = "重置计时器位置",
+    ["Test selected region"] = "测试所选区域",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "测试位移提示",
 })

@@ -49,6 +49,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
 
     local function Selected() return addon:GetSelectedProcColorEntry() end
     local function Save(patch)
+        if patch.mode ~= nil then addon:CancelProcColorPicker() end
         local ok, message = addon:SetProcRegionAppearance(Selected(), patch)
         ui.Feedback(panel, ok and addon.L.saved or message or addon.L.invalid, not ok)
         addon:RefreshOptions()
@@ -133,9 +134,10 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         { value = "timer", label = addon:Text("Timer only") },
     }, function(value) Save({ mode = value }) end)
     controls.procArtReset = Button(displayContent, addon:Text("Reset artwork to Blizzard default"), 0, -68, inner, function()
+        addon:CancelProcColorPicker()
         if addon:ResetProcRegionAppearance(Selected()) then ui.Feedback(panel, addon.L.saved) end
         addon:RefreshOptions()
-    end)
+    end, "ghost")
 
     local art, artContent = Section(addon:Text("Artwork"), 292)
     panel.procArtworkSection = art
@@ -144,45 +146,28 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         addon:OpenProcArtworkGallery()
     end)
     controls.procOwnArtwork = Button(artContent, addon:Text("Use this Proc artwork"), right, -48, half, function() Save({ assetKey = false }) end)
-    Enum(artContent, addon:Text("Artwork color (this region)"), "colorMode", -100, {
+    controls.procArt_colorMode = Dropdown(panel, artContent, addon:Text("Artwork color (this region)"), 0, -100, {
         { value = "native", label = addon:Text("Blizzard event color") },
-        { value = "custom", label = addon:Text("Custom RGB") },
-    }, function(value)
-        if value == "native" then return { artColor = false } end
-        return { artColor = { r = 1, g = 1, b = 1 } }
+        { value = "custom", label = addon:Text("Custom color") },
+    }, nil, function(value)
+        addon:CancelProcColorPicker()
+        if value == "native" then Save({ artColor = false })
+        else
+            local ok, message = addon:OpenProcColorPicker(Selected(), "artwork")
+            if not ok then ui.Feedback(panel, message, true) end
+            addon:RefreshProcColorControls()
+        end
     end)
-    panel.procArtRGB = CreateFrame("Frame", nil, artContent)
-    panel.procArtRGB:SetSize(inner, 64)
-    panel.procArtRGB:SetPoint("TOPLEFT", artContent, "TOPLEFT", 0, -176)
-    local channels = { { "r", "R" }, { "g", "G" }, { "b", "B" } }
+    controls.procArt_colorMode:SetWidth(inner - 64)
+    controls.procArtColor = Button(artContent, "", inner - 40, -126, 40, function()
+        local ok, message = addon:OpenProcColorPicker(Selected(), "artwork")
+        if not ok then ui.Feedback(panel, message, true) end
+    end)
+    local artSwatch = controls.procArtColor:CreateTexture(nil, "OVERLAY")
+    artSwatch:SetPoint("TOPLEFT", controls.procArtColor, "TOPLEFT", 6, -6)
+    artSwatch:SetPoint("BOTTOMRIGHT", controls.procArtColor, "BOTTOMRIGHT", -6, 6)
+    controls.procArtColor.swatch = artSwatch
     local third = (inner - gap * 2) / 3
-    for index, channel in ipairs(channels) do
-        local key, x = channel[1], (index - 1) * (third + gap)
-        Label(panel.procArtRGB, channel[2], x, 0, third, 20)
-        local edit = ui.EditBox(panel, panel.procArtRGB, x, -28, third)
-        controls["procArtRGB_" .. key] = edit
-        edit:SetScript("OnTextChanged", function(self, user)
-            if user and not panel.refreshing then self.dirty = true end
-        end)
-        edit:SetScript("OnEnterPressed", function()
-            local color = {}
-            for _, item in ipairs(channels) do color[item[1]] = tonumber(controls["procArtRGB_" .. item[1]]:GetText()) end
-            if not addon:IsValidProcRegionColor(color) then
-                for _, item in ipairs(channels) do
-                    local field = controls["procArtRGB_" .. item[1]]
-                    if field.SetInvalid then field:SetInvalid(true) end
-                end
-                ui.Feedback(panel, addon:Text("Choose finite RGB values from 0 to 1."), true)
-                return
-            end
-            for _, item in ipairs(channels) do
-                local field = controls["procArtRGB_" .. item[1]]
-                field.dirty = false
-                if field.SetInvalid then field:SetInvalid(false) end
-            end
-            Save({ artColor = color })
-        end)
-    end
 
     local transform, transformContent = Section(addon:Text("Transform"), 116)
     panel.procTransformSection = transform
@@ -254,27 +239,51 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         addon:CancelProcColorPicker()
         if addon:SetProcRegionColor(Selected(), nil) then ui.Feedback(panel, addon.L.saved) end
         addon:RefreshProcColorControls()
-    end)
+    end, "ghost")
     controls.procAppearance = Button(timerContent, addon:Text("Timer typography"), 0, -122, inner, function()
         addon:OpenAppearance("proc", panel.selectedProcEntry)
     end)
     Label(timerContent, addon:Text("Font, size, outline, shadow and text scale are shared by this specialization. Timer RGB and artwork RGB are separate per-region settings."), 0, -172, inner, 52)
-    local position, positionContent = Section(addon:Text("Position / Test"), 202)
+    local position, positionContent = Section(addon:Text("Position / Test"), 292)
     panel.procPositionSection = position
-    controls.procPreview = Button(positionContent, addon:Text("Preview this region"), 0, 0, half, function()
+    for _, axis in ipairs({ "X", "Y" }) do
+        local x = axis == "X" and 0 or right
+        Label(positionContent, axis == "X" and addon:Text("Timer X") or addon:Text("Timer Y"), x, 0, half, 24)
+        local edit = ui.EditBox(panel, positionContent, x, -28, half)
+        controls["procPosition" .. axis] = edit
+        edit:SetScript("OnTextChanged", function(self, user)
+            if user and not panel.refreshing then self.dirty = true end
+        end)
+        edit:SetScript("OnEnterPressed", function()
+            local entry = Selected()
+            if not entry then return end
+            local fields = { controls.procPositionX, controls.procPositionY }
+            local xValue, yValue = tonumber(fields[1]:GetText()), tonumber(fields[2]:GetText())
+            local ok = panel.submit({ reminders = { [entry.id] = { position = { x = xValue or false, y = yValue or false } } } }, addon.L.invalidPosition)
+            for _, field in ipairs(fields) do
+                field:SetInvalid(not ok)
+                if ok then field.dirty = false; field:ClearFocus() end
+            end
+            if ok then addon:RefreshOptions() end
+        end)
+    end
+    controls.procPositionReset = Button(positionContent, addon:Text("Reset timer position"), 0, -80, inner, function()
+        local entry = Selected()
+        if not entry then return end
+        controls.procPositionX.dirty, controls.procPositionY.dirty = false, false
+        controls.procPositionX:SetInvalid(false); controls.procPositionY:SetInvalid(false)
+        panel.submit({ reminders = { [entry.id] = { position = addon:NewReminderPosition() } } })
+    end, "ghost")
+    controls.procPreview = Button(positionContent, addon:Text("Test selected region"), 0, -130, half, function()
         local ok, message = addon:SetPreview("single", panel.selectedProcEntry)
         addon:RefreshOptions()
         if not ok then ui.Feedback(panel, message, true) end
-    end)
-    controls.procStop = Button(positionContent, addon.L.previewStop, right, 0, half, function()
+    end, "primary")
+    controls.procStop = Button(positionContent, addon.L.previewStop, right, -130, half, function()
         addon:StopPreview()
         addon:RefreshOptions()
     end)
-    controls.procPosition = Button(positionContent, addon:Text("Timer position / Test Mode"), 0, -50, inner, function()
-        panel.selectedPreviewEntry = panel.selectedProcEntry
-        addon:SelectOptionsCategory("preview")
-    end)
-    Label(positionContent, addon:Text("Test Mode uses separate artwork samples and never hides live Blizzard graphics."), 0, -100, inner, 44)
+    Label(positionContent, addon:Text("Test Mode uses separate artwork samples and never hides live Blizzard graphics."), 0, -180, inner, 44)
     page:HookScript("OnHide", function() if panel.procGallery then panel.procGallery:Hide() end end)
     panel.procUI = ui
 end
@@ -325,10 +334,16 @@ function addon:RefreshProcAppearanceOptions()
     local entry = self:GetSelectedProcColorEntry()
     local appearance = self:GetProcRegionAppearance(entry)
     local custom = appearance and appearance.mode == "custom"
-    for _, key in ipairs({ "procArt_mode", "procArtReset", "procAppearance", "procPosition" }) do controls[key]:SetEnabled(entry ~= nil) end
+    for _, key in ipairs({ "procArt_mode", "procArtReset", "procAppearance", "procPositionX", "procPositionY", "procPositionReset" }) do
+        controls[key]:SetEnabled(entry ~= nil)
+    end
+    local position = entry and self:GetReminderPosition(entry)
+    for _, axis in ipairs({ "X", "Y" }) do
+        local edit = controls["procPosition" .. axis]
+        if not edit.dirty then edit:SetText(position and string.format("%g", position[axis:lower()]) or "") end
+    end
     if appearance then
         controls.procArt_mode:SelectValue(appearance.mode)
-        controls.procArt_colorMode:SelectValue(appearance.artColor and "custom" or "native")
         for _, key in ipairs({ "alpha", "scale", "desaturation", "rotation", "width", "height" }) do
             local edit = controls["procArt_" .. key]
             if not edit.dirty then edit:SetText(string.format("%g", appearance[key])) end
@@ -343,14 +358,9 @@ function addon:RefreshProcAppearanceOptions()
             local edit = controls["procArt_offset" .. axis]
             if not edit.dirty then edit:SetText(string.format("%g", appearance.offset[axis:lower()])) end
         end
-        for _, key in ipairs({ "r", "g", "b" }) do
-            local edit = controls["procArtRGB_" .. key]
-            if not edit.dirty then edit:SetText(string.format("%g", appearance.artColor and appearance.artColor[key] or 1)) end
-        end
         local asset = appearance.assetKey and self:GetProcAsset(appearance.assetKey)
         panel.procAssetLabel:SetText(asset and (AssetClassName(asset.class) .. " - " .. AssetLabel(asset)) or self:Text("This Proc's native artwork"))
-        panel.procArtRGB:SetShown(appearance.artColor ~= nil)
-        panel.procArtworkSection:SetHeight(appearance.artColor and 300 or 224)
+        panel.procArtworkSection:SetHeight(224)
     end
     local y = 0
     local function Place(frame, shown, height)

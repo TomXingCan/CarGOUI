@@ -254,10 +254,27 @@ test("modern pages construct bounded wrapped layouts across eight locales and un
             local _, _, _, x = control:GetPoint()
             truthy(x >= 0 and x + control:GetWidth() <= 616.01, "three-column controls stay within their card")
         end
-        for _, key in ipairs({ "general", "mobility", "preview", "appearance", "importExport" }) do
+        for _, key in ipairs({ "general", "mobility", "appearance", "importExport" }) do
             addon:SelectOptionsCategory(key)
             equal(panel.pages[key]:GetWidth(), 660)
             AssertOwnedWidgets(state, panel.pages[key])
+        end
+        for _, sections in ipairs({ panel.generalSections, panel.mobilitySections }) do
+            for _, section in ipairs(sections) do
+                truthy(section.title.wordWrap)
+                equal(section.content:GetWidth(), section:GetWidth() - 24)
+                truthy(section.title:GetWidth() <= section:GetWidth() - 24)
+            end
+        end
+        equal(panel.mobilityScroll:GetWidth(), 640)
+        truthy(panel.mobilityScroll.scrollBar and panel.mobilityScroll.thumb)
+        for _, key in ipairs({ "generalTest", "generalStop", "centerOptions", "mobilityPreview", "mobilityStop",
+            "mobilityReset", "freeMovePreview", "freeMoveReset" }) do
+            local control = controls[key]
+            local _, _, _, x, y = control:GetPoint()
+            truthy(x + control:GetWidth() <= control:GetParent():GetWidth(), "localized action stays within its card")
+            local contentHeight = control:GetParent():GetParent():GetHeight() - 52
+            truthy(-y + control:GetHeight() <= contentHeight, "localized action stays above the card bottom")
         end
         for _, section in ipairs(panel.transfer.sections) do
             truthy(section.title.wordWrap)

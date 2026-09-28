@@ -223,7 +223,7 @@ local function MatchesCurrent(self, overlay, record, state)
 end
 
 local function RenderRegion(self, entry, visible, opacity)
-    local appearance = self:GetProcRegionAppearance(entry)
+    local appearance = self:GetProcArtworkPresentation(entry)
     local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
     if appearance.mode == "native" then FailOpen(self, entry, "native mode"); return end
     if not visible then FailOpen(self, entry, "display CVar disabled"); return end

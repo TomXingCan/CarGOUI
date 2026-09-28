@@ -408,4 +408,24 @@ addon:RegisterLocale("esES", {
     ["Unknown artwork animation field."] = "Campo de animación de imagen desconocido.",
     ["Artwork transform is outside its finite bounds."] = "La transformación de imagen está fuera de sus límites finitos.",
     ["Unknown artwork setting: "] = "Ajuste de imagen desconocido: ",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "Personaje actual / Prueba rápida",
+    ["Interface"] = "Interfaz",
+    ["Window"] = "Ventana",
+    ["Free Move position X"] = "Posición X de movimiento libre",
+    ["Free Move position Y"] = "Posición Y de movimiento libre",
+    ["Test Free Move"] = "Probar movimiento libre",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "La posición de movimiento libre es independiente de los desplazamientos de movilidad normales.",
+    ["Per-skill details are available in Copy diagnostics."] = "Los detalles de cada habilidad están disponibles en «Copiar diagnóstico».",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "Los temporizadores de proc nativos comparten el estilo de esta especialización. Los desplazamientos de región son independientes; las pruebas contextuales usan muestras separadas.",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "Muestra cuentas atrás en los gráficos de proc de Blizzard compatibles. Las pruebas contextuales muestran muestras separadas.",
+    ["Custom color"] = "Color personalizado",
+    ["Timer X"] = "Temporizador X",
+    ["Timer Y"] = "Temporizador Y",
+    ["Reset timer position"] = "Restablecer posición del temporizador",
+    ["Test selected region"] = "Probar región seleccionada",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "Probar movilidad",
 })

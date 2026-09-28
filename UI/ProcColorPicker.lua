@@ -1,7 +1,7 @@
 local _, addon = ...
 
--- This edits an ordinary RGB setting. It never reads native aura children,
--- duration text, aura state or visibility, and it never changes timer alpha.
+-- Timer and artwork share native picker ownership while retaining separate
+-- saved settings and draft presentation. No aura or duration state is read.
 local function SameRegion(first, second)
     return first and second and first.id == second.id and first.class == second.class
         and first.specID == second.specID and first.kind == "proc" and second.kind == "proc"
@@ -30,6 +30,20 @@ function addon:GetSelectedProcColorEntry()
     end
 end
 
+local function Preview(session, color)
+    if session.target == "artwork" then return addon:SetProcArtworkColorPreview(session.entry, color) end
+    return addon:SetProcRegionColorPreview(session.entry, color)
+end
+
+local function ArtworkColor(entry)
+    -- Prefer the current public SHOW color, never a native texture readback or
+    -- an expired event. Inactive artwork uses the resolver's white sample.
+    local state = addon.GetProcRegionOverlayState and addon:GetProcRegionOverlayState(entry)
+    local publicState = state and state.shown and { color = state.color } or nil
+    local appearance, asset = addon:ResolveProcAppearance(entry, nil, publicState, true)
+    return asset and asset.color or appearance.artColor or { r = 1, g = 1, b = 1 }
+end
+
 function addon:RefreshProcColorControls()
     local panel = self.optionsFrame
     if not panel or not panel.controls.procColor then return end
@@ -42,10 +56,22 @@ function addon:RefreshProcColorControls()
     if entry then
         local color = self:ResolveReminderColor(entry)
         panel.controls.procColor.swatch:SetColorTexture(color.r, color.g, color.b, 1)
-        panel.procColorMode:SetText(self:GetProcRegionColor(entry) and addon:Text("Custom RGB") or addon:Text("Class default"))
+        panel.procColorMode:SetText(self:GetProcRegionColor(entry) and addon:Text("Custom color") or addon:Text("Class default"))
     else
         panel.controls.procColor.swatch:SetColorTexture(0.35, 0.35, 0.35, 1)
         panel.procColorMode:SetText("")
+    end
+    local controls = panel.controls
+    if controls.procArtColor then
+        local appearance = entry and self:GetProcRegionAppearance(entry)
+        local custom = appearance and appearance.mode == "custom"
+        controls.procArtColor:SetEnabled(not not custom and not not PickerAvailable())
+        controls.procArt_colorMode:SetEnabled(not not custom)
+        local editing = self.procColorPickerSession
+        local color = entry and ArtworkColor(entry) or { r = .35, g = .35, b = .35 }
+        controls.procArtColor.swatch:SetColorTexture(color.r, color.g, color.b, 1)
+        controls.procArt_colorMode:SelectValue(appearance and (appearance.artColor
+            or editing and editing.target == "artwork" and SameRegion(editing.entry, entry)) and "custom" or "native")
     end
 end
 
@@ -53,12 +79,14 @@ local function Finish(session, accepted, hidePicker)
     if addon.procColorPickerSession ~= session then return end
     local owned = OwnsPicker(session)
     addon.procColorPickerSession = nil
-    if accepted and owned and session.changed and SameRegion(session.entry, addon:GetSelectedProcColorEntry()) then
+    if accepted and owned and (session.changed or session.commitUnchanged)
+        and SameRegion(session.entry, addon:GetSelectedProcColorEntry()) then
         -- Only the native Okay button takes this branch. Live color changes
         -- remain a temporary draft, without touching SavedVariables.
-        addon:SetProcRegionColor(session.entry, session.draft)
+        if session.target == "artwork" then addon:SetProcRegionAppearance(session.entry, { artColor = session.draft })
+        else addon:SetProcRegionColor(session.entry, session.draft) end
     end
-    addon:SetProcRegionColorPreview(session.entry, nil)
+    Preview(session, nil)
     -- A different addon may already have opened the shared picker. Never
     -- remove its callbacks, change its colors, or hide its window.
     if owned and OwnsPicker(session) then
@@ -101,7 +129,9 @@ local function InstallPickerHooks(picker)
     end)
 end
 
-function addon:OpenProcColorPicker(entry)
+function addon:OpenProcColorPicker(entry, target)
+    target = target or "timer"
+    if target ~= "timer" and target ~= "artwork" then return false end
     if InCombatLockdown() then return false, addon:Text("The color picker is unavailable in combat.") end
     local panel = self.optionsFrame
     if not panel or not panel:IsShown() or not SameRegion(entry, self:GetSelectedProcColorEntry()) then
@@ -125,9 +155,11 @@ function addon:OpenProcColorPicker(entry)
         end
         picker:Hide()
     end
-    local color = self:ResolveReminderColor(entry)
+    local color = target == "artwork" and ArtworkColor(entry) or self:ResolveReminderColor(entry)
     local session = {
         picker = picker,
+        target = target,
+        commitUnchanged = target == "artwork" and self:GetProcRegionAppearance(entry).artColor == nil,
         entry = { id = entry.id, class = entry.class, specID = entry.specID,
             kind = "proc", label = entry.label },
         draft = { r = color.r, g = color.g, b = color.b },
@@ -141,7 +173,7 @@ function addon:OpenProcColorPicker(entry)
         end
         local r, g, b = picker:GetColorRGB()
         local draft = { r = r, g = g, b = b }
-        if self:SetProcRegionColorPreview(session.entry, draft) then
+        if Preview(session, draft) then
             session.draft = draft
             session.changed = r ~= session.original.r or g ~= session.original.g or b ~= session.original.b
             self:RefreshProcColorControls()
@@ -155,5 +187,7 @@ function addon:OpenProcColorPicker(entry)
         r = color.r, g = color.g, b = color.b, hasOpacity = false,
         swatchFunc = session.swatchFunc, cancelFunc = session.cancelFunc, extraInfo = session,
     })
+    if target == "artwork" and OwnsPicker(session) then Preview(session, session.draft) end
+    self:RefreshProcColorControls()
     return true
 end
