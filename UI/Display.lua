@@ -6,12 +6,21 @@ function addon:CreateDisplay()
     self.reminderFrames = self.reminderFrames or {}
 end
 
-function addon:ApplyFontSettings(text, style, entry)
-    if text:SetFont(self:ResolveReminderFont(style.font.face), style.font.size, style.font.outline) == false then
-        -- Localized clients may need their standard font as a fallback.
-        text:SetFont(STANDARD_TEXT_FONT or self.factoryReminderStyle.font.face,
-            style.font.size, style.font.outline)
+local function ApplyFontFace(self, text, font)
+    local face = self:ResolveReminderFont(font.face)
+    local ok, result = pcall(text.SetFont, text, face, font.size, font.outline)
+    if not ok or result == false then
+        -- Only this owned Font or FontString is written; no native text is read.
+        text:SetFont(self:ResolveReminderFont(nil), font.size, font.outline)
     end
+end
+
+function addon:ApplyFontSettings(text, style, entry)
+    self.reminderFontRequests = self.reminderFontRequests or setmetatable({}, { __mode = "k" })
+    -- A small request snapshot lets late media registration refresh inactive
+    -- pools without querying or normalizing a different class/spec's settings.
+    self.reminderFontRequests[text] = { face = style.font.face, size = style.font.size, outline = style.font.outline }
+    ApplyFontFace(self, text, style.font)
     if style.shadow.enabled then
         text:SetShadowColor(0, 0, 0, 1)
         text:SetShadowOffset(1, -1)
@@ -20,6 +29,15 @@ function addon:ApplyFontSettings(text, style, entry)
         text:SetShadowOffset(0, 0)
     end
     self:ApplyReminderColor(text, entry)
+end
+
+function addon:RefreshReminderFonts()
+    for _, pool in pairs(self.reminderFrames or {}) do
+        for _, frame in pairs(pool) do
+            local request = self.reminderFontRequests and self.reminderFontRequests[frame.text]
+            if request then ApplyFontFace(self, frame.text, request) end
+        end
+    end
 end
 
 function addon:AcquireReminderFrame(entry, channel)

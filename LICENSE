@@ -17,6 +17,14 @@ permission from the owner, no permission is granted to copy, modify,
 redistribute, sublicense, or sell the project-owned source. Public availability
 of the repository does not grant an open-source license to post-cutover source.
 
+For the combination with the embedded LibSharedMedia-3.0 library, you may
+modify CarGOUI for your own use and reverse engineer it for debugging those
+modifications, as required by section 6 of the GNU Lesser General Public License
+version 2.1. The complete library source and LGPL text are supplied in
+Libs/LibSharedMedia-3.0/; you may replace it with an interface-compatible modified
+version. This exception takes precedence over the restrictions above and does
+not grant a general right to redistribute project-owned CarGOUI source.
+
 2. Historical GPL distribution
 
 CarGOUI v1.0.0 was released under GNU General Public License version 3 only
@@ -40,8 +48,9 @@ Third-party libraries, external source quotations and excerpts, and
 Blizzard/client resources retain their respective rights and applicable
 original terms. API references and source citations do not transfer ownership
 to CarGOUI. In particular, LibStub, CallbackHandler-1.0,
-LibDataBroker-1.1, and LibDBIcon-1.0 are not relicensed by this notice. Their
-original notices remain in Libs/ and are described in Libs/THIRD_PARTY_NOTICES.md.
+LibDataBroker-1.1, LibDBIcon-1.0, and LibSharedMedia-3.0 are not relicensed by this
+notice. Their original notices remain in Libs/ and are described in
+Libs/THIRD_PARTY_NOTICES.md.
 
 4. Warranty
 

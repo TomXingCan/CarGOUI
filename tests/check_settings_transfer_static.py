@@ -75,7 +75,13 @@ validator = section(backend, "local function ValidateEnvelope(", "local function
 assert all(token in validator for token in ("formatVersion", "schemaVersion", "addonVersion", "project", "scope"))
 assert "self.settingsMetadata.classes" in validator and "roster[spec]" in validator
 assert all(f"Number(region.color.{component}, 0, 1" in validator for component in "rgb")
-assert "client-default" in backend and "FontAvailable" in backend and "GetFont()" in backend
+assert "client-default" in backend and "GetSharedMediaFontName" in backend and "GetReminderFontStatus" in backend
+font_export = section(backend, "local function FontToken(", "local function FontPath(")
+assert "IsSupportedFont" in font_export and "GetSharedMediaFontName" in font_export
+absent(font_export, [r"CreateFont|SetFont|GetFont|GetReminderFontStatus|ResolveReminderFont|Fetch|HashTable"],
+       "Font export preserves logical identity without probing client resources or consulting registry availability")
+absent(backend, [r"CreateFont\s*\(|SetFont\s*\(|GetFont\s*\("],
+       "Import delegates local font availability to the shared resource resolver")
 snapshot = section(backend, "local function Snapshot(self, scope)", "local function Codec()")
 assert "classes = {}" in snapshot and "local target = {}" in snapshot
 absent(snapshot, [r"settingsImportBackup|pendingOptionsOpen|previewState|procColorPicker|playerName|GUID|debugLog",

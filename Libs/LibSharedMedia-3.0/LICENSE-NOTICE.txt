@@ -1,0 +1,38 @@
+LibSharedMedia-3.0 by Elkano (elkano@gmx.de)
+Inspired by SurfaceLib by Haste/Otravi (troeks@gmail.com)
+
+The unmodified Lua source explicitly declares "License: LGPL v2.1".
+Its original author, inspiration, dependency, project URL and license header
+are retained. CarGOUI does not relicense this library under its project ARR
+terms. Users retain the library rights granted by GNU LGPL version 2.1.
+
+Pinned official source, retrieved 2026-09-28:
+https://repos.wowace.com/wow/libsharedmedia-3-0/!svn/bc/177/tags/v12.1.0/LibSharedMedia-3.0/LibSharedMedia-3.0.lua
+Release: v12.1.0, official SVN repository revision 177.
+Lua last changed at revision 176; LibStub minor version 12000002.
+Source SHA256:
+ea359e44eae4355c51a49a69960c878889ee26adac9d72d1362c22a3db6af6d0
+
+The official release page is:
+https://www.wowace.com/projects/libsharedmedia-3-0/files/8691989
+The project overview's generic license label says All Rights Reserved, but
+the distributed Lua source above expressly states LGPL v2.1. This notice
+records the source's explicit license rather than relabeling it ARR.
+
+The pinned source tree supplies its license declaration in the Lua header
+and has no separate license text file. LICENSE.txt reproduces the complete,
+unmodified GNU LGPL 2.1 text obtained from the GNU project's official URL:
+https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt
+License text SHA256:
+20e50fe7aae3e56378ebf0417d9de904f55a0e61e4df315333e632a4d3555d95
+
+The library is distributed as an independent, unmodified Lua source file.
+It uses CarGOUI's existing LibStub and CallbackHandler-1.0 copies. No font,
+sound, image, texture, standalone addon TOC, or additional vendor dependency
+is included. Its built-in media paths refer to files supplied by the client;
+fonts registered by other addons remain supplied by those addons.
+
+CarGOUI's font integration must preserve the library's registration filters
+and permit an interface-compatible replacement of this library for the
+user's own use. The complete LGPL terms, including modification and
+debugging rights, govern the library and its use.

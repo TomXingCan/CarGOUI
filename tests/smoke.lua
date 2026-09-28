@@ -94,6 +94,13 @@ local function setup(saved, loggedIn, client)
     client = client or {}
     local env = setmetatable({}, { __index = _G })
     env._G = env
+    -- Each fixture is an isolated WoW global environment, including upstream
+    -- libraries that request it via getfenv(0) instead of the _G variable.
+    env.getfenv = function(value)
+        if value == 0 then return env end
+        if type(value) == "number" then return getfenv(value + 1) end
+        return getfenv(value)
+    end
     env.CarGOUIDB = saved
     env.SlashCmdList = {}
     env.UISpecialFrames = {}
@@ -140,6 +147,24 @@ local function setup(saved, loggedIn, client)
     env.GetMinimapShape = function() return state.minimapShape or "ROUND" end
     env.GetBuildInfo = function() return "12.1.0", "99999", "Sep 26 2026", 120100 end
     env.GetLocale = function() return client.locale or "enUS" end
+    env.C_UIFileAsset = { IsKnownFile = function(path)
+        return type(path) == "string" and path ~= ""
+            and not (client.unknownAssets and client.unknownAssets[path:lower()])
+    end }
+    -- Lua 5.1 has no built-in bit library. Model WoW's signed 32-bit AND for
+    -- the real embedded LibSharedMedia locale masks; do not mock its registry.
+    env.bit = { band = function(...)
+        local result = 4294967295
+        for index = 1, select("#", ...) do
+            local left, right, value, place = result, select(index, ...) % 4294967296, 0, 1
+            for _ = 1, 32 do
+                if left % 2 == 1 and right % 2 == 1 then value = value + place end
+                left, right, place = math.floor(left / 2), math.floor(right / 2), place * 2
+            end
+            result = value
+        end
+        return result >= 2147483648 and result - 4294967296 or result
+    end }
     env.GetTime = function() return state.clock end
     env.issecretvalue = isSecret
     if not client.encodingUnavailable then
@@ -547,9 +572,12 @@ local function setup(saved, loggedIn, client)
     function object:SetNormalFontObject(value) self.fontObject = value end
     function object:SetHighlightFontObject(value) self.highlightFontObject = value end
     function object:SetDisabledFontObject(value) self.disabledFontObject = value end
-    function object:GetFont() return unpack(self.font or {}) end
+    function object:GetFont()
+        assert(not self.nativeAuraRestricted, "Addon must not inspect a restricted native aura FontString")
+        return unpack(self.font or {})
+    end
     local function requireFont(fontString)
-        local templateFont = fontString.template and (fontString.kind == "FontString"
+        local templateFont = fontString.template and (fontString.kind == "FontString" or fontString.kind == "GameTooltip"
             or fontString.template == "UIPanelButtonTemplate" or fontString.template == "InputBoxTemplate")
         assert(fontString.font or fontString.fontObject or templateFont,
             "FontString requires a font before setting or measuring text")
@@ -644,6 +672,7 @@ local function setup(saved, loggedIn, client)
     function object:LockHighlight() self.highlightLocked = true end
     function object:UnlockHighlight() self.highlightLocked = false end
     function object:SetOwner(owner, anchor) self.owner, self.ownerAnchor = owner, anchor; self.tooltipLines = {} end
+    function object:GetOwner() return self.owner end
     function object:AddLine(text, ...) self.tooltipLines = self.tooltipLines or {}; self.tooltipLines[#self.tooltipLines + 1] = text end
     function object:SetAutoFocus(value) self.autoFocus = value end
     function object:SetNumeric(value) self.numeric = value end
@@ -783,6 +812,8 @@ local function setup(saved, loggedIn, client)
     -- Existing Blizzard surfaces are native fixtures, not addon-created frames.
     env.Minimap = setmetatable({ name = "Minimap", kind = "Minimap", parent = env.UIParent,
         width = 140, height = 140, mockCenter = { 1800, 960 }, scripts = {}, events = {} }, { __index = object })
+    env.GameTooltip = setmetatable({ name = "GameTooltip", kind = "GameTooltip", parent = env.UIParent,
+        template = "GameTooltipTemplate", shown = false, scripts = {}, events = {} }, { __index = object })
     env.CreateFrame = function(kind, name, parent, template)
         local frame = setmetatable({ kind = kind, name = name, parent = parent, template = template,
             events = {}, scripts = {}, shown = true }, { __index = object })
@@ -798,6 +829,12 @@ local function setup(saved, loggedIn, client)
             frame.text = frame.Text
         end
         return frame
+    end
+    env.CreateFont = function(name)
+        local font = setmetatable({ kind = "Font", name = name, scripts = {}, events = {} }, { __index = object })
+        state.auraFonts[#state.auraFonts + 1] = font
+        if name then env[name] = font end
+        return font
     end
     -- Native ColorPickerFrame contract from the pinned Retail FrameXML: swatchFunc
     -- runs on every change AND on Okay before Hide. There is no acceptFunc.
@@ -859,12 +896,6 @@ local function setup(saved, loggedIn, client)
             equal(name, "CustomAuraContainerTemplate", "only the verified aura template is probed")
             return not state.proc.templateUnavailable and {} or nil
         end }
-        env.CreateFont = function(name)
-            local font = setmetatable({ kind = "Font", name = name, scripts = {}, events = {} }, { __index = object })
-            state.auraFonts[#state.auraFonts + 1] = font
-            if name then env[name] = font end
-            return font
-        end
         local createFrame = env.CreateFrame
         local function NativeVisible(container)
             -- This is native test machinery, not an addon-accessible aura read.
@@ -1643,7 +1674,7 @@ test("font menu applies each supported face and localized client font persists",
         if entry.value == "Fonts\\FRIZQT__.ttf" then foundFriz = true end
         if entry.value == "Fonts\\ARKai_T.ttf" then foundClient = true end
     end
-    truthy(foundFriz, "Friz Quadrata remains selectable")
+    equal(foundFriz, false, "locale-incompatible Roman font is not offered as a distinct usable face")
     truthy(foundClient, "localized client font selectable")
     local chosen = addon:GetMobilityConfig().style.font.face
     local _, reloaded = login(copy(addon.db), false, { locale = "zhCN", standardFont = "Fonts\\ARKai_T.ttf" })
@@ -7704,6 +7735,11 @@ assert(loadfile(testRoot .. "/launcher_smoke.lua"))(setmetatable({ test = test, 
 assert(loadfile(testRoot .. "/localization_smoke.lua"))(setmetatable({ test = test, equal = equal, truthy = truthy,
     same = same, copy = copy, secret = secret, root = root, login = login, setup = setup,
     options = options, putAura = putAura }, { __index = launcherHarness }))
+
+assert(loadfile(testRoot .. "/font_resources_smoke.lua"))(setmetatable({ test = test, equal = equal, truthy = truthy,
+    same = same, copy = copy, root = root, login = login, setup = setup, options = options,
+    mobilityLogin = mobilityLogin, putAura = putAura, currentLive = currentLive, procFrame = procFrame },
+    { __index = launcherHarness }))
 
 assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, equal = equal,
     truthy = truthy, same = same, copy = copy, root = root, metadata = metadata,
