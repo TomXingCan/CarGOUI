@@ -5,7 +5,9 @@
 The 1.0.1 development baseline starts from `main` at
 `3dd753427414321714b7502d77575236cd61f817`. This baseline separates research from
 production and records the licensing cutover. It does not implement either
-feature below.
+feature below. Subsequent font-system development implements #6; see
+[the font architecture and compatibility record](FONT_SYSTEM.md). Proc
+Appearance v2 remains separate work and is not implemented by the font change.
 
 | In scope | Planned work |
 | --- | --- |

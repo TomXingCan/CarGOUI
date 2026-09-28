@@ -194,7 +194,21 @@ local function CheckBox(panel, parent, text, x, y, buildPatch)
     return check
 end
 
-local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect)
+local function FontTooltip(control)
+    control:SetScript("OnEnter", function(self)
+        if not self.fontTooltip then return end
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(self.fontTooltip, 1, 1, 1, 1, true)
+        GameTooltip:Show()
+    end)
+    local function HideTooltip(self)
+        if GameTooltip:GetOwner() == self then GameTooltip:Hide() end
+    end
+    control:SetScript("OnLeave", HideTooltip)
+    control:HookScript("OnHide", HideTooltip)
+end
+
+local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect, pageSize)
     Label(parent, text, x, y, 400, 22, "GameFontNormal")
     local dropdown = Button(parent, "", x, y - 26, 280, nil)
     local menu = CreateFrame("Frame", nil, panel, "BackdropTemplate")
@@ -207,16 +221,24 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
     ThemeControl(menu, "menu")
     dropdown.menu = menu
     dropdown.choices = {}
+    dropdown.page = 1
     function dropdown:SetEntries(newEntries)
         entries = newEntries
-        for index, entry in ipairs(entries) do
+        self.pageCount = pageSize and math.max(1, math.ceil(#entries / pageSize)) or 1
+        self.page = math.max(1, math.min(self.page, self.pageCount))
+        local first = pageSize and (self.page - 1) * pageSize + 1 or 1
+        local count = pageSize and math.min(pageSize, #entries - first + 1) or #entries
+        for index = 1, count do
+            local entry = entries[first + index - 1]
             local value = entry.value
             local choice = self.choices[index]
             if not choice then
                 choice = Button(menu, entry.label, 6, -6 - (index - 1) * 28, 462, nil)
+                if pageSize then FontTooltip(choice) end
                 self.choices[index] = choice
             end
             choice.value = value
+            if pageSize then choice.fontTooltip = entry.label end
             choice:SetText(entry.label)
             choice:SetScript("OnClick", function()
                 if onSelect then onSelect(value) else Submit(panel, buildPatch(value)) end
@@ -224,10 +246,38 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
             end)
             choice:Show()
         end
-        for index = #entries + 1, #self.choices do
+        for index = count + 1, #self.choices do
             self.choices[index].value = nil
             self.choices[index]:Hide()
         end
+        menu:SetHeight(math.max(1, count) * 28 + (pageSize and 48 or 12))
+        if self.previousPage then
+            self.previousPage:SetEnabled(self.page > 1)
+            self.nextPage:SetEnabled(self.page < self.pageCount)
+            self.pageLabel:SetText(string.format("%d / %d", self.page, self.pageCount))
+        end
+    end
+    function dropdown:SetPage(page)
+        self.page = page
+        self:SetEntries(entries)
+    end
+    if pageSize then
+        -- A bounded font picker reuses one page of buttons; no polling or extra
+        -- framework is needed for large shared-media registries.
+        dropdown.previousPage = Button(menu, addon:Text("Previous"), 6, 0, 140, function()
+            dropdown:SetPage(dropdown.page - 1)
+        end)
+        dropdown.nextPage = Button(menu, addon:Text("Next"), 328, 0, 140, function()
+            dropdown:SetPage(dropdown.page + 1)
+        end)
+        dropdown.pageLabel = Label(menu, "", 160, 0, 150, 24)
+        for _, control in ipairs({ dropdown.previousPage, dropdown.nextPage, dropdown.pageLabel }) do
+            control:ClearAllPoints()
+        end
+        dropdown.previousPage:SetPoint("BOTTOMLEFT", menu, "BOTTOMLEFT", 6, 6)
+        dropdown.nextPage:SetPoint("BOTTOMRIGHT", menu, "BOTTOMRIGHT", -6, 6)
+        dropdown.pageLabel:SetPoint("BOTTOM", menu, "BOTTOM", 0, 8)
+        dropdown.pageLabel:SetJustifyH("CENTER")
     end
     dropdown:SetEntries(entries)
     dropdown:SetScript("OnClick", function()
@@ -236,10 +286,11 @@ local function Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect
         if opening then menu:Show() end
     end)
     function dropdown:SelectValue(value)
-        for _, entry in ipairs(entries) do
+        for index, entry in ipairs(entries) do
             if entry.value == value then
                 self:SetText(entry.label .. "  v")
                 self.value = value
+                if pageSize then self:SetPage(math.ceil(index / pageSize)) end
                 return
             end
         end
@@ -374,17 +425,32 @@ local function RefreshAppearanceControls(panel)
         and (panel.appearanceKind == "proc" or addon:GetMobilityEntry() ~= nil))
     if key then
         local style = addon:GetReminderStyle(key)
+        controls.appearanceFont:SetEntries(addon:GetReminderFontOptions())
         controls.appearanceFont:SelectValue(style.font.face)
-        if controls.appearanceFont.value ~= style.font.face then
-            -- A font saved on another text client remains a valid preference.
-            -- It need not add unavailable resources to the local choice menu.
-            controls.appearanceFont:SetText(addon:Text("Client default") .. "  v")
-            controls.appearanceFont.value = style.font.face
-        end
+        local status = addon:GetReminderFontStatus(style.font.face)
+        -- The button always names the saved choice, including a missing media
+        -- name. The separate status names the effective local fallback.
+        controls.appearanceFont:SetText(status.selectedLabel .. "  v")
+        controls.appearanceFont.value = style.font.face
+        local reason = status.fallbackReason
+        local detail = not status.effectiveAvailable
+            and addon:Text("Neither the requested font nor the local default font is available.")
+            or reason == "locale" and addon:Text("Not suitable for this client language.")
+            or reason == "missing-media" and addon:Text("SharedMedia font is unavailable on this client.")
+            or reason == "invalid" and addon:Text("Invalid font preference.")
+            or reason and addon:Text("Unavailable on this client.")
+            or addon:Text("Available on this client.")
+        local fontStatus = addon:Format("Selected: %s\n%s\nUsing: %s",
+            status.selectedLabel, detail, status.effectiveLabel)
+        controls.appearanceFontStatus:SetText(fontStatus)
+        controls.appearanceFont.fontTooltip = fontStatus
         controls.appearanceOutline:SelectValue(style.font.outline)
         controls.appearanceShadow:SetChecked(style.shadow.enabled)
         SetSlider(controls.appearanceFontSize, style.font.size)
         SetSlider(controls.appearanceScale, style.scale)
+    else
+        controls.appearanceFontStatus:SetText("")
+        controls.appearanceFont.fontTooltip = nil
     end
     panel.appearanceHint:SetText(panel.appearanceKind == "proc"
         and addon:Text("Native Proc timers share this specialization style. Region offsets stay independent; Test Mode uses separate samples.")
@@ -852,7 +918,7 @@ function addon:CreateOptions()
     scroll:SetSize(448, 336)
     self:RegisterOptionsDragSurface(scroll)
     local editor = CreateFrame("Frame", nil, scroll)
-    editor:SetSize(448, 654)
+    editor:SetSize(448, 720)
     self:RegisterOptionsDragSurface(editor)
     scroll:SetScrollChild(editor)
     panel.appearanceScroll = scroll
@@ -867,35 +933,38 @@ function addon:CreateOptions()
         local key = panel.selectedAppearanceKey
         return key and { styles = { [key] = patch } } or { styles = false }
     end
-    panel.controls.appearanceFont = Dropdown(panel, editor, L.font, 0, -122, addon.fonts,
-        function(value) return StylePatch({ font = { face = value } }) end)
-    panel.controls.appearanceFontSize = Slider(panel, editor, L.fontSize, -200, addon.limits.fontSize, 1,
+    panel.controls.appearanceFont = Dropdown(panel, editor, L.font, 0, -122, addon:GetReminderFontOptions(),
+        function(value) return StylePatch({ font = { face = value } }) end, nil, 8)
+    panel.controls.appearanceFont:SetWidth(430)
+    FontTooltip(panel.controls.appearanceFont)
+    panel.controls.appearanceFontStatus = Label(editor, "", 0, -184, 430, 60)
+    panel.controls.appearanceFontSize = Slider(panel, editor, L.fontSize, -266, addon.limits.fontSize, 1,
         function(value) return StylePatch({ font = { size = value or false } }) end, L.invalidFontSize)
-    panel.controls.appearanceOutline = Dropdown(panel, editor, L.outline, 0, -286, {
+    panel.controls.appearanceOutline = Dropdown(panel, editor, L.outline, 0, -352, {
         { value = "", label = L.none }, { value = "OUTLINE", label = L.normal },
         { value = "THICKOUTLINE", label = L.thick },
     }, function(value) return StylePatch({ font = { outline = value } }) end)
-    panel.controls.appearanceShadow = CheckBox(panel, editor, L.shadow, 0, -358,
+    panel.controls.appearanceShadow = CheckBox(panel, editor, L.shadow, 0, -424,
         function(value) return StylePatch({ shadow = { enabled = value } }) end)
-    panel.controls.appearanceScale = Slider(panel, editor, L.scale, -410, addon.limits.scale, 0.05,
+    panel.controls.appearanceScale = Slider(panel, editor, L.scale, -476, addon.limits.scale, 0.05,
         function(value) return StylePatch({ scale = value or false }) end, L.invalidScale)
     for _, slider in ipairs({ panel.controls.appearanceFontSize, panel.controls.appearanceScale }) do
         slider:SetWidth(288)
         slider.editBox:ClearAllPoints()
-        slider.editBox:SetPoint("TOPLEFT", editor, "TOPLEFT", 318, slider == panel.controls.appearanceFontSize and -224 or -434)
+        slider.editBox:SetPoint("TOPLEFT", editor, "TOPLEFT", 318, slider == panel.controls.appearanceFontSize and -290 or -500)
     end
-    Label(editor, L.appearanceHint, 0, -490, 430, 40)
-    panel.controls.appearanceReset = Button(editor, addon:Text("Reset this context's style"), 0, -540, 220, function()
+    Label(editor, L.appearanceHint, 0, -556, 430, 40)
+    panel.controls.appearanceReset = Button(editor, addon:Text("Reset this context's style"), 0, -606, 220, function()
         ClearEdits(panel)
         CancelReset(panel)
         if addon:ResetReminderStyle(panel.selectedAppearanceKey) then Feedback(panel, L.saved) end
     end)
-    panel.controls.appearancePreview = Button(editor, addon:Text("Preview current reminder"), 232, -540, 198, function()
+    panel.controls.appearancePreview = Button(editor, addon:Text("Preview current reminder"), 232, -606, 198, function()
         local ok, message = addon:StartAppearancePreview(panel.selectedAppearanceKey)
         addon:RefreshOptions()
         if not ok then Feedback(panel, message, true) end
     end)
-    panel.controls.appearanceBack = Button(editor, addon:Text("Back"), 0, -592, 140, function()
+    panel.controls.appearanceBack = Button(editor, addon:Text("Back"), 0, -658, 140, function()
         addon:SelectOptionsCategory(panel.appearanceKind or "mobility")
     end)
 

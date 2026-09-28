@@ -138,21 +138,11 @@ local function Keys(list)
 end
 local fontPaths = { friz = "Fonts\\FRIZQT__.ttf", arial = "Fonts\\ARIALN.TTF",
     morpheus = "Fonts\\MORPHEUS.TTF", skurri = "Fonts\\skurri.ttf" }
-local fontProbe
-local function FontAvailable(self, face)
-    if type(face) ~= "string" or not self:IsSupportedFont(face) then return false end
-    if not fontProbe then
-        if type(CreateFont) ~= "function" then Fail(addon:Text("Native font verification is unavailable.")) end
-        fontProbe = CreateFont("CarGOUISettingsTransferFontProbe")
-    end
-    -- This is an isolated public scratch Font and a trusted built-in resource.
-    -- Never inspect a timer FontString or infer anything about protected data.
-    local ok, result = pcall(fontProbe.SetFont, fontProbe, face, 12, "")
-    if not ok or result == false then return false end
-    local actual = fontProbe:GetFont()
-    return type(actual) == "string" and actual:lower():gsub("/", "\\") == face:lower():gsub("/", "\\")
-end
 local function FontToken(self, face)
+    -- A shared-media name is a portable preference, never a resolved file path.
+    -- Export has no dependency on the local registry or font-file availability.
+    local mediaName = self:GetSharedMediaFontName(face)
+    if mediaName then return "LSM:" .. mediaName end
     for token, path in pairs(fontPaths) do if type(face) == "string" and face:lower() == path:lower() then return token end end
     for _, path in ipairs(self.clientFontPaths) do
         if type(face) == "string" and face:lower() == path:lower() then return "client-default" end
@@ -161,14 +151,22 @@ local function FontToken(self, face)
     Fail(addon:Text("Unsupported saved font resource; choose a built-in or client default font before exporting."))
 end
 local function FontPath(self, token, warnings)
-    local face = token == "client-default" and STANDARD_TEXT_FONT or fontPaths[token]
-    if token ~= "client-default" and not fontPaths[token] then Fail(addon:Text("Unknown font token; external paths are not permitted.")) end
-    if FontAvailable(self, face) then return face end
-    local fallback = type(STANDARD_TEXT_FONT) == "string" and self:IsSupportedFont(STANDARD_TEXT_FONT)
-        and STANDARD_TEXT_FONT or self.factoryReminderStyle.font.face
-    if not FontAvailable(self, fallback) then Fail(addon:Text("Neither the requested font nor the local default font is available.")) end
-    warnings[#warnings + 1] = addon:Format("Font %s is unavailable locally; a compatible font will be used for display. Your saved choice is retained.", token)
-    return face or fallback -- Preserve a recognized saved choice; render fallback is separate.
+    local shared = self:GetSharedMediaFontName(token)
+    if not shared and token ~= "client-default" and not fontPaths[token] then
+        Fail(addon:Text("Unknown font token; external paths are not permitted."))
+    end
+    local face = shared and ("LSM:" .. shared) or (token == "client-default" and STANDARD_TEXT_FONT or fontPaths[token])
+    if token == "client-default" and not self:IsSupportedFont(face) then
+        face = self.factoryReminderStyle.font.face
+    end
+    local status = self:GetReminderFontStatus(face)
+    if not status.effectiveAvailable then
+        Fail(addon:Text("Neither the requested font nor the local default font is available."))
+    end
+    if status.fallbackReason then
+        warnings[#warnings + 1] = addon:Format("Font %s is unavailable locally; a compatible font will be used for display. Your saved choice is retained.", status.selectedLabel)
+    end
+    return face -- Preserve the logical preference even when this client cannot render it.
 end
 
 local function Position(value, path, kinds, shell)

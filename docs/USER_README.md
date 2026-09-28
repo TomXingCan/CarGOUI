@@ -14,7 +14,9 @@ General → **Show minimap icon** hides only the standard button; slash commands
 
 The client locale automatically selects English, Simplified Chinese, Traditional Chinese, German, French, Spanish, Italian or Russian. enGB uses English, esMX Spanish, unknown locales English. Missing translations fall back to English. There is no manual language selector or saved language profile. Public ability names use the client API when available.
 
-Saved font choices stay intact. If their resource/glyph coverage is unsuitable, live and Preview rendering can use a compatible client fallback without rewriting settings. New translations require native-speaker and client visual review; report missing glyphs, clipped labels or incorrect wording with locale/build.
+The font picker separates Blizzard / Client fonts from SharedMedia fonts registered by local addons. LibSharedMedia is embedded; no separate library addon is needed. CarGOUI ships no user font files and does not scan system fonts. Available fonts depend on client language and installed addons; the client default remains selectable.
+
+Saved font choices stay intact. A missing SharedMedia choice keeps its name through export/import and can resolve again when its provider registers it. The picker shows the selected preference separately from the effective client fallback; hover a font button to read long names in full. Live reminders and Preview update immediately. New translations require native-speaker and client visual review; report missing glyphs, clipped labels or incorrect wording with locale/build.
 
 - Faction Header and class/spec Body themes are automatic; there is no Themes page.
 - Mobility shares settings within each class. Free move shares appearance but has separate XY. Proc typography is class+spec; regions have independent XY and optional RGB. Mobility/Free move remain fixed class color.

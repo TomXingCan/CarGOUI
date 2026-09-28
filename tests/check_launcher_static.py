@@ -13,15 +13,16 @@ toc = read("CarGOUI.toc")
 entries = [line.strip().replace("\\", "/") for line in toc.splitlines()
            if line.strip() and not line.strip().startswith("#")]
 
-# Official upstream v12.0.3 / SVN r162, independently acquired by API audit.
+# Launcher upstream v12.0.3 / SVN r162; LibSharedMedia v12.1.0 / SVN r177.
 # Normalize platform line endings only; no logic/source substitutions permitted.
 vendors = {
     "Libs/LibStub/LibStub.lua": "f93f7dfbd280c0f8e0328bb194faa6db541c3c50b3d4d37eb064c816f0ec5576",
     "Libs/CallbackHandler-1.0/CallbackHandler-1.0.lua": "84a15af505e728ac5e5eb6a8eaba8989d1131d5f8ba14d11abcfe4ce086de3c1",
+    "Libs/LibSharedMedia-3.0/LibSharedMedia-3.0.lua": "ea359e44eae4355c51a49a69960c878889ee26adac9d72d1362c22a3db6af6d0",
     "Libs/LibDataBroker-1.1/LibDataBroker-1.1.lua": "f3d4758f2060215492c9764b1d7dc2a336826d4cd253cd54ff9ff7c6d78f04e2",
     "Libs/LibDBIcon-1.0/LibDBIcon-1.0.lua": "85c426947fa50319071b64c7cb845326c44316341713a3847dc8149c1e36716b",
 }
-assert entries[:4] == list(vendors), "Native Lua dependencies must load in upstream dependency order"
+assert entries[:len(vendors)] == list(vendors), "Native Lua dependencies must load in upstream dependency order"
 for path, expected in vendors.items():
     assert entries.count(path) == 1
     assert hashlib.sha256((root / path).read_bytes().replace(b"\r\n", b"\n")).hexdigest() == expected, path

@@ -6,7 +6,7 @@ Version 1.0.0 adds automatic client-language UI and public spell-name localizati
 
 ## 1.0.1 development baseline
 
-The current development target is **1.0.1**: [#6 font selector fixes and LibSharedMedia font support](https://github.com/TomXingCan/CarGOUI/issues/6), plus [#7 Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7). This baseline implements neither feature and keeps the production version at **1.0.0** until release hardening. See the [1.0.1 roadmap](docs/ROADMAP_1.0.1.md).
+The current development target is **1.0.1**: [#6 font selector fixes and LibSharedMedia font support](https://github.com/TomXingCan/CarGOUI/issues/6), plus [#7 Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7). Font-resource support is implemented on the development branch; Proc Appearance v2 remains planned. The production version stays **1.0.0** until release hardening. See the [1.0.1 roadmap](docs/ROADMAP_1.0.1.md).
 
 Production Class Tools development is paused and must not block 1.0.1. Its logger, Phase 1 / 1.1 findings and research tests remain in the repository, but normal login does not load `addon.ClassToolsRawCapture`, and `/cui ctlog` is not a player command or help entry. Research tests explicitly load the retained module. Arcane Missiles Chain Check, Combustion Counter and Alter Time Recovery Feedback are outside 1.0.1.
 
@@ -17,7 +17,7 @@ Production Class Tools development is paused and must not block 1.0.1. Its logge
 3. Open/close settings with `/cui` or `/cargoui`, or plain left-click the minimap emblem, LDB launcher or native AddOn Compartment entry.
 4. For a source checkout, use the repository as `CarGOUI` and copy `Modules/CarGOUI_Data` to a sibling AddOns/CarGOUI_Data directory. Prefer the installation ZIP to avoid omitting the internal module.
 
-LibStub, CallbackHandler-1.0, LibDataBroker-1.1 and LibDBIcon-1.0 are embedded inside CarGOUI. No separately installed library addon is required; no full Ace3/AceGUI is bundled. See [third-party notices](Libs/THIRD_PARTY_NOTICES.md).
+LibStub, CallbackHandler-1.0, LibSharedMedia-3.0, LibDataBroker-1.1 and LibDBIcon-1.0 are embedded inside CarGOUI. No separately installed library addon is required; no full Ace3/AceGUI is bundled. See [third-party notices](Libs/THIRD_PARTY_NOTICES.md).
 
 ## Language and fonts
 
@@ -25,7 +25,9 @@ The interface automatically follows the client locale: **English, Simplified Chi
 
 Only English plus the active locale's overlay is retained. Other locale files may execute from the TOC but return before constructing their translation tables; that is not a claim that their files never load. Public spell IDs remain stable, while available display names come from the client's public spell-name API. Missing names use the defined safe fallback and bounded event-driven retry. Localization neither scans Auras nor changes skill recognition, timing, visibility or stored IDs.
 
-Existing requested font choices remain saved. If a requested resource is unavailable or unsuitable for the active script, rendering can use the client's appropriate default without rewriting the preference. Reused live/Preview frames share the same rules; secret timer text is never read or measured to choose a font. See [the API audit](docs/LOCALIZATION_API.md) for exact name/font boundaries. Translations and fallback behavior are implemented and tested offline; native glyph coverage, clipping and language quality remain client/native-speaker acceptance.
+The font picker distinguishes **Blizzard / Client** from **SharedMedia** and follows the actual client's font language, including enUS/enGB, deDE, frFR, esES/esMX, itIT, ptBR, ruRU, zhCN, zhTW and koKR. It shows the client default and distinct eligible resources, without listing several Roman choices that all silently render as the same wide-language default. SharedMedia, MyMedia, ElvUI and other providers can contribute fonts through LibSharedMedia; none is a required dependency. CarGOUI ships no user font files and does not scan operating-system fonts or arbitrary directories.
+
+Existing 1.0.0 Blizzard paths remain valid. New shared selections save a logical `LSM:<media-name>` preference, such as `LSM:Expressway`. If that font is missing on another client, the preference survives login and import/export while rendering uses the client default. The picker separately names the selected font, availability and effective rendering font. A later LSM registration updates existing live/Preview and pooled font objects without restarting timers. See [font architecture](docs/FONT_SYSTEM.md) and [the API audit](docs/LOCALIZATION_API.md). Native glyph coverage, clipping and language quality remain client/native-speaker acceptance.
 
 ## Settings and interaction
 
@@ -41,7 +43,7 @@ No class/spec/Profile/manual-theme selector. Appearance shows the automatically 
 
 Options retains a left category list and right controls. Header, Body, sidebar blank areas, borders and static explanations drag the whole window; interactive controls keep their input. No modifier, capture overlay or Unlock Mode. Release, close and Esc end movement; placement persists and stays screen-constrained. [RC2's drag record](docs/DRAG_RC2.md) explains source ownership and native current-pointer pickup.
 
-Dropdowns, checkboxes and sliders update immediately. Numeric fields save on Enter, without Apply. Context/page changes and closing discard unsubmitted drafts. Appearance's Font, Font Size, Outline, Shadow and Scale share the appropriate class/spec scope; reset affects only that style, not positions or other scopes. Built-in choices include Friz Quadrata, Arial Narrow, Morpheus, Skurri and available Client default. Factory typography is Friz Quadrata 24, OUTLINE, shadow on, Scale 1, with runtime language fallback where needed. Size range is 8–72, Scale 0.5–3 and new XY edits -10000..10000. Scaling does not multiply saved offsets.
+Dropdowns, checkboxes and sliders update immediately. Numeric fields save on Enter, without Apply. Context/page changes and closing discard unsubmitted drafts. Appearance's Font, Font Size, Outline, Shadow and Scale share the appropriate class/spec scope; reset affects only that style, not positions or other scopes. Font choices combine Client default, distinct language-compatible Blizzard faces, and locally registered LSM fonts in a paged popup. Factory typography retains the 1.0.0 defaults: Friz Quadrata or the appropriate wide-language client face, size 24, OUTLINE, shadow on, Scale 1. Size range is 8–72, Scale 0.5–3 and new XY edits -10000..10000. Scaling does not multiply saved offsets.
 
 Proc's **Timer color** uses the selected ability/region, previews native-picker changes, and saves only on Okay. Cancel/close/region/spec changes discard drafts without closing another addon's subsequently owned picker. **Use class color** removes only that region's override. Color changes update existing text objects without Aura queries, timer rebuilds or native gate-alpha changes. See [regional colors](docs/PROC_COLORS.md).
 

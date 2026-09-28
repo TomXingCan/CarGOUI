@@ -72,12 +72,21 @@ assert not re.search(r'SetDuration|SetAlpha|GetText|GetFont|GetWidth|GetString',
 assert 'AcquireAuraReminder(entry, entry.auraID, self:Text("Free move"))' in source('Modules/Mobility/FreeMove.lua')
 print('PASS Authored lookup keys exist; language controls absent; stable ID name cache cannot query gameplay or read native timer state')
 
-fonts = source('UI/ReminderStyle.lua')
-assert 'CarGOUIReminderFontProbe' in fonts and 'fontProbe:GetFont()' in fonts
+fonts = source('Core/FontResources.lua')
+assert entries.index('Config/LocaleFinalize.lua') < entries.index('Core/FontResources.lua') < entries.index('Config/Defaults.lua')
+assert 'CarGOUIReminderFontProbe' in fonts and 'pcall(fontProbe.GetFont, fontProbe)' in fonts
 assert not re.search(r'text:GetFont\(|frame[.]text:GetFont\(|STANDARD_TEXT_FONT\s*=|GameFont\w+\s*=', fonts)
-assert 'return face or fallback' in source('Core/SettingsTransfer.lua')
-assert 'clientFontPaths' in source('Config/Defaults.lua')
+assert 'clientFontPaths' in fonts and 'defaultReminderFont' in source('Config/Defaults.lua')
+assert 'HashTable("font")' in fonts and 'LibSharedMedia_Registered' in fonts
+assert all(key in fonts for key in ('selectedFace', 'effectiveFace', 'fallbackReason', 'effectiveAvailable'))
+font_code = re.sub(r'--[^\n]*', '', fonts)
+assert not re.search(r'OnUpdate|NewTicker|C_Timer|GetAura|C_Spell|SetDuration|SetAlpha|GetText\(|GetAlpha\(|\bio[.]|\bos[.]|loadfile|dofile', font_code)
+transfer = source('Core/SettingsTransfer.lua')
+assert 'return face -- Preserve the logical preference' in transfer
+assert 'GetSharedMediaFontName' in transfer and 'GetReminderFontStatus' in transfer
+assert not re.search(r'CreateFont\(|GetFont\(|SetFont\(', transfer)
 assert 'button:GetFontString()' in options and 'label:SetWordWrap(true)' in options
 assert not re.search(r'utf8?.*sub\(|label:sub\(|text:sub\(', options, re.I)
-print('PASS Font availability probes only an owned public Font; saved choices remain separate; Options wraps full text without byte truncation')
+print('PASS Shared font discovery uses the locale-filtered registry and owned public Font probe; saved identity stays separate from effective fallback without polling or filesystem access')
+print('PASS Import delegates font resolution; Options wraps full text without byte truncation or native timer inspection')
 print('Localization static checks passed; real-client layout and native-speaker review remain separate.')

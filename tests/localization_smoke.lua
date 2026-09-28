@@ -186,14 +186,15 @@ test("1.0 reminder font fallback preserves saved user choices and native nil suc
         addon:ApplyFontSettings(text, style, addon:GetMobilityEntry())
         equal(text.font[1], case[2]); same(style, original, "effective fallback never rewrites saved choice")
         equal(env.STANDARD_TEXT_FONT, case[2], "client global font is unchanged")
-        equal(addon:ResolveReminderFont("Interface\\AddOns\\Custom\\font.ttf"), "Interface\\AddOns\\Custom\\font.ttf")
+        equal(addon:IsSupportedFont("Interface\\AddOns\\Custom\\font.ttf"), false, "unregistered raw font paths cannot be saved")
+        equal(addon:ResolveReminderFont("Interface\\AddOns\\Custom\\font.ttf"), case[2], "invalid raw paths render through safe client fallback")
     end
     local env, addon = h.login(nil, false, { fontSetReturnsNil = true, proc = {} })
     local style = copy(addon.factoryReminderStyle); style.font.face = "Fonts\\MORPHEUS.ttf"
     local frame = env.CreateFrame("Frame", nil, env.UIParent)
     local text = frame:CreateFontString(nil, "OVERLAY")
     addon:ApplyFontSettings(text, style, addon:GetMobilityEntry())
-    equal(text.font[1], style.font.face, "nil SetFont success must not replace available selected font")
+    equal(text.font[1]:lower(), style.font.face:lower(), "nil SetFont success keeps the same available font with canonical path spelling")
     local missingEnv, missingAddon = h.login(nil, false, { proc = {}, unavailableFonts = { ["fonts\\blei00d.ttf"] = true } })
     local savedStyle = copy(missingAddon.factoryReminderStyle); savedStyle.font.face = "Fonts\\blei00d.TTF"
     local before = copy(savedStyle)
