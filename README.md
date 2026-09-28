@@ -4,6 +4,12 @@
 
 Version 1.0.0 adds automatic client-language UI and public spell-name localization, rendering-safe font fallback, and English project documentation. The user reported RC3 working in their test environment; that feedback does not certify every class/talent/collector/locale combination. New translations still require native-client and native-speaker review. See [release notes](docs/RELEASE_1.0.0.md), [localization](docs/LOCALIZATION.md) and the separate [Mobility](docs/MOBILITY_COVERAGE.md), [Proc](docs/PROC_COVERAGE.md) and [Body-theme](docs/BODY_THEME_COVERAGE.md) coverage records.
 
+## 1.0.1 development baseline
+
+The current development target is **1.0.1**: [#6 font selector fixes and LibSharedMedia font support](https://github.com/TomXingCan/CarGOUI/issues/6), plus [#7 Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7). This baseline implements neither feature and keeps the production version at **1.0.0** until release hardening. See the [1.0.1 roadmap](docs/ROADMAP_1.0.1.md).
+
+Production Class Tools development is paused and must not block 1.0.1. Its logger, Phase 1 / 1.1 findings and research tests remain in the repository, but normal login does not load `addon.ClassToolsRawCapture`, and `/cui ctlog` is not a player command or help entry. Research tests explicitly load the retained module. Arcane Missiles Chain Check, Combustion Counter and Alter Time Recovery Feedback are outside 1.0.1.
+
 ## Install or upgrade
 
 1. Exit WoW and place **both `CarGOUI` and `CarGOUI_Data`** directly in `_retail_/Interface/AddOns/`. Replace their program directories together; each TOC must sit directly inside its matching folder. Data loads automatically—no class package selection.
@@ -158,4 +164,8 @@ Import validates before review, then Confirm commits atomically. Source class/sp
 
 ## License
 
-Project-owned code is **GPL-3.0-only**: [full license](LICENSE). Branding assets under Media/Branding are **All Rights Reserved**, separately described in [their notice](Media/Branding/LICENSE.txt). Embedded libraries retain their original licenses. See [NOTICE.md](NOTICE.md) for scope, asset provenance and client-resource attribution.
+Current project-owned source from the commit introducing the ARR [LICENSE](LICENSE), and future project-owned source unless expressly licensed otherwise, is **All Rights Reserved**. This cutover belongs to the 1.0.1 development baseline even though production TOCs still say 1.0.0. Official distributions may be installed and run for personal gameplay under LICENSE.
+
+The already published **v1.0.0 remains GPL-3.0-only as originally distributed**: [historical license](https://github.com/TomXingCan/CarGOUI/blob/v1.0.0/LICENSE) and [unchanged Release](https://github.com/TomXingCan/CarGOUI/releases/tag/v1.0.0). No previously granted GPL rights are revoked or restricted by this cutover.
+
+Branding assets under Media/Branding remain **All Rights Reserved**, separately described in [their notice](Media/Branding/LICENSE.txt). Embedded libraries retain their original licenses and notices. See [NOTICE.md](NOTICE.md) for the exact scopes and [the ownership audit](docs/LICENSING_AUDIT_1.0.1.md) for cutover evidence.

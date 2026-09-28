@@ -25,7 +25,7 @@ Version 1.0.0 keeps RC3's gameplay, launchers and drag safeguards and adds autom
 
 ## License and sources
 
-Project-owned code: **GPL-3.0-only**. Branding artwork: **All Rights Reserved**, under a separate notice. Embedded libraries retain original licenses; client fonts/graphics are referenced, not redistributed. CarGOUI is not an official or certified Blizzard product.
+For current and future project-owned source from the ARR LICENSE cutover: **All Rights Reserved**; official distributions may be installed and run for personal gameplay. The already published **v1.0.0 remains GPL-3.0-only as originally distributed**, with no revocation of previously granted GPL rights. The baseline still carries version 1.0.0; the source cutover, not that version field, identifies the new terms. Branding artwork remains **All Rights Reserved**, under a separate notice. Embedded libraries retain original licenses; client fonts/graphics are referenced, not redistributed. CarGOUI is not an official or certified Blizzard product. This draft does not authorize publication or changing the historical v1.0.0 listing.
 
 Source, exact coverage, localization notes and license notices: [TomXingCan/CarGOUI](https://github.com/TomXingCan/CarGOUI).
 

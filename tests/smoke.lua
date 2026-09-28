@@ -1045,10 +1045,65 @@ end
 test("TOC declares the Retail target, SavedVariables and unique load entries", function()
     equal(metadata.Interface, "120100", "Retail 12.1 interface")
     equal(metadata.SavedVariables, "CarGOUIDB", "SavedVariables declaration")
+    equal(metadata.SavedVariablesPerCharacter, nil, "no character-specific research persistence")
     local seen = {}
     for _, file in ipairs(files) do
         truthy(not seen[file], "Duplicate TOC entry: " .. file)
+        truthy(not file:lower():match("^research/"), "production TOC never loads research: " .. file)
         seen[file] = true
+    end
+end)
+
+test("baseline production startup has no research logger or research event subscriptions", function()
+    local researchEvents = { "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
+        "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_SENT",
+        "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_CHANNEL_STOP",
+        "UNIT_AURA", "COMBAT_LOG_EVENT_UNFILTERED", "UNIT_HEALTH", "UNIT_MAXHEALTH" }
+    for _, specID in ipairs({ 62, 63, 64 }) do
+        for _, late in ipairs({ false, true }) do
+            local _, addon, state = setup(nil, late, { specID = specID, proc = {} })
+            equal(addon.ClassToolsRawCapture, nil, "TOC execution never attaches research")
+            state:fire("ADDON_LOADED", "CarGOUI")
+            if not late then state:fire("PLAYER_LOGIN") end
+            equal(addon.ClassToolsRawCapture, nil, "login never attaches research")
+            local diagnostics = addon:GetEventDiagnostics()
+            for _, event in ipairs(researchEvents) do
+                equal(diagnostics.perEvent[event], nil, "event router has no research listener for " .. event)
+            end
+            for _, file in ipairs(state.loadedFiles) do
+                equal(file:lower():find("/research/", 1, true), nil, "loaded files exclude research")
+            end
+            equal(#state.errors, 0, "production startup has no research dependency")
+        end
+    end
+end)
+
+test("baseline production commands reject ctlog even when a logger is manually attached", function()
+    for _, attached in ipairs({ false, true }) do
+        local env, addon, state = login()
+        local before, listeners, frames = copy(addon.db), addon:GetEventDiagnostics(), #state.frames
+        local calls = 0
+        if attached then
+            addon.ClassToolsRawCapture = { HandleCommand = function() calls = calls + 1 end }
+        end
+        for _, message in ipairs({ "ctlog", "ctlog arcane on", "ctlog combustion on", "ctlog altertime on",
+            "ctlog status", "ctlog dump", "ctlog off", "ctlog clear", "CTLOG ARCANE ON" }) do
+            env.SlashCmdList.CARGOUI(message)
+            truthy(state.messages[#state.messages]:find(addon:Text("Invalid command. Type /cui help for help."), 1, true),
+                "removed research command follows ordinary invalid-command handling")
+        end
+        equal(calls, 0, "production command routing cannot invoke an attached research logger")
+        local messagesBefore = #state.messages
+        env.SlashCmdList.CARGOUI("help")
+        truthy(#state.messages > messagesBefore, "production help remains available")
+        for index = messagesBefore + 1, #state.messages do
+            equal(state.messages[index]:lower():find("ctlog", 1, true), nil, "production help omits research commands")
+        end
+        same(addon.db, before, "removed commands never alter existing settings or persist research data")
+        same(addon:GetEventDiagnostics(), listeners, "removed commands never add event subscriptions")
+        equal(#state.frames, frames, "removed commands never create a research copy surface")
+        equal(addon.optionsFrame, nil, "invalid commands and help preserve lazy Options")
+        equal(#state.errors, 0, "missing research module causes no command error")
     end
 end)
 
@@ -6628,6 +6683,23 @@ launcherHarness.transferSeed, launcherHarness.transferPage = transferSeed, trans
 launcherHarness.prepareSettings, launcherHarness.packSettings = prepareSettings, packSettings
 launcherHarness.unpackSettings, launcherHarness.transferMetrics = unpackSettings, transferMetrics
 
+test("baseline preserves existing 1.0.0 schema 5 settings across login and reload", function()
+    local _, original = transferSeed()
+    local saved, before = copy(original.db), copy(original.db)
+    equal(saved.schemaVersion, 5, "existing 1.0.0 configuration schema")
+    local env, addon, state = login(saved, false, { specID = 62, proc = {} })
+    equal(addon.db, saved, "existing SavedVariables root identity retained")
+    equal(env.CarGOUIDB, saved, "runtime continues to share the existing SavedVariables")
+    same(addon.db, before, "Mobility, Free move, Proc, other classes and Options survive unchanged")
+    equal(addon.ClassToolsRawCapture, nil, "old settings do not enable research")
+    env.SlashCmdList.CARGOUI("ctlog arcane on")
+    same(addon.db, before, "removed research command writes no settings or logs")
+    local _, reloaded = login(copy(addon.db), false, { specID = 62, proc = {} })
+    same(reloaded.db, before, "a subsequent reload preserves the complete original configuration")
+    equal(reloaded.ClassToolsRawCapture, nil, "research stays absent after reload")
+    equal(#state.errors, 0, "old settings require no research runtime")
+end)
+
 test("RC export is a read-only whitelist snapshot of all saved specs in the selected class", function()
     local env, addon, state = transferSeed()
     addon.db.playerName, addon.db.guid, addon.db.debugLog = "PRIVATE PLAYER", "PRIVATE GUID", { "SECRET TRACE" }
@@ -7635,6 +7707,7 @@ assert(loadfile(testRoot .. "/localization_smoke.lua"))(setmetatable({ test = te
 
 assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, equal = equal,
     truthy = truthy, same = same, copy = copy, root = root, metadata = metadata,
+    researchRoot = testRoot .. "/..",
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
 

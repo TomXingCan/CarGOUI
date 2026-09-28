@@ -2,8 +2,10 @@ CarGOUI branding assets
 All Rights Reserved.
 
 The CarGOUI emblem, logo, wordmark, branding artwork and their source/derived
-art files in Media/Branding are excluded from the GPL-3.0-only license for the
-project-owned code. The project owner retains all rights in these assets.
+art files in Media/Branding remain under these separate asset terms. The
+project owner retains all rights in these assets. They were excluded from the
+GPL-3.0-only source license for v1.0.0; the current source ARR cutover does not
+change the branding terms or revoke any historical GPL source rights.
 
 Their inclusion in the official CarGOUI package permits their ordinary display
 as part of using that package. It does not grant a separate right to reuse,

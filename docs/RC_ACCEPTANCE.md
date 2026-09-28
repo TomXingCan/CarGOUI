@@ -34,7 +34,7 @@ Record native empty-table JSON round trips (the protocol accepts both empty `{}`
 - [ ] Record new localization's native-client and native-speaker acceptance, including fonts/layout and exact locale/build.
 - [ ] Resolve any reported errors and repeat checks on the exact replacement ZIP.
 - [ ] Review supported interface/build metadata against the actual target client.
-- [x] Owner selected GPL-3.0-only for project-owned code and All Rights Reserved branding; LICENSE and NOTICE.md record the separate scopes, retaining original third-party terms.
+- [x] For the historical v1.0.0 release, the owner selected GPL-3.0-only for project-owned code and All Rights Reserved branding; [v1.0.0/LICENSE](https://github.com/TomXingCan/CarGOUI/blob/v1.0.0/LICENSE) and [v1.0.0/NOTICE.md](https://github.com/TomXingCan/CarGOUI/blob/v1.0.0/NOTICE.md) retain those scopes and original third-party terms. The later ARR baseline applies to current source without changing this historical release or its granted GPL rights; see [current NOTICE.md](../NOTICE.md).
 - [ ] Review the CurseForge description draft and current coverage/known boundaries.
 - [ ] Complete RC3's launcher/collector checks separately for each manager version and verify the embedded-library attribution/relationship requirements before any actual publisher upload.
 - [x] User authorized the 1.0.0 publishing task after successful verification. Record each actual source/merge/tag/Release/asset/CurseForge operation separately; unavailable remote operations remain pending rather than claimed complete.

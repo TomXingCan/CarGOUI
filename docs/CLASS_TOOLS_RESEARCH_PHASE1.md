@@ -2,7 +2,9 @@
 
 ## Purpose and delivery boundary
 
-Phase 1 supplies one temporary, opt-in **Class Tools Raw Capture Logger** for gathering event timelines on WoW Retail 12.1. The logger lives in [`Research/ClassToolsRawCapture.lua`](../Research/ClassToolsRawCapture.lua) and is exposed internally as `addon.ClassToolsRawCapture`. Product direction is recorded separately in [Class Tools Product Specification](CLASS_TOOLS_PRODUCT_SPEC.md).
+**Paused for the 1.0.1 release cycle.** This document preserves the Phase 1 / 1.1 research and client observations for later development. Production Class Tools, Arcane Missiles Chain Check, Combustion Counter and Alter Time Recovery Feedback are outside [1.0.1](ROADMAP_1.0.1.md) and must not block it. `Research/ClassToolsRawCapture.lua` remains in the repository but is absent from the production TOC; normal login does not create `addon.ClassToolsRawCapture` or research subscriptions. Normal `/cui` routing and help do not expose `ctlog`.
+
+Phase 1 supplied one temporary, opt-in **Class Tools Raw Capture Logger** for gathering event timelines on WoW Retail 12.1. The retained logger lives in [`Research/ClassToolsRawCapture.lua`](../Research/ClassToolsRawCapture.lua) and attaches as `addon.ClassToolsRawCapture` only when explicitly loaded by a research harness. Product direction is recorded separately in [Class Tools Product Specification](CLASS_TOOLS_PRODUCT_SPEC.md).
 
 **No production Class Tools evaluation algorithm is implemented in Phase 1.**
 
@@ -30,7 +32,9 @@ These gaps motivate capturing `castBarID` independently of `castGUID`: the targe
 
 Phase 1.1 also records `UNIT_SPELLCAST_SENT` to research the time when the client emits the next cast/Spell Queue send event. **SENT is only a raw event observation.** It is not a successful cast, queued success, chain success, or the absolute true time of a player's button press. Its target argument is not necessary for this research and is neither inspected nor saved.
 
-## Commands and session lifecycle
+## Historical research commands and session lifecycle
+
+The command table and capture scenarios below describe the original Phase 1 / 1.1 research environment. They are retained as research records, not instructions for the normal production addon: `/cui ctlog ...` is no longer registered. Offline fixtures explicitly load the module and call its retained `HandleCommand` / `Start` / `Stop` methods directly. Resuming in-client capture requires a separate development harness; this baseline adds no player-facing research loader or command.
 
 | Command | Behavior |
 | --- | --- |
@@ -235,6 +239,8 @@ The following remain live-client acceptance items:
 If the data is insufficient, preserve the actual missing/restricted capability as a research result. Do not invent an evaluation rule or bypass restrictions to fill the gap.
 
 ## Automated validation
+
+`tests/class_tools_research_smoke.lua` explicitly loads the logger from the repository research path into each research fixture, including fixtures that first perform a production login. It does not depend on the production TOC. The same suite verifies that normal login has no logger or research-only subscriptions, normal commands reject `ctlog` and omit it from help, no research SavedVariables exist, and existing settings and Proc/Mobility/Free move behavior remain intact.
 
 Phase 1 automated coverage must verify default OFF and reload-like fresh load, mode switching, idempotent same-mode start, no duplicate subscriptions, no records after OFF, clear behavior, stable dump ordering, the hard cap and visible truncation flag, secret-safe health handling, and no SavedVariables persistence. Regression coverage must also check that stopping or switching research leaves existing Proc/Mobility subscriptions and behavior intact, and all new Lua remains compatible with Lua 5.1.
 
