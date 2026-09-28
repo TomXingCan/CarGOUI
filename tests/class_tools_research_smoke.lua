@@ -1,11 +1,11 @@
--- Offline contract tests for the temporary Phase 1 logger. The real event router
+-- Offline contract tests for the temporary Phase 1 / 1.1 logger. The real event router
 -- is loaded below; secret tokens are tripwires, not a simulation of client taint.
 local h = ...
 local test, equal, truthy, same, copy = h.test, h.equal, h.truthy, h.same, h.copy
 local researchPath = h.root .. "/Research/ClassToolsRawCapture.lua"
 local commonEvents = {
     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
-    "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SUCCEEDED",
+    "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_SENT",
     "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE",
     "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_AURA", "COMBAT_LOG_EVENT_UNFILTERED",
 }
@@ -213,7 +213,9 @@ test("CT research dump retains raw fields in insertion order with monotonic rela
     local records, dump, header = rows(logger)
     same(header, { "t", "seq", "event", "unit", "castGUID", "spellID", "spellName",
         "sourceGUID", "destGUID", "subEvent", "healthPct", "detail", "auraInstanceID",
-        "duration", "expirationTime", "applications", "cleuTimestamp" })
+        "duration", "expirationTime", "applications", "cleuTimestamp",
+        "castBarID", "interruptedBy", "channelSpellID", "channelStartTimeMs", "channelEndTimeMs", "channelCastBarID" })
+    contains(dump, "\tformat=2\t", "appended fields have a new explicit dump format")
     equal(records[1].event, "SESSION_START"); equal(tonumber(records[1].t), 0)
     local previous = -1
     for index, row in ipairs(records) do
@@ -231,14 +233,218 @@ test("CT research dump retains raw fields in insertion order with monotonic rela
 end)
 
 test("CT research session metadata is captured once and independently from event facts", function()
-    local _, _, state, logger = fixture()
+    local _, addon, state, logger = fixture()
     truthy(logger:Start("arcane")); state:cast(); state:cast()
     local records, dump, sessions = rows(logger), logger:Dump(), 0
     for _, row in ipairs(records) do if row.event == "SESSION_START" then sessions = sessions + 1 end end
     equal(sessions, 1)
+    contains(records[1].detail, "addonVersion=1.0.0;")
+    contains(records[1].detail, "researchLoggerRevision=phase1.1")
+    equal(addon.version, "1.0.0", "research revision does not change the addon version")
     for _, value in ipairs({ "1.0.0", "12.1.0", "120100", "MAGE", "62", "25.5", "32", "45", "400", "arcane" }) do
         contains(dump, value, "session records " .. value)
     end
+    noErrors(state)
+end)
+
+test("CT research records fourth-argument castBarID on ordinary cast and channel events", function()
+    local _, _, state, logger = fixture()
+    truthy(logger:Start("arcane"))
+    for index, event in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
+        "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE" }) do
+        state:fire(event, "player", "Cast-" .. index, 5143, 200 + index)
+        local row = last(logger)
+        equal(row.event, event); equal(row.castGUID, "Cast-" .. index); equal(row.spellID, "5143")
+        equal(row.castBarID, tostring(200 + index)); equal(row.interruptedBy, "")
+    end
+    noErrors(state)
+end)
+
+test("CT research CHANNEL_STOP and INTERRUPTED preserve interruptedBy before castBarID", function()
+    local _, _, state, logger = fixture()
+    truthy(logger:Start("arcane"))
+    for _, event in ipairs({ "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED" }) do
+        state:fire(event, "player", "Cast-Stop", 5143, "Player-Interrupter-1", 301)
+        local row = last(logger)
+        equal(row.event, event); equal(row.interruptedBy, "Player-Interrupter-1"); equal(row.castBarID, "301")
+        equal(row.castGUID, "Cast-Stop"); equal(row.spellID, "5143")
+        state:fire(event, "player", "Cast-Nil", 5143, nil, 302)
+        equal(last(logger).interruptedBy, "UNAVAILABLE")
+        equal(last(logger).castBarID, "302", "a nil interruptedBy cannot shift the fifth argument")
+        state:fire(event, "player", "Cast-Missing", 5143, "Player-Interrupter-2")
+        equal(last(logger).interruptedBy, "Player-Interrupter-2"); equal(last(logger).castBarID, "UNAVAILABLE")
+    end
+    noErrors(state)
+end)
+
+test("CT research guards interruptedBy and castBarID independently", function()
+    local _, _, state, logger = fixture()
+    truthy(logger:Start("arcane"))
+    local blocked = {}; inaccessible[blocked] = true
+    for _, event in ipairs({ "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED" }) do
+        for _, value in ipairs({ opaque(), blocked }) do
+            state:fire(event, "player", "Cast-Secret", 5143, value, 401)
+            equal(last(logger).interruptedBy, "RESTRICTED"); equal(last(logger).castBarID, "401")
+            state:fire(event, "player", "Cast-Secret", 5143, "Player-Interrupter-1", value)
+            equal(last(logger).interruptedBy, "Player-Interrupter-1"); equal(last(logger).castBarID, "RESTRICTED")
+        end
+    end
+    state:fire("UNIT_SPELLCAST_START", "player", "Cast-Secret", 5143, opaque())
+    equal(last(logger).castBarID, "RESTRICTED")
+    noErrors(state)
+end)
+
+test("CT research public castBarID survives unavailable or restricted castGUID and spellID", function()
+    local _, _, state, logger = fixture()
+    truthy(logger:Start("arcane"))
+    for _, event in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
+        "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE",
+        "UNIT_SPELLCAST_CHANNEL_STOP", "UNIT_SPELLCAST_INTERRUPTED" }) do
+        for _, unavailable in ipairs({ false, true }) do
+            local guid, spell = opaque(), opaque()
+            if unavailable then guid, spell = nil, nil end
+            if event == "UNIT_SPELLCAST_CHANNEL_STOP" or event == "UNIT_SPELLCAST_INTERRUPTED" then
+                state:fire(event, "player", guid, spell, nil, 501)
+            else state:fire(event, "player", guid, spell, 501) end
+            local row = last(logger)
+            equal(row.castBarID, "501")
+            equal(row.castGUID, unavailable and "UNAVAILABLE" or "RESTRICTED")
+            equal(row.spellID, unavailable and "UNAVAILABLE" or "RESTRICTED")
+        end
+    end
+    noErrors(state)
+end)
+
+test("CT research SENT captures its own raw signature in every mode and never inspects target", function()
+    local env, _, state, logger = fixture()
+    local target, probes, oldSecret = opaque(), 0, env.issecretvalue
+    env.issecretvalue = function(value)
+        if rawequal(value, target) then probes = probes + 1; error("SENT target is irrelevant") end
+        return oldSecret(value)
+    end
+    for _, mode in ipairs({ "arcane", "combustion", "altertime" }) do
+        truthy(logger:Start(mode))
+        state.clock = state.clock + 0.125
+        state:fire("UNIT_SPELLCAST_SENT", "player", target, "Cast-Sent", 5143)
+        local row = last(logger)
+        equal(row.event, "UNIT_SPELLCAST_SENT"); equal(row.unit, "player")
+        equal(row.castGUID, "Cast-Sent"); equal(row.spellID, "5143"); equal(tonumber(row.t), 0.125)
+        equal(row.castBarID, ""); equal(row.interruptedBy, ""); equal(row.channelSpellID, "")
+        equal(row.detail, "", "SENT adds no success or queue interpretation")
+        state:fire("UNIT_SPELLCAST_SENT", "player", "Target-Never-Saved", opaque(), opaque())
+        equal(last(logger).castGUID, "RESTRICTED"); equal(last(logger).spellID, "RESTRICTED")
+        truthy(not logger:Dump():find("Target-Never-Saved", 1, true), "target is absent from raw logs")
+    end
+    equal(probes, 0, "target never reaches a secret predicate")
+    noErrors(state)
+end)
+
+test("CT research channel events take exactly one snapshot with the native return positions", function()
+    local env, _, state, logger = fixture()
+    local calls = 0
+    env.UnitChannelInfo = function(unit)
+        equal(unit, "player"); calls = calls + 1
+        return "Arcane Missiles", "Display", 123, 8506.687, 10056.172, false, false, 5143, false, 0, 601
+    end
+    for _, mode in ipairs({ "arcane", "combustion", "altertime" }) do
+        truthy(logger:Start(mode))
+        for _, event in ipairs({ "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE",
+            "UNIT_SPELLCAST_CHANNEL_STOP" }) do
+            local before = calls
+            if event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+                state:fire(event, "player", "Cast-Channel", 5143, nil, 602)
+            else state:fire(event, "player", "Cast-Channel", 5143, 602) end
+            equal(calls, before + 1, "each eligible event attempts one native query")
+            local row = last(logger)
+            equal(row.castBarID, "602"); equal(row.channelCastBarID, "601", "snapshot ID remains independent")
+            equal(row.channelSpellID, "5143"); equal(tonumber(row.channelStartTimeMs), 8506.687)
+            equal(tonumber(row.channelEndTimeMs), 10056.172, "native millisecond values are not transformed")
+        end
+    end
+    equal(calls, 9); noErrors(state)
+end)
+
+test("CT research channel snapshot guards each field without gating on name or spell", function()
+    local env, _, state, logger = fixture()
+    truthy(logger:Start("arcane"))
+    local blocked = {}; inaccessible[blocked] = true
+    env.UnitChannelInfo = function()
+        return opaque(), nil, nil, 1000, opaque(), nil, nil, blocked, nil, nil, 701
+    end
+    state:fire("UNIT_SPELLCAST_CHANNEL_START", "player", opaque(), 5143, 702)
+    local row = last(logger)
+    equal(row.channelStartTimeMs, "1000"); equal(row.channelEndTimeMs, "RESTRICTED")
+    equal(row.channelSpellID, "RESTRICTED"); equal(row.channelCastBarID, "701")
+    equal(row.castBarID, "702"); equal(row.castGUID, "RESTRICTED")
+    env.UnitChannelInfo = function()
+        return nil, nil, nil, opaque(), 2000, nil, nil, 5143, nil, nil, blocked
+    end
+    state:fire("UNIT_SPELLCAST_CHANNEL_UPDATE", "player", nil, 5143, 703)
+    row = last(logger)
+    equal(row.channelStartTimeMs, "RESTRICTED"); equal(row.channelEndTimeMs, "2000")
+    equal(row.channelSpellID, "5143"); equal(row.channelCastBarID, "RESTRICTED")
+    equal(row.castBarID, "703"); equal(row.castGUID, "UNAVAILABLE")
+    noErrors(state)
+end)
+
+test("CT research channel snapshot tolerates absent throwing and empty native APIs", function()
+    for _, variant in ipairs({ "missing", "throws", "empty" }) do
+        local env, _, state, logger = fixture()
+        local calls = 0
+        if variant == "missing" then env.UnitChannelInfo = nil
+        else
+            env.UnitChannelInfo = function()
+                calls = calls + 1
+                if variant == "throws" then error("Channel info unavailable") end
+            end
+        end
+        truthy(logger:Start("arcane"))
+        for _, event in ipairs({ "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE",
+            "UNIT_SPELLCAST_CHANNEL_STOP" }) do
+            state:fire(event, "player", nil, 5143)
+            local row = last(logger)
+            for _, field in ipairs({ "channelSpellID", "channelStartTimeMs", "channelEndTimeMs", "channelCastBarID" }) do
+                equal(row[field], "UNAVAILABLE", event .. " preserves an unavailable " .. field)
+            end
+        end
+        equal(calls, variant == "missing" and 0 or 3, "failed snapshots are not retried")
+        noErrors(state)
+    end
+end)
+
+test("CT research snapshot never polls or reads outside an active public player channel event", function()
+    local env, _, state, logger = fixture()
+    local calls = 0
+    env.UnitChannelInfo = function() calls = calls + 1 end
+    for _, event in ipairs(commonEvents) do state:fire(event, "player", "Cast-Off", 5143, 801) end
+    equal(calls, 0, "default OFF never queries channel info")
+    truthy(logger:Start("altertime")); equal(calls, 0, "metadata capture does not query channel info")
+    for _, event in ipairs({ "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
+        "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SENT",
+        "UNIT_HEALTH", "UNIT_MAXHEALTH", "UNIT_AURA" }) do
+        state:fire(event, "player", "Cast-Other", 5143, 801)
+    end
+    equal(calls, 0, "non-channel events never query channel info")
+    for _, event in ipairs({ "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE",
+        "UNIT_SPELLCAST_CHANNEL_STOP" }) do
+        state:fire(event, "party1", "Cast-Other", 5143, 801)
+        state:fire(event, opaque(), "Cast-Unknown", 5143, 801)
+        equal(last(logger).unit, "RESTRICTED")
+        equal(last(logger).channelCastBarID, "UNAVAILABLE", "unknown unit cannot be attributed to player")
+        state:fire(event, nil, "Cast-Unknown", 5143, 801)
+        equal(last(logger).unit, "UNAVAILABLE"); equal(last(logger).channelSpellID, "UNAVAILABLE")
+    end
+    equal(calls, 0, "other or inaccessible units cannot trigger a player snapshot")
+    state:fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 5143, 802)
+    equal(calls, 1)
+    local count, dump = logger:GetStatus().count, logger:Dump()
+    state.clock = state.clock + 100
+    logger:GetStatus(); equal(logger:Dump(), dump)
+    equal(logger:GetStatus().count, count); equal(calls, 1, "time and inspection produce no observations")
+    logger:Stop()
+    local stoppedDump = logger:Dump()
+    for _, event in ipairs(commonEvents) do state:fire(event, "player", "Cast-Off", 5143, 803) end
+    equal(calls, 1, "explicit OFF never queries channel info"); equal(logger:Dump(), stoppedDump)
     noErrors(state)
 end)
 
@@ -495,7 +701,16 @@ end)
 test("CT research preserves existing SavedVariables and reload always starts OFF", function()
     local env, addon, state, logger = fixture({ marker = "existing settings", options = { scale = 1.2 } })
     local before = copy(env.CarGOUIDB)
-    truthy(logger:Start("arcane")); state:cast(); logger:Stop()
+    env.UnitChannelInfo = function()
+        return "Arcane Missiles", nil, nil, 1000, 2000, nil, nil, 5143, nil, nil, 901
+    end
+    for _, mode in ipairs({ "arcane", "combustion", "altertime" }) do
+        truthy(logger:Start(mode)); state:cast()
+        state:fire("UNIT_SPELLCAST_SENT", "player", opaque(), "Cast-Memory", 5143)
+        state:fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 5143, 901)
+        state:fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 5143, opaque(), 901)
+        logger:Stop()
+    end
     same(env.CarGOUIDB, before, "capture adds no SavedVariables fields")
     same(addon.db, before, "capture writes no formal schema")
     local _, reloaded, _, nextLogger = fixture(copy(env.CarGOUIDB))
@@ -558,6 +773,9 @@ test("CT research start switch stop preserves actual Proc and Mobility native ru
     for _, mode in ipairs({ "arcane", "combustion", "altertime" }) do
         truthy(logger:Start(mode))
         state:fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-Regression", 133)
+        state:fire("UNIT_SPELLCAST_SENT", "player", "Research target", "Cast-Regression", 133)
+        state:fire("UNIT_SPELLCAST_CHANNEL_START", "player", nil, 5143, 1001)
+        state:fire("UNIT_SPELLCAST_CHANNEL_STOP", "player", nil, 5143, nil, 1001)
         logger:Stop()
         same(addon:GetEventDiagnostics(), listeners, "shared event consumers survive cleanup")
     end

@@ -8,14 +8,15 @@ local RESTRICTED, UNAVAILABLE = "RESTRICTED", "UNAVAILABLE"
 local modes = { arcane = true, combustion = true, altertime = true }
 local events = {
     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
-    "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SUCCEEDED",
+    "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_SENT",
     "UNIT_SPELLCAST_CHANNEL_START", "UNIT_SPELLCAST_CHANNEL_UPDATE", "UNIT_SPELLCAST_CHANNEL_STOP",
     "UNIT_AURA", "COMBAT_LOG_EVENT_UNFILTERED",
 }
 local healthEvents = { "UNIT_HEALTH", "UNIT_MAXHEALTH" }
 local columns = { "t", "seq", "event", "unit", "castGUID", "spellID", "spellName",
     "sourceGUID", "destGUID", "subEvent", "healthPct", "detail", "auraInstanceID",
-    "duration", "expirationTime", "applications", "cleuTimestamp" }
+    "duration", "expirationTime", "applications", "cleuTimestamp",
+    "castBarID", "interruptedBy", "channelSpellID", "channelStartTimeMs", "channelEndTimeMs", "channelCastBarID" }
 local buffer, subscriptions = {}, {}
 local enabled, mode, truncated = false, nil, false
 local clock, startedAt, lastTime, playerGUID
@@ -144,6 +145,7 @@ local function SessionMetadata()
         equipment[#equipment + 1] = slot .. ":" .. Escape(Read(GetInventoryItemID, 1, "player", slot))
     end
     Put("equipmentItemIDs", table.concat(equipment, ","))
+    Put("researchLoggerRevision", "phase1.1")
     Append({ event = "SESSION_START", unit = "player", sourceGUID = playerGUID,
         detail = table.concat(build, ";") })
 end
@@ -282,7 +284,45 @@ local function CaptureCombatLog(hp)
     Append(row)
 end
 
-OnEvent = function(_, event, unit, castGUID, spellID, ...)
+local function ChannelSnapshot(row)
+    row.channelSpellID, row.channelStartTimeMs = UNAVAILABLE, UNAVAILABLE
+    row.channelEndTimeMs, row.channelCastBarID = UNAVAILABLE, UNAVAILABLE
+    if row.unit ~= "player" or type(UnitChannelInfo) ~= "function" then return end
+    -- One optional observation, including STOP after the native channel disappears.
+    -- Do not gate public fields on the name, cast GUID or another returned field.
+    local values = { pcall(UnitChannelInfo, "player") }
+    if not values[1] then return end
+    -- Native positions: start=4, end=5, spellID=8, castBarID=11; pcall adds one.
+    row.channelSpellID = Public(values[9])
+    row.channelStartTimeMs = Public(values[5])
+    row.channelEndTimeMs = Public(values[6])
+    row.channelCastBarID = Public(values[12])
+end
+
+local function CaptureSpellcast(event, unit, arg2, arg3, arg4, arg5, hp)
+    local row = { event = event, unit = unit, healthPct = hp }
+    if event == "UNIT_SPELLCAST_SENT" then
+        -- SENT is (unit, target, castGUID, spellID). The target is never inspected.
+        -- This event does not establish success, queue acceptance or button timing.
+        row.castGUID, row.spellID = Public(arg3), Public(arg4)
+    else
+        row.castGUID, row.spellID = Public(arg2), Public(arg3)
+        if event == "UNIT_SPELLCAST_CHANNEL_STOP" or event == "UNIT_SPELLCAST_INTERRUPTED" then
+            -- These signatures insert interruptedBy before castBarID.
+            row.interruptedBy, row.castBarID = Public(arg4), Public(arg5)
+        else
+            row.castBarID = Public(arg4)
+        end
+    end
+    row.spellName = SpellName(row.spellID)
+    if event == "UNIT_SPELLCAST_CHANNEL_START" or event == "UNIT_SPELLCAST_CHANNEL_UPDATE"
+        or event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+        ChannelSnapshot(row)
+    end
+    Append(row)
+end
+
+OnEvent = function(_, event, unit, arg2, arg3, arg4, arg5)
     if not enabled then return end
     if event == "COMBAT_LOG_EVENT_UNFILTERED" then
         CaptureCombatLog(mode == "altertime" and Health() or nil)
@@ -292,14 +332,12 @@ OnEvent = function(_, event, unit, castGUID, spellID, ...)
     if IsKnown(publicUnit) and publicUnit ~= "player" then return end
     local hp = mode == "altertime" and Health() or nil
     if event == "UNIT_AURA" and publicUnit == "player" then
-        CaptureAura(castGUID, hp)
+        CaptureAura(arg2, hp)
     elseif event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" or event == "UNIT_AURA" then
         Append({ event = event, unit = publicUnit, healthPct = hp,
             detail = event == "UNIT_AURA" and publicUnit or nil })
     else
-        local id = Public(spellID)
-        Append({ event = event, unit = publicUnit, castGUID = Public(castGUID), spellID = id,
-            spellName = SpellName(id), healthPct = hp })
+        CaptureSpellcast(event, publicUnit, arg2, arg3, arg4, arg5, hp)
     end
 end
 
@@ -346,7 +384,7 @@ function capture:GetStatus()
 end
 
 function capture:Dump()
-    local lines = { "# CarGOUI CTLOG Phase1\tformat=1\tmode=" .. (mode or "NONE")
+    local lines = { "# CarGOUI CTLOG Phase1\tformat=2\tmode=" .. (mode or "NONE")
         .. "\tenabled=" .. tostring(enabled) .. "\tcount=" .. #buffer .. "\tcap=" .. CAP
         .. "\tTRUNCATED=" .. tostring(truncated), table.concat(columns, "\t") }
     for _, row in ipairs(buffer) do
