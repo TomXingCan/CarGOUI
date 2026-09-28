@@ -429,4 +429,9 @@ addon:RegisterLocale("ruRU", {
     -- RC2 contextual editors.
     ["Test Mobility"] = "Тест мобильности",
     ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - Снимок текущего сеанса вручную; открывать настройки не требуется.",
+    ["Proc testing is unavailable while Proc is quarantined."] = "Тестирование Proc недоступно, пока Proc изолирован.",
+    ["Proc is not quarantined."] = "Proc не изолирован.",
+    ["Proc retry completed; current settings remain in effect."] = "Повторный запуск Proc завершён; текущие настройки остаются в силе.",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Повторный запуск Proc не удался. Скопируйте диагностику командой /cui diagnostics copy; может потребоваться перезагрузка интерфейса.",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "После повторяющихся ошибок Proc изолирован до конца сеанса. Выполните /cui diagnostics copy, затем /cui proc retry или /reload.",
 })

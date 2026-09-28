@@ -70,7 +70,7 @@ function addon:ApplyReminderColor(text, entry)
     return available
 end
 
-function addon:RefreshProcRegionColor(entry, restoredColor)
+local function RefreshProcRegionColor(self, entry, restoredColor)
     for _, pool in pairs(self.reminderFrames or {}) do
         local frame = pool[entry.id]
         if frame and frame.text and SameRegion(frame.reminderEntry, entry) then
@@ -79,6 +79,10 @@ function addon:RefreshProcRegionColor(entry, restoredColor)
             else self:ApplyReminderColor(frame.text, entry) end
         end
     end
+end
+
+function addon:RefreshProcRegionColor(entry, restoredColor)
+    return self:RunProcSafe("render", RefreshProcRegionColor, self, entry, restoredColor)
 end
 
 function addon:SetProcRegionColorPreview(entry, color)

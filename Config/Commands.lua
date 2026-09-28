@@ -32,6 +32,15 @@ function addon:HandleSlashCommand(message)
     elseif command == "status" and #args == 1 then
         PrintStatus()
         return
+    elseif command == "proc" and #args == 2 and args[2] == "retry" then
+        if not self:IsProcQuarantined() then
+            self:Print(self:Text("Proc is not quarantined."))
+        elseif self:RetryProc() then
+            self:Print(self:Text("Proc retry completed; current settings remain in effect."))
+        else
+            self:Print(self:Text("Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."))
+        end
+        return
     elseif command == "diagnostics" and #args == 1 then
         self:PrintDiagnosticsSnapshot()
         return

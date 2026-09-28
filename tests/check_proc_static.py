@@ -52,25 +52,25 @@ assert "adapter.procCapability.version == 1" in proc_runtime and "CompileProcDef
 assert "RegisterProcFactory" in shared and "requiresAnyKnown" in shared and "requiresKnown" in shared
 assert "byRegion[region.id]" in compiler and "binding.source.shared" in compiler
 assert "source.textureID == texture and source.locationTypeName == location" in proc_runtime
-assert 'auraHandle.auraID ~= auraID' in code((root / "UI/ProcDisplay.lua").read_text(encoding="utf-8"))
+assert 'frame.nativeAuraID ~= auraID' in code((root / "UI/ProcDisplay.lua").read_text(encoding="utf-8"))
 assert "proc_sources_69933.lua" not in toc and "fixtures" not in data_toc
 print("PASS Proc capability, conflict validation, exact graphical dispatch and immutable Aura provider guards are explicit")
 absent(runtime, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_SPELLCAST",
                  r"UnitBuff\s*\(", r"UnitAura\s*\(", r"C_UnitAuras", r"GetTime\s*\(",
-                 r"pcall\s*\(", r"GetRemainingDuration\s*\(", r"GetFormattedText\s*\(",
+                 r"GetRemainingDuration\s*\(", r"GetFormattedText\s*\(",
                  r"\.expirationTime", r"\.applications"],
        "Proc and Free move have no polling, cast inference, addon aura scan, raw timer arithmetic or secret-state probing")
 absent(runtime, [r"GetText\s*\(", r"GetStringWidth\s*\(", r"GetStringHeight\s*\(",
                  r"GetAlpha\s*\(", r"GetAuraSlotFrame\s*\(", r"GetAuraInstance\s*\("],
        "Proc never reads native aura child visibility, opacity, identity or timer text")
 assert '"CustomAuraContainerTemplate"' in native
-assert '"AuraContainer"' in native and '"SetUnit", container.SetUnit, container, "player"' in native
-assert '"AddAuraSlot", container.AddAuraSlot, container, key, "HELPFUL"' in native
-assert "candidateFilters = { includeSpellIDs = { [auraID] = true } }" in native
+assert '"AuraContainer"' in native and '"SetUnit", handle.container.SetUnit, handle.container, "player"' in native
+assert 'handle.container.AddAuraSlot, handle.container, handle.key, "HELPFUL"' in native
+assert "candidateFilters = { includeSpellIDs = { [handle.auraID] = true } }" in native
 assert "button:SetDurationText(text, { binding = binding })" in native
-assert "text:SetFontObject(font)" in native and '"CreateFont", CreateFont' in native
-assert "self.container:SetEnabled(enabled)" in native
-assert "self.container:Show()" in native
+assert "text:SetFontObject(handle.font)" in native and '"fontsCreated", handle.procOwned, CreateFont' in native
+assert "container.SetEnabled, container, value" in native
+assert "Attempt(container.Show, container)" in native
 absent(native, [r"self\.container:Hide\s*\(", r"self\.button", r"handle\.button",
                 r"\.GetAuraDataBy", r"\.GetPlayerAura"],
        "Aura lifecycle uses native helpful-spell filtering, copied binding and no retained restricted child")
@@ -103,8 +103,24 @@ assert "ColorCopy(region.color)" in database and "config.regions[id].color = Col
 assert "changedColors" in database and "RefreshProcRegionColor(entry)" in database
 print("PASS RGB schema is optional per stable Proc region and color-only writes use targeted styling")
 
-# Presentation has a separate failure boundary. Protected calls here recover
-# owned rendering faults; the existing Aura/trigger ban above remains intact.
+# Protected calls now also isolate owned construction and shutdown failures.
+# They never probe a restricted Aura, button, duration or native callback object.
+stop = proc_runtime.split('function addon:StopProc()', 1)[1].split('local function RenderProcState', 1)[0]
+assert "pcall(callback, ...)" in stop and "self.procStopping, self.procTracking = true, false" in stop
+assert "self.nativeAuraSlots[key] = handle" in native and "handle.slotAttempted" in native
+assert "handle.initializeCompleted" in native and '"slot-uncertain"' in native
+absent(native, [r"SetParent\s*\(", r"HasAuraSlot\s*\(", r"RemoveAuraSlot\s*\(",
+                r"UnregisterAuraSlot\s*\(", r"SetAuraSlotCandidateFilters\s*\("],
+       "Native ownership avoids forbidden parenting private slot methods and refresh-time filter rebuilds")
+safety = code((root / "Core/ProcSafety.lua").read_text(encoding="utf-8"))
+diagnostics = code((root / "Core/ProcDiagnostics.lua").read_text(encoding="utf-8"))
+assert "Core/ProcSafety.lua" in declared and "Core/ProcDiagnostics.lua" in declared
+assert "local BUDGET = 3" in safety and "state.quarantined" in safety and "RetryProc" in safety
+assert "RunProcSafe" in proc_runtime and "IsProcQuarantined" in proc_runtime
+absent(safety + diagnostics, [r"OnUpdate", r"NewTicker", r"C_Timer", r"collectgarbage", r"CarGOUIDB",
+       r"C_UnitAuras", r"GetText\s*\(", r"GetAlpha\s*\(", r"GetAuraSlotFrame\s*\(",
+       r"geterrorhandler\s*\(", r"seterrorhandler\s*\("],
+       "Proc-only diagnostics and quarantine have no polling GC persistence protected readback or global error handler")
 artwork = code((root / "UI/ProcArtwork.lua").read_text(encoding="utf-8"))
 resolver = code((root / "Core/ProcAppearance.lua").read_text(encoding="utf-8"))
 catalog = code((root / "Database/ProcAssets.lua").read_text(encoding="utf-8"))

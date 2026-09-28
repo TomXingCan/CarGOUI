@@ -33,7 +33,8 @@ test("Proc diagnostics fixed keys reject restricted values and keep a detached b
     equal(fresh.counters.showEvents, 100); equal(fresh.api.SetUnit.requested, 0)
     truthy(fresh.errors[1].reason ~= "mutated")
     equal(fresh.nativeListenerActual, "unobservable"); equal(fresh.nativeBindingActual, "unobservable")
-    same(fresh.safety, { quarantined = false, generation = 1, failures = 0, budget = 3,
+    local generation = addon.GetProcSafetyGeneration and addon:GetProcSafetyGeneration() or 1
+    same(fresh.safety, { quarantined = false, generation = generation, failures = 0, budget = 3,
         phase = "none", reason = "none", cleanupComplete = true, retryAllowed = false })
     addon.GetProcSafetyDiagnostics = function() return { quarantined = true, failures = 2, budget = restricted,
         phase = "render", arbitrary = "ignored", cleanupComplete = false } end

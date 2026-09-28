@@ -429,4 +429,9 @@ addon:RegisterLocale("esES", {
     -- RC2 contextual editors.
     ["Test Mobility"] = "Probar movilidad",
     ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - Captura manual de la sesión; no hace falta abrir las opciones.",
+    ["Proc testing is unavailable while Proc is quarantined."] = "Las pruebas de Proc no están disponibles mientras Proc esté aislado.",
+    ["Proc is not quarantined."] = "Proc no está aislado.",
+    ["Proc retry completed; current settings remain in effect."] = "El reintento de Proc ha terminado; los ajustes actuales siguen vigentes.",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "El reintento de Proc ha fallado. Copia el diagnóstico con /cui diagnostics copy; puede que debas recargar la interfaz.",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc se ha aislado durante esta sesión tras errores repetidos. Usa /cui diagnostics copy y después /cui proc retry o /reload.",
 })

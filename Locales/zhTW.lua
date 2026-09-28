@@ -429,4 +429,9 @@ addon:RegisterLocale("zhTW", {
     -- RC2 contextual editors.
     ["Test Mobility"] = "測試位移提示",
     ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - 手動取得工作階段快照，無需開啟選項。",
+    ["Proc testing is unavailable while Proc is quarantined."] = "Proc 已被隔離，暫時無法進行 Proc 測試。",
+    ["Proc is not quarantined."] = "Proc 未被隔離。",
+    ["Proc retry completed; current settings remain in effect."] = "Proc 重試完成，目前設定仍然生效。",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Proc 重試失敗。請使用 /cui diagnostics copy 複製診斷；可能需要重新載入介面。",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc 因重複異常已在本次工作階段中隔離。請先使用 /cui diagnostics copy，再使用 /cui proc retry 或 /reload。",
 })

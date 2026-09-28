@@ -957,10 +957,11 @@ local function setup(saved, loggedIn, client)
             return container.enabled and container:IsVisible()
         end
         function state:refreshNativeAuras()
+            local cleared = {}
             for _, slot in ipairs(self.auraSlots) do
                 -- A native dirty pass is postponed while any public ancestor is
                 -- hidden. Addon shutdown must leave the wrapper shown/alpha=0.
-                if slot.container:IsVisible() then
+                if slot.container:IsVisible() and (slot.container.nativeAuraDirty or NativeVisible(slot.container)) then
                 local candidate
                 if NativeVisible(slot.container) then
                     for _, aura in pairs(self.proc.auras) do
@@ -981,9 +982,10 @@ local function setup(saved, loggedIn, client)
                     binding:UpdateFontString()
                 end
                 self.nativeAuraUpdates = self.nativeAuraUpdates + 1
-                slot.container.nativeAuraDirty = false
+                cleared[slot.container] = true
                 end
             end
+            for container in pairs(cleared) do container.nativeAuraDirty = false end
         end
         function state:nativeAuraText(container)
             self:nativeTick()
@@ -1007,19 +1009,27 @@ local function setup(saved, loggedIn, client)
             for _, slot in ipairs(self.auraSlots) do if NativeVisible(slot.container) then count = count + 1 end end
             return count
         end
+        local nativeSlotKeys = {}
         env.CreateFrame = function(kind, name, parent, template)
             local frame = createFrame(kind, name, parent, template)
             if template and template:find("CustomAuraContainerTemplate", 1, true) then
                 equal(kind, "AuraContainer", "custom native aura template uses native AuraContainer type")
                 frame.nativeAuraContainer = true
+                frame.nativeProviderSwitchRegistered = true
+                frame.nativeDynamicListening = false
+                frame.nativeAddSlotCalls = 0
+                nativeSlotKeys[frame] = {}
                 frame.enabled = false
                 function frame:SetUnit(unit) equal(unit, "player", "only player helpful auras are configured"); self.unit = unit end
                 function frame:SetEnabled(value)
                     equal(type(value), "boolean", "native container enable is public lifecycle state")
                     self.enabled = value
+                    self.nativeDynamicListening = value and self:IsVisible() and next(nativeSlotKeys[self]) ~= nil
                     self.nativeAuraDirty = true
                 end
                 function frame:AddAuraSlot(key, filter, configuration)
+                    self.nativeAddSlotCalls = self.nativeAddSlotCalls + 1
+                    assert(not nativeSlotKeys[self][key], "Native AddAuraSlot rejects duplicate stable keys")
                     equal(filter, "HELPFUL", "Proc native filtering is helpful-player only")
                     truthy(configuration.candidateFilters.includeSpellIDs, "candidate filters declare audited aura IDs")
                     for id, enabled in pairs(configuration.candidateFilters.includeSpellIDs) do
@@ -1028,7 +1038,17 @@ local function setup(saved, loggedIn, client)
                     local slot = { container = self, key = key, filters = configuration.candidateFilters, children = {} }
                     local button = createFrame("Button", nil, self)
                     slot.button = button
+                    -- Intrinsic forbidden aspects precede initializeFrame.
+                    function button:SetParent() error("AuraButton intrinsic forbids ChangeParent") end
+                    for _, method in ipairs({ "SetAllPoints", "EnableMouse", "SetAlpha", "SetScale", "SetPoint" }) do
+                        local original = button[method]
+                        button[method] = function(object, ...)
+                            assert(not object.nativeAuraRestricted, "Native child cannot be mutated after initialization")
+                            return original(object, ...)
+                        end
+                    end
                     function button:SetDurationText(text, options)
+                        assert(not self.nativeAuraRestricted, "Duration binding is initialization-only")
                         local binding = env.C_DurationUtil.CreateDurationTextBinding()
                         binding:Assign(options.binding)
                         binding:SetFontString(text)
@@ -1040,12 +1060,18 @@ local function setup(saved, loggedIn, client)
                         slot.children[#slot.children + 1] = text
                         return text
                     end
-                    state.auraSlots[#state.auraSlots + 1] = slot
-                    configuration.initializeFrame(button)
+                    -- securecallfunction reports callback errors but its result
+                    -- is ignored by the native provider. AddAuraSlot can return
+                    -- normally with partially initialized content.
+                    local initialized, failure = pcall(configuration.initializeFrame, button)
+                    if not initialized then state.errors[#state.errors + 1] = failure end
                     -- Simulates the native restriction boundary after initialization.
                     button.nativeAuraRestricted = true
                     for _, text in ipairs(slot.children) do text.nativeAuraRestricted = true end
-                    state:refreshNativeAuras()
+                    nativeSlotKeys[self][key] = true
+                    state.auraSlots[#state.auraSlots + 1] = slot
+                    self.nativeDynamicListening = self.enabled and self:IsVisible()
+                    self.nativeAuraDirty = true
                     return button
                 end
             end
@@ -7831,7 +7857,7 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     nativeText = nativeText, procText = procText })
 
 for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua",
-    "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua" }) do
+    "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua", "proc_native_lifecycle.lua", "proc_safety.lua", "proc_preview_safety.lua", "proc_runtime_lifecycle.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,
         root = root, metadata = metadata, login = login, setup = setup, options = options,
