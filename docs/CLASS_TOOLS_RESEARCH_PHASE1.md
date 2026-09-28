@@ -1,4 +1,4 @@
-# Class Tools Research Phase 1
+# Class Tools Research Phase 1 / Phase 1.1 instrumentation
 
 ## Purpose and delivery boundary
 
@@ -7,6 +7,28 @@ Phase 1 supplies one temporary, opt-in **Class Tools Raw Capture Logger** for ga
 **No production Class Tools evaluation algorithm is implemented in Phase 1.**
 
 This phase does not implement Arcane success/failure, a seventh-tick protection interval, wave grouping, AoE clustering, Combustion window evaluation, a Combustion Counter, or Alter Time recovery calculations. It also adds no production Class Tools Options page, formal Class Tools database schema, schema migration, production registry, style inheritance, 1.0.1 release, or tag. The existing addon version is recorded as session context; this research phase is not a release-version change.
+
+Phase 1.1 extends raw instrumentation only. It appends guarded event identifiers and optional channel snapshots, adds a client-send observation, and identifies the logger revision independently of the addon version. The production boundary above continues to apply.
+
+## First target-client observation and Phase 1.1 motivation
+
+The author reported the first Arcane sample from **WoW Retail 12.1.0, build 69933**. The following describes that one supplied sample; it does not claim broader client coverage or establish final algorithm rules:
+
+| Observation | Reported result |
+| --- | --- |
+| `COMBAT_LOG_EVENT_UNFILTERED` | `RESTRICTED`. |
+| `UNIT_AURA` | Registration succeeded, but aura payloads during Arcane Missiles were largely `RESTRICTED`. |
+| Arcane Missiles channel spell ID | `5143` observed. |
+| Complete sample `UNIT_SPELLCAST_CHANNEL_START` | Relative timestamp `8.506687`. |
+| Complete sample `UNIT_SPELLCAST_SUCCEEDED` | Relative timestamp `8.507931`, immediately after CHANNEL_START, not at channel completion. |
+| Complete sample `UNIT_SPELLCAST_CHANNEL_STOP` | Relative timestamp `10.056172`. |
+| `UNIT_SPELLCAST_CHANNEL_UPDATE` | Zero observations in the complete sample. |
+| Channel START/STOP cast GUID | `UNAVAILABLE` in this sample. |
+| SUCCEEDED cast GUID | Readable in this sample. |
+
+These gaps motivate capturing `castBarID` independently of `castGUID`: the target API declarations mark this event field `NeverSecret`, while each observed value still passes the logger's secret/access guards. Its presence records a raw identifier; it does not establish a chain, wave, or success result. Optional `UnitChannelInfo` snapshots add observable channel fields without polling or deriving ticks from times.
+
+Phase 1.1 also records `UNIT_SPELLCAST_SENT` to research the time when the client emits the next cast/Spell Queue send event. **SENT is only a raw event observation.** It is not a successful cast, queued success, chain success, or the absolute true time of a player's button press. Its target argument is not necessary for this research and is neither inspected nor saved.
 
 ## Commands and session lifecycle
 
@@ -38,6 +60,7 @@ UNIT_SPELLCAST_STOP
 UNIT_SPELLCAST_FAILED
 UNIT_SPELLCAST_INTERRUPTED
 UNIT_SPELLCAST_SUCCEEDED
+UNIT_SPELLCAST_SENT
 UNIT_SPELLCAST_CHANNEL_START
 UNIT_SPELLCAST_CHANNEL_UPDATE
 UNIT_SPELLCAST_CHANNEL_STOP
@@ -65,7 +88,8 @@ Initial `CAPABILITY` rows record each requested event's registration result. Lat
 
 Records carry a monotonically nondecreasing relative timestamp and an increasing sequence number. The selected session clock is `GetTimePreciseSec` when available, otherwise `GetTime`; no profiling timer is reset. The timestamp is relative to the start of that capture session and is `UNAVAILABLE` if the selected clock cannot be read safely. Sequence order remains authoritative for equal or unavailable timestamps. The event name is preserved. Applicable records include:
 
-- Unit, cast GUID, spell ID, and a public spell name for debug readability only.
+- Unit, cast GUID, spell ID, cast bar ID, applicable interruption field, and a public spell name for debug readability only.
+- Optional channel spell ID, start/end times in native milliseconds, and channel cast bar ID, observed once on each eligible channel event.
 - Public source/destination GUIDs and the CLEU subevent.
 - Raw aura update facts, including available added/updated/removed aura instance IDs and public spell/duration/expiration fields.
 - Publicly safe player health percentage when applicable.
@@ -76,19 +100,55 @@ There is no initial aura baseline scan when a session begins. Full `UNIT_AURA` u
 
 A CLEU record is an observation of a received event, not proof of a completed missile wave or a successful chain. A `UNIT_SPELLCAST_SUCCEEDED` record is not a Phase 1 product success result. An aura removal does not by itself distinguish manual return from expiration or another mechanic. Those distinctions must be investigated against a deliberately recorded live-client scenario.
 
+### Spellcast event signatures
+
+Payload arguments after the event name are read according to each event's signature, rather than treating every fourth argument as a cast bar ID:
+
+| Event | Payload order | Captured event fields |
+| --- | --- | --- |
+| `UNIT_SPELLCAST_START` | `unit, castGUID, spellID, castBarID` | `unit`, `castGUID`, `spellID`, `castBarID` |
+| `UNIT_SPELLCAST_STOP` | `unit, castGUID, spellID, castBarID` | `unit`, `castGUID`, `spellID`, `castBarID` |
+| `UNIT_SPELLCAST_FAILED` | `unit, castGUID, spellID, castBarID` | `unit`, `castGUID`, `spellID`, `castBarID` |
+| `UNIT_SPELLCAST_SUCCEEDED` | `unit, castGUID, spellID, castBarID` | `unit`, `castGUID`, `spellID`, `castBarID` |
+| `UNIT_SPELLCAST_CHANNEL_START` | `unit, castGUID, spellID, castBarID` | `unit`, `castGUID`, `spellID`, `castBarID` |
+| `UNIT_SPELLCAST_CHANNEL_UPDATE` | `unit, castGUID, spellID, castBarID` | `unit`, `castGUID`, `spellID`, `castBarID` |
+| `UNIT_SPELLCAST_CHANNEL_STOP` | `unit, castGUID, spellID, interruptedBy, castBarID` | `unit`, `castGUID`, `spellID`, `interruptedBy`, `castBarID` |
+| `UNIT_SPELLCAST_INTERRUPTED` | `unit, castGUID, spellID, interruptedBy, castBarID` | `unit`, `castGUID`, `spellID`, `interruptedBy`, `castBarID` |
+| `UNIT_SPELLCAST_SENT` | `unit, target, castGUID, spellID` | `unit`, `castGUID`, `spellID`; discard `target` |
+
+Each captured field is guarded independently. An inaccessible `castGUID` does not suppress an accessible `castBarID`, and an inaccessible `interruptedBy` does not suppress the following cast bar ID. `interruptedBy` is the raw field, not a classification of the interruption. Events whose signatures do not supply one of these fields leave its TSV cell empty; a supplied but inaccessible or missing expected value uses the corresponding marker.
+
+### Optional channel snapshots
+
+Only a publicly identified `player` event of type `UNIT_SPELLCAST_CHANNEL_START`, `UNIT_SPELLCAST_CHANNEL_UPDATE`, or `UNIT_SPELLCAST_CHANNEL_STOP` triggers one protected `UnitChannelInfo("player")` call, if the API exists. No other event requests this snapshot. The native return positions are read independently:
+
+| TSV field | Native return position | Meaning |
+| --- | --- | --- |
+| `channelSpellID` | 8 | Raw channel spell ID. |
+| `channelStartTimeMs` | 4 | Raw native channel start time in milliseconds. |
+| `channelEndTimeMs` | 5 | Raw native channel end time in milliseconds. |
+| `channelCastBarID` | 11 | Raw channel cast bar ID. |
+
+Snapshot fields use the existing secret/access guards independently of the channel name, cast GUID, and each other. A secret field becomes `RESTRICTED`; a missing API, failed call, absent return, or inaccessible unit identity leaves the attempted snapshot field `UNAVAILABLE`. A STOP snapshot may have no result because the channel is already gone; that absence is retained as an observation. Snapshot cells on unrelated events are empty.
+
+There is no polling or OnUpdate handler. The logger does not subtract or normalize the native channel start/end times, infer ticks, calculate protection windows, or establish a cast/channel relationship from these identifiers.
+
 ## Dump format and synthetic example
 
 The dump is deterministic UTF-8-compatible text with a status/comment line, one fixed TSV header, and records in insertion order. `t` uses six decimal places when numeric. `seq` is the one-based buffer index. Tabs, newlines, carriage returns, backslashes, and WoW markup pipes in values are escaped to keep cells and the copy surface stable. There is no sort by spell, target, subevent, or inferred wave.
 
-The fixed column order is shown below. `detail` carries session metadata, capability status, aura action/update markers, or a limitation. `cleuTimestamp` preserves the public native combat-log timestamp separately from the relative observation clock `t`. `duration`, `expirationTime`, and `applications` are public aura facts only; no arithmetic uses them.
+Phase 1.1 uses **`format=2` with 23 fixed TSV columns**. The original 17 columns retain their order and meaning; six fields are appended: `castBarID`, `interruptedBy`, `channelSpellID`, `channelStartTimeMs`, `channelEndTimeMs`, and `channelCastBarID`. Consumers must read the format marker and header rather than assume the older format=1 width.
 
-**Synthetic offline dump excerpt, not a WoW sample.** All observations below are synthetic fixture data. The spell IDs and event pairings in this example do not establish target-client mappings. The real dump starts with one `SESSION_START` row and ten common-mode `CAPABILITY` rows; those eleven rows are omitted from this excerpt for readability, so the first displayed sequence is 12. The status line describes a stopped, untruncated 13-record session. Stopping does not append a row.
+The fixed column order is shown below. `detail` carries session metadata, capability status, aura action/update markers, or a limitation. `cleuTimestamp` preserves the public native combat-log timestamp separately from the relative observation clock `t`. `duration`, `expirationTime`, and `applications` are public aura facts only; no arithmetic uses them. The new channel time fields preserve their native millisecond values and are not relative session timestamps.
+
+**Synthetic offline dump excerpt, not a WoW sample.** All observations below are synthetic fixture data. These identifiers, timings, and event pairings do not establish target-client mappings or a cast relationship. The real dump starts with one `SESSION_START` row and eleven common-mode `CAPABILITY` rows; those twelve rows are omitted from this excerpt for readability, so the first displayed sequence is 13. The status line describes a stopped, untruncated 15-record session. Stopping does not append a row.
 
 ```tsv
-# CarGOUI CTLOG Phase1	format=1	mode=arcane	enabled=false	count=13	cap=2000	TRUNCATED=false
-t	seq	event	unit	castGUID	spellID	spellName	sourceGUID	destGUID	subEvent	healthPct	detail	auraInstanceID	duration	expirationTime	applications	cleuTimestamp
-0.125000	12	COMBAT_LOG_EVENT_UNFILTERED			5143	Debug spell 5143	Player-Synthetic	Creature-Synthetic	SPELL_CAST_SUCCESS							10000.125
-0.375000	13	COMBAT_LOG_EVENT_UNFILTERED			7268	Debug spell 7268	Player-Synthetic	Creature-Synthetic	SPELL_PERIODIC_DAMAGE							10000.375
+# CarGOUI CTLOG Phase1	format=2	mode=arcane	enabled=false	count=15	cap=2000	TRUNCATED=false
+t	seq	event	unit	castGUID	spellID	spellName	sourceGUID	destGUID	subEvent	healthPct	detail	auraInstanceID	duration	expirationTime	applications	cleuTimestamp	castBarID	interruptedBy	channelSpellID	channelStartTimeMs	channelEndTimeMs	channelCastBarID
+0.125000	13	UNIT_SPELLCAST_CHANNEL_START	player	UNAVAILABLE	5143	Debug spell 5143											314		5143	10000125	10001625	314
+0.375000	14	UNIT_SPELLCAST_CHANNEL_UPDATE	player	UNAVAILABLE	5143	Debug spell 5143											314		5143	10000125	10001625	314
+1.625000	15	UNIT_SPELLCAST_CHANNEL_STOP	player	UNAVAILABLE	5143	Debug spell 5143											314	UNAVAILABLE	UNAVAILABLE	UNAVAILABLE	UNAVAILABLE	UNAVAILABLE
 ```
 
 `dump` is a point-in-time copy; subsequent events do not rewrite an already open copy surface. Use `/cui ctlog off`, then `/cui ctlog dump`, select all, and copy before clearing, restarting, or reloading. Record a short scenario note beside the dump so deliberate manual actions remain distinguishable from unclassified event facts.
@@ -108,8 +168,9 @@ At session start the logger captures the following once in the `SESSION_START.de
 | Research mode | Identify the explicitly selected capture mode. |
 | Equipment item IDs | A low-cost inventory snapshot, not item-effect inference. |
 | Active talent configuration ID | A low-cost identifier; no talent-tree traversal or inferred talent effects. |
+| Research logger revision | `researchLoggerRevision=phase1.1` identifies this instrumentation revision without changing the formal addon version. |
 
-The metadata keys, in order, are `addonVersion`, `wowVersion`, `build`, `interface`, `class`, `specID`, `haste`, `homeLatencyMS`, `worldLatencyMS`, `spellQueueWindowMS`, `researchMode`, `clock`, `activeTalentConfigID`, and `equipmentItemIDs`. Equipment covers inventory slots 1–19 as `slot:itemID` pairs. Unavailable or restricted metadata is recorded as such. Equipment and talent configuration identifiers are only partial environment context; they do not constitute a complete reproducible talent/effect model. Note the relevant selected talents, gear effects, and intended action sequence alongside the copied dump when preparing live samples.
+The metadata keys, in order, are `addonVersion`, `wowVersion`, `build`, `interface`, `class`, `specID`, `haste`, `homeLatencyMS`, `worldLatencyMS`, `spellQueueWindowMS`, `researchMode`, `clock`, `activeTalentConfigID`, `equipmentItemIDs`, and `researchLoggerRevision`. An `addonVersion=1.0.0` session can therefore explicitly identify the Phase 1.1 logger without a formal version bump, release, or tag. Equipment covers inventory slots 1–19 as `slot:itemID` pairs. Unavailable or restricted metadata is recorded as such. Equipment and talent configuration identifiers are only partial environment context; they do not constitute a complete reproducible talent/effect model. Note the relevant selected talents, gear effects, and intended action sequence alongside the copied dump when preparing live samples.
 
 ## Secret and restricted data
 
@@ -127,7 +188,7 @@ The first live capture order is fixed: **Arcane → Fire → Alter Time**. Arcan
 
 Start with `/cui ctlog arcane on`. Record separate deliberate examples of uninterrupted Arcane Missiles, early interruption, channel replacement/chaining, movement or other causes of interruption, and different relevant talent/haste conditions. Stop and copy each short scenario before starting another.
 
-The external candidates **Arcane Missiles damage/tick `7268`** and **Clearcasting `263725`** are research labels only. Neither is hardcoded as a final algorithm fact or an admission filter. Confirm the actual player cast/channel IDs, damage/tick IDs, aura IDs, GUID availability, and ordering across channel START/UPDATE/STOP, INTERRUPTED, SUCCEEDED, UNIT_AURA, and CLEU on the target client. Record both single-target and multiple-target samples without grouping waves or clustering targets.
+The external candidates **Arcane Missiles damage/tick `7268`** and **Clearcasting `263725`** are research labels only. Neither is hardcoded as a final algorithm fact or an admission filter. Channel spell ID `5143` is observed in the reported build 69933 sample, not installed as an algorithm rule or admission filter. Continue checking the actual player cast/channel IDs, damage/tick IDs, aura IDs, cast GUID/cast bar ID availability, optional channel snapshots, and ordering across SENT, channel START/UPDATE/STOP, INTERRUPTED, SUCCEEDED, UNIT_AURA, and any safely available CLEU stream on the target client. Record both single-target and multiple-target samples without grouping waves or clustering targets.
 
 The logger must not label any sample success/failure, synthesize a seventh tick, create a seventh-tick protection interval, or group events into waves.
 
@@ -148,7 +209,7 @@ Scenario notes identify the action attempted; the logger does not classify the r
 These public source declarations guide defensive capture; they do not replace WoW 12.1 client observations:
 
 - [Combat log API declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/CombatLogDocumentation.lua) mark CLEU as restricted-capable and expose `C_CombatLog.IsCombatLogRestricted`. A restricted registration/access path must be recorded as a capability gap, not reported as a working stream.
-- [Unit event and health declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua) describe spellcast/channel event payloads and secret-capable health returns. Player events still require per-value checks; [secret predicate declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/SecretPredicatesDocumentation.lua) include conditions that can make otherwise familiar fields secret.
+- [Unit event and health declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitDocumentation.lua) describe the differing spellcast/channel signatures, `NeverSecret` cast bar IDs, the conditional-secret SENT target, secret-capable health returns, and `UnitChannelInfo` return positions. The logger discards the SENT target and still guards all recorded fields independently; documentation does not replace runtime checks. [Secret predicate declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/SecretPredicatesDocumentation.lua) include conditions that can make otherwise familiar fields secret.
 - [Aura API declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitAuraDocumentation.lua) and [aura payload structures](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/UnitConstantsDocumentation.lua) describe restricted-capable `UNIT_AURA` updates and access-limited instance queries. A missing field or failed instance query is not proof of aura absence.
 - [Native percentage scale](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_SharedXMLBase/CurveConstants.lua) defines `ScaleTo100` with points `(0, 0)` and `(1, 100)`. The health API receives that native curve; addon Lua does not reconstruct or scale secret health.
 - [FrameScript access-check declarations](https://github.com/Gethe/wow-ui-source/blob/live/Interface/AddOns/Blizzard_APIDocumentationGenerated/FrameScriptDocumentation.lua) distinguish value checks (`issecretvalue` / `canaccessvalue`) from table checks (`issecrettable` / `canaccesstable`).
@@ -157,11 +218,12 @@ The source links use the live branch and can change. The exact build recorded in
 
 ## Target-client verification still required
 
-Offline mocks and public documentation/source declarations establish intended behavior and safety boundaries, not live WoW 12.1 verification. Existing Proc mappings and native aura bindings do not prove that direct raw aura or CLEU data is readable by this logger in combat.
+Offline mocks and public documentation/source declarations establish intended behavior and safety boundaries, not live WoW 12.1 verification. The single author-reported build 69933 sample above provides limited target-client evidence; Phase 1.1 additions still require their own live capture. Existing Proc mappings and native aura bindings do not prove that direct raw aura or CLEU data is readable by this logger in combat.
 
 The following remain live-client acceptance items:
 
-- Availability and exact payloads of every requested spellcast/channel event, particularly channel UPDATE/STOP versus INTERRUPTED/SUCCEEDED ordering and public cast GUIDs.
+- Availability and exact payloads of every requested spellcast/channel event, particularly SENT, channel UPDATE/STOP versus INTERRUPTED/SUCCEEDED ordering, public cast GUIDs/cast bar IDs, and `interruptedBy` accessibility. The absence of UPDATE in the reported sample is not a universal rule.
+- `UnitChannelInfo` field availability and cast bar IDs during START/UPDATE/STOP, including independent field restrictions and no-result STOP snapshots; no inferred tick count or cast relationship is an acceptance criterion.
 - CLEU registration and `CombatLogGetCurrentEventInfo` access in town, training-dummy combat, and actual instance combat; source/destination GUID and spell-field restrictions.
 - `UNIT_AURA` update payload accessibility, incremental versus full updates, and aura-instance query access; completeness of raw apply/update/removal observations when fields are restricted or unavailable.
 - Arcane candidates `7268` and `263725`, plus all observed cast/channel, Combustion, Pyroblast, Flamestrike, Alter Time first-cast/return, and duration-extension aliases.
@@ -175,5 +237,7 @@ If the data is insufficient, preserve the actual missing/restricted capability a
 ## Automated validation
 
 Phase 1 automated coverage must verify default OFF and reload-like fresh load, mode switching, idempotent same-mode start, no duplicate subscriptions, no records after OFF, clear behavior, stable dump ordering, the hard cap and visible truncation flag, secret-safe health handling, and no SavedVariables persistence. Regression coverage must also check that stopping or switching research leaves existing Proc/Mobility subscriptions and behavior intact, and all new Lua remains compatible with Lua 5.1.
+
+Phase 1.1 coverage additionally checks event-specific cast bar positions on START/STOP/FAILED/SUCCEEDED and channel START/UPDATE/STOP, INTERRUPTED ordering, secret `interruptedBy`, public cast bar IDs alongside unavailable/restricted cast GUIDs, SENT capture without reading its target, and one optional channel snapshot per eligible player event. Snapshot tests include public fields, independent restricted fields, missing API, failed/no-result calls, and inaccessible unit identity. The format=2 header and ordering, unchanged first 17 column meanings, research revision, absence of polling, and absence of new SavedVariables remain part of the validation boundary.
 
 The new coverage lives in [`tests/class_tools_research_smoke.lua`](../tests/class_tools_research_smoke.lua) and is included by the main smoke suite. From the repository root, run `python tests/run_tests.py --addon-root .` in an environment that already has `lupa.lua51`; the runner requires actual Lua 5.1 and does not silently skip the full suite or install dependencies. Run the complete existing test suite as well as the new research tests before opening the PR. Mock results are reported separately from unperformed live-client acceptance. They do not certify combat secrecy, taint, native-client event access, or actual gameplay event order.
