@@ -1,8 +1,10 @@
--- Offline contract tests for the temporary Phase 1 / 1.1 logger. The real event router
--- is loaded below; secret tokens are tripwires, not a simulation of client taint.
+-- Offline contract tests explicitly load the temporary Phase 1 / 1.1 logger from
+-- the development tree. Production TOCs and slash commands never load or route it.
+-- The real event router is used; secret tokens do not simulate client taint.
 local h = ...
 local test, equal, truthy, same, copy = h.test, h.equal, h.truthy, h.same, h.copy
-local researchPath = h.root .. "/Research/ClassToolsRawCapture.lua"
+local researchPath = assert(h.researchRoot, "research tests require an explicit development root")
+    .. "/Research/ClassToolsRawCapture.lua"
 local commonEvents = {
     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED",
     "UNIT_SPELLCAST_INTERRUPTED", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_SENT",
@@ -77,6 +79,13 @@ local function configure(env, state)
     end
 end
 
+local function attachResearch(env, addon)
+    equal(addon.ClassToolsRawCapture, nil, "only this explicit test helper may attach research")
+    local chunk = assert(loadfile(researchPath))
+    setfenv(chunk, env); chunk("CarGOUI", addon)
+    return assert(addon.ClassToolsRawCapture, "research module is explicitly attached")
+end
+
 local function fixture(saved)
     local env = setmetatable({}, { __index = _G })
     local state = { frames = {}, errors = {}, messages = {}, clock = 100,
@@ -110,9 +119,9 @@ local function fixture(saved)
         NewTicker = function() error("Research never schedules tickers") end }
     local addon = { name = "CarGOUI", version = "1.0.0", db = env.CarGOUIDB }
     function addon:Print(message) state.messages[#state.messages + 1] = message end
-    for _, path in ipairs({ h.root .. "/Core/Events.lua", researchPath }) do
-        local chunk = assert(loadfile(path)); setfenv(chunk, env); chunk("CarGOUI", addon)
-    end
+    local events = assert(loadfile(h.root .. "/Core/Events.lua"))
+    setfenv(events, env); events("CarGOUI", addon)
+    local logger = attachResearch(env, addon)
     function state:fire(event, ...)
         for _, frame in ipairs(self.frames) do
             if frame.events[event] and frame.scripts.OnEvent then frame.scripts.OnEvent(frame, event, ...) end
@@ -121,7 +130,7 @@ local function fixture(saved)
     function state:cast(event, id, guid)
         self:fire(event or "UNIT_SPELLCAST_SUCCEEDED", "player", guid or "Cast-Research", id or 5143)
     end
-    return env, addon, state, assert(addon.ClassToolsRawCapture, "research module is attached")
+    return env, addon, state, logger
 end
 
 local function rows(logger)
@@ -720,41 +729,45 @@ test("CT research preserves existing SavedVariables and reload always starts OFF
     noErrors(state)
 end)
 
-test("CT research command routing works while Options stays lazy and DB unchanged", function()
+test("CT research explicit development commands keep Options lazy and DB unchanged", function()
     local env, addon, state = h.login()
     configure(env, state)
+    local logger = attachResearch(env, addon)
     local before = copy(addon.db)
     for _, mode in ipairs({ "arcane", "combustion", "altertime" }) do
-        env.SlashCmdList.CARGOUI("ctlog " .. mode .. " on")
-        equal(addon.ClassToolsRawCapture:GetStatus().mode, mode)
-        equal(addon.ClassToolsRawCapture:GetStatus().enabled, true)
+        logger:HandleCommand({ "ctlog", mode, "on" })
+        equal(logger:GetStatus().mode, mode)
+        equal(logger:GetStatus().enabled, true)
         equal(addon.optionsFrame, nil, "research does not instantiate an Options page")
     end
-    env.SlashCmdList.CARGOUI("ctlog status")
+    logger:HandleCommand({ "ctlog", "status" })
     state:fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-Dump", 342245)
     local framesBefore = #state.frames
-    env.SlashCmdList.CARGOUI("ctlog dump")
+    logger:HandleCommand({ "ctlog", "dump" })
     equal(#state.frames, framesBefore + 4, "explicit dump creates only its copy surface")
     local edit = state.frames[#state.frames]
-    equal(edit.kind, "EditBox"); equal(edit:GetText(), addon.ClassToolsRawCapture:Dump())
+    equal(edit.kind, "EditBox"); equal(edit:GetText(), logger:Dump())
     equal(edit.maxLetters, 0); equal(edit.maxBytes, 0, "full bounded timeline is copyable")
     truthy(edit:HasFocus()); truthy(edit.highlight, "dump text is selected for copying")
     equal(addon.optionsFrame, nil, "dump does not create formal Options")
     for index = framesBefore + 1, #state.frames do
         equal(state.frames[index]:GetScript("OnUpdate"), nil, "dump surface never polls")
     end
-    env.SlashCmdList.CARGOUI("ctlog dump")
+    logger:HandleCommand({ "ctlog", "dump" })
     equal(#state.frames, framesBefore + 4, "repeated dump reuses its UI")
-    env.SlashCmdList.CARGOUI("ctlog off")
-    equal(addon.ClassToolsRawCapture:GetStatus().enabled, false)
-    env.SlashCmdList.CARGOUI("ctlog clear")
-    equal(addon.ClassToolsRawCapture:GetStatus().count, 0)
+    logger:HandleCommand({ "ctlog", "off" })
+    equal(logger:GetStatus().enabled, false)
+    logger:HandleCommand({ "ctlog", "clear" })
+    equal(logger:GetStatus().count, 0)
     equal(edit:GetText(), "", "clear also removes copy-surface text")
     equal(edit:HasFocus(), false); equal(edit:GetParent():GetParent():IsShown(), false)
     same(addon.db, before)
-    local _, reloaded = h.login(copy(addon.db))
-    equal(reloaded.ClassToolsRawCapture:GetStatus().enabled, false)
-    equal(reloaded.ClassToolsRawCapture:GetStatus().count, 0)
+    local nextEnv, reloaded, nextState = h.login(copy(addon.db))
+    equal(reloaded.ClassToolsRawCapture, nil, "production reload never reattaches research")
+    configure(nextEnv, nextState)
+    local nextLogger = attachResearch(nextEnv, reloaded)
+    equal(nextLogger:GetStatus().enabled, false)
+    equal(nextLogger:GetStatus().count, 0)
     noErrors(state)
 end)
 
@@ -769,7 +782,7 @@ test("CT research start switch stop preserves actual Proc and Mobility native ru
     env.issecretvalue = function(value) return oldSecret(value) or newSecret(value) end
     local db, listeners, reads = copy(addon.db), addon:GetEventDiagnostics(), copy(state.spellReads)
     local slots, bindings = #state.auraSlots, #state.bindings
-    local logger = addon.ClassToolsRawCapture
+    local logger = attachResearch(env, addon)
     for _, mode in ipairs({ "arcane", "combustion", "altertime" }) do
         truthy(logger:Start(mode))
         state:fire("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-Regression", 133)

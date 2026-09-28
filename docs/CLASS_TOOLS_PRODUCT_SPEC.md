@@ -1,6 +1,8 @@
-# Class Tools Product Specification — 1.0.1
+# Class Tools Product Specification — paused research
 
 ## Status and scope
+
+**Production development is paused and is outside CarGOUI 1.0.1.** Arcane Missiles Chain Check, Combustion Counter and Alter Time Recovery Feedback must not block the [1.0.1 roadmap](ROADMAP_1.0.1.md). The product semantics below are retained for future development, without a committed release target. Phase 1 / 1.1 implementation, findings and tests remain available; the production TOC and normal `/cui` commands no longer load or expose the research logger.
 
 This document records the agreed product semantics for **Class Tools / 职业辅助**. It defines the intended product, not a claim that the product is implemented in Research Phase 1. Phase 1 only adds a temporary, opt-in raw capture logger and its research documentation. See [Class Tools Research Phase 1](CLASS_TOOLS_RESEARCH_PHASE1.md).
 
@@ -42,7 +44,7 @@ Turning any master or group gate OFF must never overwrite, clear, reset, or norm
 
 These are product semantics only. This document does not prescribe a database layout, add a formal Class Tools schema, or authorize a schema migration. The temporary capture logger has no relationship to these future saved preferences.
 
-## Mage scope for 1.0.1
+## Retained Mage product direction (no release target)
 
 | Section | Tool | Product intent |
 | --- | --- | --- |

@@ -40,7 +40,7 @@ Focused client checks:
 
 ## License
 
-The owner selected **GPL-3.0-only for project-owned code**, with **All Rights Reserved for branding artwork**. The full GPLv3 document is in root LICENSE, scope/attribution is in NOTICE.md, and Media/Branding/LICENSE.txt defines the separate artwork terms. Embedded libraries retain their original licenses and notices; Blizzard client fonts/textures are referenced rather than redistributed. No unspecified later GPL version is granted by the project's license notice.
+The owner selected **GPL-3.0-only for project-owned code**, with **All Rights Reserved for branding artwork**. For this historical release, the full GPLv3 document is in [v1.0.0/LICENSE](https://github.com/TomXingCan/CarGOUI/blob/v1.0.0/LICENSE), scope/attribution is in [v1.0.0/NOTICE.md](https://github.com/TomXingCan/CarGOUI/blob/v1.0.0/NOTICE.md), and its Media/Branding/LICENSE.txt defines the separate artwork terms. The later ARR source cutover does not change v1.0.0 or revoke any rights granted with it; current source terms are recorded separately in [NOTICE.md](../NOTICE.md). Embedded libraries retain their original licenses and notices; Blizzard client fonts/textures are referenced rather than redistributed. No unspecified later GPL version is granted by the project's license notice.
 
 ## Publication status and prepared text
 

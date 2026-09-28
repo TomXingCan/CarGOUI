@@ -2,6 +2,10 @@
 
 This release keeps **CarGOUI + CarGOUI_Data** as the only installed addon directories. Native Load-on-Demand applies to the entire Data addon. Every Lua file listed in its TOC loads together, including the factories for all shipped classes. A class subdirectory is not an independent load boundary. This is the accepted two-directory tradeoff, not strict per-class code unloading.
 
+## Research boundary for the 1.0.1 baseline
+
+`Research/ClassToolsRawCapture.lua` is retained as development source but is not listed in `CarGOUI.toc`. Normal login does not attach `addon.ClassToolsRawCapture`, subscribe research callbacks, or register `/cui ctlog`; normal help contains no research command. Research tests load the module explicitly from the repository. No research SavedVariables, configuration migration, or additional installed addon is introduced. Proc, Mobility and Free move keep their existing loading paths.
+
 ## Four distinct layers
 
 | Layer | Actual behavior |
