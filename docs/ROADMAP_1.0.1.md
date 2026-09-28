@@ -7,7 +7,7 @@ The 1.0.1 development baseline starts from `main` at
 production and records the licensing cutover. It does not implement either
 feature below. Subsequent font-system development implements #6; see
 [the font architecture and compatibility record](FONT_SYSTEM.md). Proc
-Appearance v2 remains separate work and is not implemented by the font change.
+Appearance v2 is implemented separately from base `f40b854e04ffe13914e1669eba4f37bbfb23068c`; see [architecture and acceptance](PROC_APPEARANCE_V2.md). Real-client acceptance and release hardening remain outstanding.
 
 | In scope | Planned work |
 | --- | --- |
@@ -15,9 +15,10 @@ Appearance v2 remains separate work and is not implemented by the font change.
 | [#7: Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7) | A Blizzard FileDataID asset catalog, cross-class Blizzard Proc artwork, independent per-region visual customization, and animation presets. |
 
 Proc Appearance v2 changes presentation only. Existing verified native Proc
-trigger semantics remain authoritative. The catalog will ship metadata referring
+trigger semantics remain authoritative. The catalog ships metadata referring
 to artwork in the WoW client, not copies of Blizzard texture files. Existing
-1.0.0 visuals and settings must remain the default after upgrade.
+1.0.0 visuals and settings remain the Native default after upgrade. Schema 5,
+transfer format 1 and both production TOC versions remain unchanged.
 
 ## Paused and excluded
 

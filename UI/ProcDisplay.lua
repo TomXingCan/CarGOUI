@@ -8,7 +8,7 @@ end
 -- Public stock layout: Blizzard_FrameXML/SpellActivationOverlay.lua, build
 -- 69933. Anchor to the stock root's edges, not a fixed screen-center offset.
 -- Only geometry is read; no native child, visibility, alpha or aura is read.
-function addon:AnchorProcReminder(frame, entry, style, guideOnly)
+function addon:AnchorProcReminder(frame, entry, style, guideOnly, preview)
     local root = SpellActivationOverlayFrame
     local location = entry.nativeLocation or entry.location
     if not root or not location or not root.GetEffectiveScale or not UIParent.GetEffectiveScale then
@@ -18,7 +18,7 @@ function addon:AnchorProcReminder(frame, entry, style, guideOnly)
     if not Number(nativeScale) or not Number(uiScale) or nativeScale <= 0 or uiScale <= 0 then
         return false, self:Text("The stock Proc layout scale is not available as public geometry.")
     end
-    local regionState = self.GetProcRegionOverlayState and self:GetProcRegionOverlayState(entry)
+    local regionState = not preview and self.GetProcRegionOverlayState and self:GetProcRegionOverlayState(entry)
     local scale = regionState and regionState.scale or entry.nativeScale or 1
     if not Number(scale) or scale <= 0 or scale > 10 then
         return false, self:Text("The native Proc region scale is unavailable or unsupported.")

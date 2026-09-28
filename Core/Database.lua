@@ -29,6 +29,12 @@ local function RegionColorSetting(value)
     return value == false or addon:IsValidProcRegionColor(value), addon:Text("Choose finite RGB values from 0 to 1; opacity is not configurable.")
 end
 
+local function RegionAppearanceSetting(value)
+    if issecretvalue and issecretvalue(value) then return false, addon:Text("Artwork settings must contain public values.") end
+    if value == false then return true end -- Reset only this region's artwork.
+    return addon:ValidateProcAppearance(value, true)
+end
+
 local function NumberSetting(range, message)
     return function(value) return addon:IsNumberInRange(value, range), message end
 end
@@ -324,6 +330,7 @@ function addon:GetProcConfig(specID)
             -- into them, not only after the first render of each region.
             if region.position ~= nil then region.position = Position(region.position) end
             region.color = ColorCopy(region.color)
+            region.appearance = self:CopyProcAppearance(region.appearance)
             config.regions[id] = region
         end
     end
@@ -438,6 +445,25 @@ function addon:SetProcRegionColor(entry, color)
     return self:UpdateSettings({ proc = { regions = { [entry.id] = { color = color or false } } } })
 end
 
+function addon:GetProcRegionAppearance(entry)
+    if not self:GetCurrentProcRegion(entry) then return self:NewProcAppearance() end
+    local config = self:GetProcConfig()
+    local region = config and config.regions[entry.id]
+    return self:NormalizeProcAppearance(type(region) == "table" and region.appearance or nil)
+end
+
+function addon:SetProcRegionAppearance(entry, patch)
+    if not self:GetCurrentProcRegion(entry) then return false, addon:Text("Choose a defined Proc region for your current specialization.") end
+    local valid, message = self:ValidateProcAppearance(patch, true)
+    if not valid then return false, message end
+    return self:UpdateSettings({ proc = { regions = { [entry.id] = { appearance = patch } } } })
+end
+
+function addon:ResetProcRegionAppearance(entry)
+    if not self:GetCurrentProcRegion(entry) then return false, addon:Text("Choose a defined Proc region for your current specialization.") end
+    return self:UpdateSettings({ proc = { regions = { [entry.id] = { appearance = false } } } })
+end
+
 function addon:UpdateReminderStyle(key, patch)
     if not self:GetReminderStyleKey(key) then return false, addon:Text("Edit the current class / specialization Appearance.") end
     return self:UpdateSettings({ styles = { [key] = patch } })
@@ -509,7 +535,8 @@ function addon:UpdateSettings(patch)
     for _, entry in ipairs(self:GetPreviewEntries()) do
         entries[entry.id] = entry
         schema.reminders[entry.id] = { position = positionSchema }
-        if entry.kind == "proc" then schema.proc.regions[entry.id] = { position = positionSchema, color = RegionColorSetting } end
+        if entry.kind == "proc" then schema.proc.regions[entry.id] = {
+            position = positionSchema, color = RegionColorSetting, appearance = RegionAppearanceSetting } end
     end
     for _, kind in ipairs({ "mobility", "proc" }) do
         local context = self:GetAppearanceContext(kind)
@@ -526,7 +553,7 @@ function addon:UpdateSettings(patch)
         return false, addon:Text("Proc settings are unavailable until the current specialization module is ready.")
     end
     local changedPositions = PositionChanges(patch, entries)
-    local changedStyles, changedColors, stylesOnly = {}, {}, true
+    local changedStyles, changedColors, changedAppearances, stylesOnly = {}, {}, {}, true
     local function RecordStyle(kind)
         local context = self:GetAppearanceContext(kind)
         if context then changedStyles[context.key] = true end
@@ -541,6 +568,16 @@ function addon:UpdateSettings(patch)
     end
     if patch.proc then
         local config = self:GetProcConfig()
+        -- Compute detached artwork objects before the generic merge. A reset
+        -- or optional-field sentinel must never become a saved boolean.
+        local appearances = {}
+        for id, record in pairs(patch.proc.regions or {}) do
+            if record.appearance ~= nil then
+                local previous = config.regions[id]
+                if record.appearance == false then appearances[id] = false
+                else appearances[id] = self:MergeProcAppearance(type(previous) == "table" and previous.appearance or nil, record.appearance) end
+            end
+        end
         MergePatch(config, patch.proc)
         for key in pairs(patch.proc) do if key ~= "style" and key ~= "regions" then stylesOnly = false end end
         for id, record in pairs(patch.proc.regions or {}) do
@@ -552,6 +589,10 @@ function addon:UpdateSettings(patch)
                 if draft and draft.id == id and draft.class == class and draft.specID == entries[id].specID then
                     self.procRegionColorPreview = nil
                 end
+            end
+            if record.appearance ~= nil then
+                config.regions[id].appearance = appearances[id] or nil
+                changedAppearances[id] = entries[id]
             end
         end
         if patch.proc.style then RecordStyle("proc") end
@@ -573,6 +614,9 @@ function addon:UpdateSettings(patch)
     elseif stylesOnly then
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
         if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end
+        if self.RefreshProcAppearance then
+            for _, entry in pairs(changedAppearances) do self:RefreshProcAppearance(entry) end
+        end
     else self:ApplySettings() end
     if patch.options and patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
     if stylesOnly and next(changedColors) and not next(changedStyles) then

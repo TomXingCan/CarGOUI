@@ -429,3 +429,8 @@ For each newly admitted family available to the test character:
 Unconfirmed/excluded candidates above do not need the user to validate a guessed
 implementation. Their absence does not invalidate the admitted finite timers;
 the absence and its reason remain explicit in this coverage ledger.
+
+
+## Presentation catalog boundary
+
+Proc Appearance v2 reuses the audited artwork sources represented here in a separate metadata-only asset catalog. Selecting a cross-class image does not activate that class, add a trigger, or imply a timer for its source ability. This document remains the trigger/timer coverage authority. See [presentation architecture and acceptance](PROC_APPEARANCE_V2.md).

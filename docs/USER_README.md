@@ -22,13 +22,15 @@ Saved font choices stay intact. A missing SharedMedia choice keeps its name thro
 - Mobility shares settings within each class. Free move shares appearance but has separate XY. Proc typography is class+spec; regions have independent XY and optional RGB. Mobility/Free move remain fixed class color.
 - Inputs save on Enter; sliders/menus update immediately. Proc colors preview until Okay; Cancel/close/context changes discard drafts.
 - Blank Header/Body/sidebar/static areas drag Options; controls retain normal input. Reminders are not draggable.
-- Test Mode shows marked samples. Close/Stop ends TEST; real timers keep working.
+- Proc Region Editor selects one Proc and stable region: Native, Custom Blizzard Asset, or Timer Only. Native is the upgrade default. Custom adds a paged artwork gallery, independent artwork color/alpha/scale and animation presets; Advanced expands extra transforms. Timer color and timer XY remain separate.
+- Reset artwork to Blizzard default resets only that region's artwork settings. The Timer typography button opens the existing editor shared by the current specialization.
+- Test Mode shows marked samples, including the selected Proc artwork. Timer Only shows only the timer sample. Close/Stop ends TEST; real timers keep working. Live replacement fails open to Blizzard artwork if safe ownership or rendering is unavailable.
 
 ## Import / Export
 
 Choose Current class or All saved settings and Export; select text and Ctrl+C. The addon does not claim direct clipboard access. Paste and Import to validate/review; Confirm commits, Cancel preserves settings. Restore backup reviews the last pre-import snapshot. Closing/entering combat cancels pending drafts and confirmation.
 
-Only user settings transfer. Class/spec identities are preserved: Mage import on Warrior saves Mage data without converting Warrior appearance. All-settings includes window placement/animation and validated minimap visibility/angle. Current-class excludes shell settings. RC1/RC2 strings without minimap fields preserve icon preferences; import/restore/reset keeps the original button connected to active saved data. Automatic language and runtime font fallback do not add locale data to the transfer format.
+Only user settings transfer. Class/spec identities are preserved: Mage import on Warrior saves Mage data without converting Warrior appearance. All-settings includes window placement/animation and validated minimap visibility/angle. Current-class excludes shell settings. RC1/RC2 strings without minimap fields preserve icon preferences; import/restore/reset keeps the original button connected to active saved data. Automatic language and runtime font fallback do not add locale data to the transfer format. Proc artwork settings use the same format 1 and schema 5 with strict catalog keys and bounded values; old imported regions without artwork settings become Native. No texture path or arbitrary FileDataID can be imported.
 
 ## Features and limits
 

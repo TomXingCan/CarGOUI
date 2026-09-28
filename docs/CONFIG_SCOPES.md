@@ -105,3 +105,8 @@ Changing a timer Aura/graphic owner does not rename region IDs. Existing Clearca
 ## Additive XY isolation (alpha.16, integrated from alpha.15-xyfix.1)
 
 `mobility.freeMovePosition` is now independent of `mobility.position`. It retains the same class (not specialization) scope. Free move still shares the class font, scale and enable behavior. This intentionally narrows the older phrase "all Mobility positions share one group" to ordinary mobility reminders only. Missing independent fields migrate once from that class's old offset; old coordinates are not scaled or deleted. Current-spec Proc positions are detached before region patch writes. See [implementation, limits and acceptance](POSITION_ISOLATION_XYFIX1.md).
+
+
+## Additive Proc Appearance v2
+
+Schema remains 5. `classes[classToken].proc[specID].regions[stableRegionID].appearance` independently owns artwork mode, audited asset key, artwork RGB, desaturation, opacity, transforms, artwork offset and animation. Missing appearance resolves to Native without populating old region records or rewriting timer position/color/style. `ResetProcRegionAppearance` removes only that optional record. Timer typography remains specialization-wide. See [field bounds and acceptance](PROC_APPEARANCE_V2.md).

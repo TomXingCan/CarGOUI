@@ -89,3 +89,8 @@ outside regions, Overpowered Missiles top, the Fire region sizes/locations,
 and Frost regions; then change the shared font size and reload. Their colors
 and positions should stay independent. Verify that canceling a color edit
 leaves no saved change and that Mobility / Free move remain class-colored.
+
+
+## Proc Appearance v2 ownership
+
+The existing `region.color` remains timer RGB. Artwork uses a separate optional `region.appearance.artColor`; omission selects public Blizzard SHOW RGB, normalized from 0–255 to 0–1. Live Custom with no reliable public RGB fails open to Native. Artwork alpha is independent of timer color and multiplied by the native overlay-opacity CVar. No native texture color is read or changed. See [the appearance architecture](PROC_APPEARANCE_V2.md).

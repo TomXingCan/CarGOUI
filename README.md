@@ -6,7 +6,7 @@ Version 1.0.0 adds automatic client-language UI and public spell-name localizati
 
 ## 1.0.1 development baseline
 
-The current development target is **1.0.1**: [#6 font selector fixes and LibSharedMedia font support](https://github.com/TomXingCan/CarGOUI/issues/6), plus [#7 Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7). Font-resource support is implemented on the development branch; Proc Appearance v2 remains planned. The production version stays **1.0.0** until release hardening. See the [1.0.1 roadmap](docs/ROADMAP_1.0.1.md).
+The current development target is **1.0.1**: [#6 font selector fixes and LibSharedMedia font support](https://github.com/TomXingCan/CarGOUI/issues/6), plus [#7 Proc Appearance v2](https://github.com/TomXingCan/CarGOUI/issues/7). Font-resource support and Proc Appearance v2 are implemented on the development branch; Proc Appearance still requires real-client acceptance. The production version stays **1.0.0** until release hardening. See the [1.0.1 roadmap](docs/ROADMAP_1.0.1.md).
 
 Production Class Tools development is paused and must not block 1.0.1. Its logger, Phase 1 / 1.1 findings and research tests remain in the repository, but normal login does not load `addon.ClassToolsRawCapture`, and `/cui ctlog` is not a player command or help entry. Research tests explicitly load the retained module. Arcane Missiles Chain Check, Combustion Counter and Alter Time Recovery Feedback are outside 1.0.1.
 
@@ -36,10 +36,11 @@ Existing 1.0.0 Blizzard paths remain valid. New shared selections save a logical
 | Mobility enabled, font/size/outline/shadow/Scale, anchor, XY and preferences | Current classToken; all Mage specs and Blink/Shimmer share one Mage scope |
 | Free move anchor and XY | Separate `mobility.freeMovePosition` within that class; independent of ordinary Mobility XY |
 | Proc font/size/outline/shadow/text Scale and enabled | Current classToken + specID; shared by all regions in that spec |
-| Proc region anchor, XY and optional RGB | Independent stable region ID within class/spec; absent RGB uses dynamic class color |
+| Proc timer anchor, XY and optional RGB | Independent stable region ID within class/spec; absent timer RGB uses dynamic class color |
+| Proc artwork mode, asset, RGB, transform and animation | Separate optional `region.appearance`; absent settings preserve Blizzard Native |
 | Options placement, branding animation, minimap visibility/angle | Independent shell records, separate from class settings and from one another |
 
-No class/spec/Profile/manual-theme selector. Appearance shows the automatically selected configuration context. The Proc region menu selects position/Preview/color targets, never separate regional fonts. Mobility and Free move always use Blizzard's player class color. Proc defaults to class color and permits per-region RGB, without opacity editing. Options themes do not alter reminder style or native state.
+No class/spec/Profile/manual-theme selector. Appearance shows the automatically selected configuration context. The Proc Region Editor selects one Proc and one stable region in the current specialization. Timer typography remains shared by that specialization; the existing Appearance editor controls it. Timer RGB and artwork RGB are independent. Mobility and Free move always use Blizzard's player class color. Proc timers default to class color; only custom artwork has its own opacity control. Options themes do not alter reminder style or native state.
 
 Options retains a left category list and right controls. Header, Body, sidebar blank areas, borders and static explanations drag the whole window; interactive controls keep their input. No modifier, capture overlay or Unlock Mode. Release, close and Esc end movement; placement persists and stays screen-constrained. [RC2's drag record](docs/DRAG_RC2.md) explains source ownership and native current-pointer pickup.
 
@@ -69,7 +70,9 @@ Each family has a stable preset slot: the first at the saved class anchor, other
 
 ## Native Proc and Free move
 
-Live Proc shows only digits at the visual midpoint of its own Blizzard graphic region, plus saved region XY. Audited geometry, native graphic-root layout/scale and SHOW-event scale determine placement. CarGOUI neither reads restricted graphic children nor replaces Blizzard art. Saved offsets remain; old fixed Preview positions do not substitute for real layout.
+Native mode preserves Blizzard artwork and places timer digits at its audited visual midpoint plus the existing timer XY. The optional Proc Appearance v2 presentation layer adds Custom Blizzard Asset and Timer Only modes per stable region. Custom uses addon-owned frames/textures and a metadata-only catalog of audited client FileDataIDs. It can suppress a precisely matched native graphic only by owning a reversible texture-alpha change. If matching, public color, geometry or rendering is unavailable, it leaves/restores Blizzard artwork and reports why. Timer triggers and native Aura duration bindings are unchanged.
+
+The Region Editor shows only relevant controls for the selected mode. Custom Basic contains artwork selection, independent artwork RGB, alpha, overall scale and animation presets. Advanced expands desaturation, width/height, rotation, mirrors, independent artwork XY and animation speed/intensity/direction. Its expansion is session-only. The gallery uses paged client-texture thumbnails and source-class filtering; a cross-class image grants no trigger or timer support. Reset artwork changes only `region.appearance`. See [architecture and client acceptance](docs/PROC_APPEARANCE_V2.md).
 
 Mage coverage includes Clearcasting, Arcane Soul, Overpowered Missiles; Hot Streak, Heating Up, **Pyroclasm's hard-cast Pyroblast/Flamestrike buff**, Hyperthermia; and Fingers of Frost sides plus Brain Freeze. Historical Fury of the Sun King is actual-SHOW-only, not a currently verified selectable talent Preview. [Mage coverage](docs/MAGE_PROC_COVERAGE.md) separates graphic IDs, timer Auras, textures and regions. [Clearcasting's repair](docs/CLEARCASTING_ALPHA13.md) preserves the later source-supported finite-Aura association.
 
@@ -134,7 +137,7 @@ See [the detailed Proc coverage record](docs/PROC_COVERAGE.md).
 
 ## Test Mode and themes
 
-External TEST uses clearly marked fixed `8.0` samples; Free move is text-only. Proc choices include only audited regions for current class/spec/talents, even without an active effect, independently of Mobility. Samples never enter native Aura/live state. Closing, Stop test, combat or spec change clears temporary samples; live resynchronizes. Reminders/guides cannot be dragged.
+External TEST uses clearly marked fixed `8.0` samples; Free move is text-only. Proc choices include only audited regions for current class/spec/talents, even without an active effect, independently of Mobility. Samples never enter native Aura/live state. Proc Native previews render a simulated mapped image, Custom previews render the selected catalog asset, and Timer Only previews retain just the timer sample. Their artwork objects are independent of live artwork and never own native suppression. Closing, Stop test, combat or spec change clears temporary samples; live resynchronizes. Reminders/guides cannot be dragged.
 
 Header expresses faction only: Alliance blue, Horde red, neutral fallback; same-faction spec changes retain it and original full-color branding. Body expresses class/spec over main/sidebar/footer surfaces, with complete 13-class/40-spec mappings and distinct palettes/static geometry. Mage Arcane purple runes, Fire red-brown/amber flames and Frost blue/cyan crystals retain alpha.9 definitions. No Themes page or manual theme control.
 
@@ -154,7 +157,7 @@ Schema 5 uses `classes[classToken].mobility` and `classes[classToken].proc[specI
 
 Current class is the default, including its already-saved Proc specs without initializing others. All saved settings includes saved classes and shell placement/animation/minimap preferences. Exports contain only whitelisted user data, never identity/theme/skills/runtime/migration/import backups. Select text and Ctrl+C; no unsupported direct-clipboard claim.
 
-Import validates before review, then Confirm commits atomically. Source class/spec remains unchanged; omitted classes/specs/regions survive. An included region without RGB clears its old override. A single pre-import snapshot can be restored with review/confirmation. Close/combat cancels drafts/transactions; unlock never auto-submits. Existing pure-coordinate/color changes stay targeted. Minimap settings use the stable library-bound table after import/restore/reset; older RC1/RC2 strings without minimap fields preserve current preferences. Locale/font rendering fallback does not add translated data or locale settings to format 1. See [transfer specification](docs/SETTINGS_TRANSFER_FORMAT.md).
+Import validates before review, then Confirm commits atomically. Source class/spec remains unchanged; omitted classes/specs/regions survive. An included region without timer RGB clears its old timer-color override. `region.appearance` is an additive strict whitelist; an included old region without it imports as Native. Schema 5 and transfer format 1 remain unchanged. New appearance-bearing strings require a version that understands those fields; older strict importers can reject them safely. A single pre-import snapshot can be restored with review/confirmation. Close/combat cancels drafts/transactions; unlock never auto-submits. Existing pure-coordinate/color changes stay targeted. Minimap settings use the stable library-bound table after import/restore/reset; older RC1/RC2 strings without minimap fields preserve current preferences. Locale/font rendering fallback does not add translated data or locale settings to format 1. See [transfer specification](docs/SETTINGS_TRANSFER_FORMAT.md).
 
 ## Development and verification
 

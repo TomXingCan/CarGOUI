@@ -100,6 +100,7 @@ function addon:GetProcRegionOverlayState(entry)
 end
 
 function addon:StopProc()
+    if self.StopProcArtwork then self:StopProcArtwork() end
     self.procTracking = false
     for _, event in ipairs(events) do self:UnregisterEvent(event, OnProcEvent) end
     for _, frame in pairs(self.reminderFrames and self.reminderFrames.nativeAura or {}) do
@@ -155,6 +156,7 @@ function addon:RenderProcState(changedDefinitions)
             if frame.reminderEntry.kind == "proc" and not keep[id] then self:DisableAuraReminder(frame) end
         end
     end
+    if self.RenderProcArtwork then self:RenderProcArtwork() end
 end
 
 function addon:ConfigureProc()
@@ -172,17 +174,19 @@ function addon:ConfigureProc()
         self.procOverlayStates = {}
     end
     if self.procDefinitions ~= definitions then
+        if self.StopProcArtwork then self:StopProcArtwork() end
         local compiled, conflict = self:CompileProcDefinitions(definitions, class, spec)
         if not compiled then self:StopProc(); self.procStatusReason = conflict; return end
         self.procByOverlay, self.procByRegion = compiled.byOverlay, compiled.byRegion
     end
     self.procClass, self.procSpec, self.procDefinitions = class, spec, definitions
     self.procTracking, self.procStatusReason = true, "Native aura tracking; Lua does not read aura presence, stacks or time."
+    if self.InstallProcArtworkHooks then self:InstallProcArtworkHooks() end
     for _, event in ipairs(events) do self:RegisterEvent(event, OnProcEvent) end
     self:RenderProcState()
 end
 
-OnProcEvent = function(self, event, id, texture, locationType, scale)
+OnProcEvent = function(self, event, id, texture, locationType, scale, r, g, b)
     if not self.procTracking then return end
     local changed, seen = {}, {}
     local function Changed(definition)
@@ -218,7 +222,9 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
                     -- Stock ignores SHOW with its display CVar off. Merely
                     -- enabling it later cannot replay this graphical state.
                     state[key] = { shown = CVar("displaySpellActivationOverlays", true),
-                        scale = scale, sequence = self.procEventSequence }
+                        scale = scale, sequence = self.procEventSequence,
+                        ownerID = id, textureID = texture, sourceKey = source.stateKey,
+                        color = self.ProcPublicColor and self:ProcPublicColor(r, g, b) }
                 end
                 Changed(definition)
             end
@@ -251,6 +257,7 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Native containers resynchronize the real aura provider. No cached
         -- combat timers or cast/stack counts are replayed into the new world.
+        if self.StopProcArtwork then self:StopProcArtwork() end
         self.procOverlayStates = {}
         Trace(self, event, nil, nil, nil, nil, "native aura resync; cleared public graphical gate history")
     end
@@ -300,6 +307,9 @@ function addon:GetProcDiagnostics()
         for _, entry in ipairs(definition.regions) do
             details[#details + 1] = "  " .. entry.id .. ": "
                 .. (self.procRegionDiagnostics and self.procRegionDiagnostics[entry.id] or "not initialized")
+            if self.GetProcArtworkDiagnostic then
+                details[#details + 1] = "    presentation: " .. self:GetProcArtworkDiagnostic(entry)
+            end
         end
     end
     details[#details + 1] = "Recent public native graphic events (bounded 16; no aura payloads):"

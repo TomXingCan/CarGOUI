@@ -91,6 +91,15 @@ assert "for spec, proc in pairs(record.proc)" in snapshot
 assert "target.proc[tostring(spec)]" in snapshot
 assert 'scope == "all"' in snapshot
 print("PASS Schema identities, symbolic fonts, finite RGB and saved-only scope snapshots are explicit")
+assert 'Keys("position color appearance")' in validator
+assert 'ValidateProcAppearance(value)' in backend and 'CopyProcAppearance(value)' in backend
+assert 'mode assetKey artColor desaturation alpha scale width height rotation mirrorX mirrorY offset animation' in backend
+assert 'for id in pairs(appearances) do self:RefreshProcAppearance({ id = id }) end' in backend
+appearance = code(read("Core/ProcAppearance.lua"))
+assert 'GetProcAsset(item)' in appearance and 'procAppearanceEnums' in appearance
+assert 'value == value' in appearance and 'getmetatable(value) == nil' in appearance
+assert 'schemaVersion = 5' in code(read("Config/Defaults.lua"))
+print("PASS Additive appearance transfer retains schema 5/format 1 and rejects unlisted resources and unbounded presentation settings")
 
 context = section(backend, "local function Context(self)", "local function MergeCandidate(")
 assert "InCombatLockdown()" in context and "panel:IsShown()" in context

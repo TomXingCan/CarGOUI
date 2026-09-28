@@ -1,7 +1,9 @@
 local _, addon = ...
 
-local limits = { inputBytes = 196608, decodedBytes = 131072, depth = 12,
-    tokens = 20000, entries = 2048 }
+-- Bounded for 256 complete region appearance records plus all class styles.
+-- This additive payload keeps formatVersion 1 and schemaVersion 5 unchanged.
+local limits = { inputBytes = 786432, decodedBytes = 524288, depth = 12,
+    tokens = 65536, entries = 16384 }
 addon.settingsTransferLimits = limits
 local pending
 local function Fail(message) error(message, 0) end
@@ -204,6 +206,17 @@ local function Style(self, value, path, kinds, warnings)
         scale = Number(value.scale, .5, 3, path .. ".scale"),
         shadow = { enabled = Boolean(value.shadow.enabled, path .. ".shadow.enabled") } }
 end
+local function Appearance(self, value, path, kinds)
+    Map(value, Keys("mode assetKey artColor desaturation alpha scale width height rotation mirrorX mirrorY offset animation"), path, kinds)
+    if value.artColor ~= nil then Map(value.artColor, Keys("r g b"), Path(path, "artColor"), kinds) end
+    if value.offset ~= nil then Map(value.offset, Keys("x y"), Path(path, "offset"), kinds) end
+    if value.animation ~= nil then
+        Map(value.animation, Keys("entrance active exit speed intensity direction"), Path(path, "animation"), kinds)
+    end
+    local valid, message = self:ValidateProcAppearance(value)
+    if not valid then Fail(path .. ": " .. message) end
+    return self:CopyProcAppearance(value)
+end
 local function ValidateEnvelope(self, value, kinds)
     Map(value, Keys("formatVersion schemaVersion addonVersion project scope classes options"), "", kinds)
     if value.formatVersion ~= 1 or value.schemaVersion ~= 5 then Fail(addon:Text("Unsupported settings format or schema version.")) end
@@ -246,13 +259,14 @@ local function ValidateEnvelope(self, value, kinds)
                     totalRegions = totalRegions + 1
                     if totalRegions > 256 then Fail(addon:Text("Too many Proc regions.")) end
                     local rp = pp .. "/regions/" .. id
-                    Map(region, Keys("position color"), rp, kinds)
+                    Map(region, Keys("position color appearance"), rp, kinds)
                     local r = { position = Position(region.position, rp .. "/position", kinds) }
                     if region.color ~= nil then
                         Map(region.color, Keys("r g b"), rp .. "/color", kinds)
                         r.color = { r = Number(region.color.r, 0, 1, rp .. ".color.r"),
                             g = Number(region.color.g, 0, 1, rp .. ".color.g"), b = Number(region.color.b, 0, 1, rp .. ".color.b") }
                     end
+                    if region.appearance ~= nil then r.appearance = Appearance(self, region.appearance, rp .. "/appearance", kinds) end
                     out.regions[id] = r
                 end
             end
@@ -329,6 +343,7 @@ local function Snapshot(self, scope)
                             if not self:IsValidProcRegionColor(region.color) then Fail(addon:Text("Malformed saved Proc color.")) end
                             r.color = { r = region.color.r, g = region.color.g, b = region.color.b }
                         end
+                        if region.appearance ~= nil then r.appearance = Appearance(self, region.appearance, "/saved/appearance") end
                         out.regions[id] = r
                     end
                 end
@@ -446,6 +461,7 @@ local function Summary(incoming, before, context, warnings, restore)
         restore and addon:Text("This restores the complete backup; settings added after that backup are removed.")
             or addon:Text("Only included scopes are replaced. Other classes, specializations and regions are unchanged."),
         addon:Text("Included regions without RGB use the current class color, clearing any old override."),
+        addon:Text("Included regions without artwork settings use Blizzard native artwork, clearing any old artwork override."),
         addon:Text("Mobility and Free move offsets remain independent.") }
     for _, class in ipairs(names) do
         local record = incoming.classes[class]
@@ -547,13 +563,14 @@ local function ApplyTransferredSettings(self, before, after, context, wasPreview
     local changes = { proc = {} }
     changes.mobility = not Equal(oldMobility.position, newMobility.position)
     changes.freeMove = not Equal(oldMobility.freeMovePosition, newMobility.freeMovePosition)
-    local colors, ids = {}, {}
+    local colors, appearances, ids = {}, {}, {}
     for id in pairs(oldProc.regions or {}) do ids[id] = true end
     for id in pairs(newProc.regions or {}) do ids[id] = true end
     for id in pairs(ids) do
         local oldRegion, newRegion = (oldProc.regions or {})[id] or {}, (newProc.regions or {})[id] or {}
         if not Equal(oldRegion.position, newRegion.position) then changes.proc[id] = true end
         if not Equal(oldRegion.color, newRegion.color) then colors[id] = true end
+        if not Equal(oldRegion.appearance, newRegion.appearance) then appearances[id] = true end
     end
     if not Equal(oldClass, newClass) then
         -- Existing native bindings hold state/providers, not these getter caches.
@@ -582,6 +599,11 @@ local function ApplyTransferredSettings(self, before, after, context, wasPreview
                 end
             end
         end
+    end
+    if self.RefreshProcAppearance then
+        -- IDs already belong to the current class/spec snapshot. Refresh only
+        -- changed regions without creating a catalog for inactive scopes.
+        for id in pairs(appearances) do self:RefreshProcAppearance({ id = id }) end
     end
     if not Equal(before.options.position, after.options.position) and self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
     if before.options.animatedTitle ~= after.options.animatedTitle and self.RefreshTitleAnimation then self:RefreshTitleAnimation() end

@@ -654,6 +654,7 @@ local function setup(saved, loggedIn, client)
     function object:GetTexture() return self.texture end
     function object:SetBlendMode(value) self.blendMode = value end
     function object:SetRotation(value) self.rotation = value end
+    function object:SetDesaturation(value) self.desaturation = value end
     function object:SetGradient(orientation, first, last)
         equal(orientation, "HORIZONTAL", "Options gradient is native and static")
         self.gradient = { orientation = orientation, first = { first:GetRGBA() }, last = { last:GetRGBA() } }
@@ -802,6 +803,7 @@ local function setup(saved, loggedIn, client)
             function animation:SetScale(x, y) self.scale = { x, y } end
             function animation:SetFromScale(x, y) self.fromScale = { x, y } end
             function animation:SetToScale(x, y) self.toScale = { x, y } end
+            function animation:SetDegrees(value) self.degrees = value end
             self.animations[#self.animations + 1] = animation
             return animation
         end
@@ -6336,6 +6338,9 @@ test("all new native regions use existing Proc controls for independent RGB XY a
                     local events, slots, bindings = addon:GetEventDiagnostics().callbacks, #state.auraSlots, #state.bindings
                     for index, entry in ipairs(entries) do
                         totalRegions = totalRegions + 1
+                        -- The Region Editor first selects the owning Proc.
+                        -- Keep all existing timer RGB/XY/font assertions intact.
+                        choose(controls.procSelector, tostring(entry.overlayID or entry.sourceSpellID or entry.id))
                         choose(controls.procEntry, entry.id)
                         equal(panel.selectedProcEntry, entry.id, "existing selector resolves stable region identity")
                         controls.procPreview:Click()
@@ -7746,6 +7751,17 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     researchRoot = testRoot .. "/..",
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
+
+for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua" }) do
+    assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
+        test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,
+        root = root, metadata = metadata, login = login, setup = setup, options = options,
+        putAura = putAura, showProc = showProc, procFrame = procFrame, procText = procText,
+        mobilityLogin = mobilityLogin, currentLive = currentLive, counts = counts,
+        transferSeed = transferSeed, transferPage = transferPage, prepareSettings = prepareSettings,
+        packSettings = packSettings, unpackSettings = unpackSettings, transferMetrics = transferMetrics,
+    }, { __index = launcherHarness }))
+end
 
 assert(failed == 0, failed .. " of " .. total .. " offline smoke tests failed.")
 print("All " .. total .. " offline smoke tests passed.")

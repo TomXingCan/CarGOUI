@@ -639,13 +639,8 @@ function addon:RefreshOptions()
     panel.procStatus:SetText(#procChoices > 0
         and addon:Text("Displays countdowns on supported Blizzard Proc graphics. Test Mode shows separate samples.")
         or addon:Text("No verified timed native Proc regions are available for this specialization / talent selection."))
-    controls.procEntry:SetEntries(procChoices)
     controls.previewEntry:SetEntries(previewChoices)
-    if not procAllowed[panel.selectedProcEntry] then
-        panel.selectedProcEntry = procChoices[1] and procChoices[1].value
-    end
-    controls.procEntry:FilterChoices(procAllowed)
-    controls.procEntry:SelectValue(panel.selectedProcEntry)
+    self:RefreshProcAppearanceOptions()
     self:RefreshProcColorControls()
     controls.procAppearance:SetEnabled(panel.selectedProcEntry ~= nil)
     controls.procPreview:SetEnabled(panel.selectedProcEntry ~= nil and not InCombatLockdown())
@@ -1023,55 +1018,11 @@ function addon:CreateOptions()
     Label(page, L.entryHint, 0, -266, 470, 44)
     panel.previewStatus = Label(page, "", 0, -324, 470, 48)
 
-    local proc = panel.pages.proc
-    panel.controls.procEnabled = CheckBox(panel, proc, addon:Text("Enable Proc timers"), 0, -32,
-        function(value) return { proc = { enabled = value } } end)
-    panel.procStatus = Label(proc, "", 0, -68, 470, 40)
-    local procChoices = {}
-    for _, entry in ipairs(self:GetPreviewEntries()) do
-        if entry.kind == "proc" then procChoices[#procChoices + 1] = { value = entry.id, label = self:GetEntryDisplayLabel(entry) } end
-    end
-    panel.controls.procEntry = Dropdown(panel, proc, addon:Text("Proc region"), 0, -110, procChoices, nil, function(key)
-        addon:CancelProcColorPicker()
-        ClearEdits(panel)
-        panel.selectedProcEntry = key
-        addon:RefreshOptions()
-    end)
-    panel.controls.procEntry:SetWidth(474)
-    panel.procColorSelection = Label(proc, "", 0, -174, 474, 20, "GameFontHighlight")
-    Label(proc, addon:Text("Timer color:"), 0, -202, 90, 20, "GameFontNormal")
-    panel.controls.procColor = Button(proc, "", 94, -196, 38, function()
-        local ok, message = addon:OpenProcColorPicker(addon:GetSelectedProcColorEntry())
-        if not ok then Feedback(panel, message, true) end
-    end)
-    local swatch = panel.controls.procColor:CreateTexture(nil, "OVERLAY")
-    swatch:SetPoint("TOPLEFT", panel.controls.procColor, "TOPLEFT", 5, -5)
-    swatch:SetPoint("BOTTOMRIGHT", panel.controls.procColor, "BOTTOMRIGHT", -5, 5)
-    panel.controls.procColor.swatch = swatch
-    panel.procColorMode = Label(proc, "", 142, -202, 102, 20)
-    panel.controls.procColorReset = Button(proc, addon:Text("Use class color"), 248, -196, 226, function()
-        addon:CancelProcColorPicker()
-        local entry = addon:GetSelectedProcColorEntry()
-        if entry and addon:SetProcRegionColor(entry, nil) then Feedback(panel, L.saved) end
-        addon:RefreshProcColorControls()
-    end)
-    panel.controls.procAppearance = Button(proc, L.appearance, 0, -242, 226, function()
-        addon:OpenAppearance("proc", panel.selectedProcEntry)
-    end)
-    panel.controls.procPreview = Button(proc, addon:Text("Preview this region"), 248, -242, 226, function()
-        local ok, message = addon:SetPreview("single", panel.selectedProcEntry)
-        addon:RefreshOptions()
-        if not ok then Feedback(panel, message, true) end
-    end)
-    panel.controls.procStop = Button(proc, L.previewStop, 0, -282, 226, function()
-        addon:StopPreview()
-        addon:RefreshOptions()
-    end)
-    Button(proc, addon:Text("Region position / Test Mode"), 248, -282, 226, function()
-        panel.selectedPreviewEntry = panel.selectedProcEntry
-        addon:SelectOptionsCategory("preview")
-    end)
-    Label(proc, addon:Text("Proc font, size, outline, shadow and scale are shared within this specialization. Each region has its own position and optional timer color."), 0, -326, 470, 44)
+    self:CreateProcAppearanceOptions(panel, {
+        Label = Label, Button = Button, Dropdown = Dropdown, EditBox = EditBox,
+        CheckBox = CheckBox, ThemeControl = ThemeControl, Backdrop = Backdrop,
+        Feedback = Feedback, ClearEdits = ClearEdits,
+    })
 
     local mobility = panel.pages.mobility
     panel.controls.mobilityEnabled = CheckBox(panel, mobility, L.mobilityEnabled, 0, -32,

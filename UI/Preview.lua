@@ -11,7 +11,7 @@ local function CreateGuidance(frame, entry)
     guide:SetPoint("CENTER", frame, "CENTER", 0, 0)
     local region = entry.guide
     guide:SetSize(region and region.width or 150, region and region.height or 64)
-    if region then
+    if region and (entry.kind ~= "proc" or not addon.RenderProcArtworkPreview) then
         -- Native shape is faint, static, TEST-only guidance. Never feed sample
         -- events into Blizzard's overlay frame or start its animation/sounds.
         local shape = guide:CreateTexture(nil, "BACKGROUND")
@@ -47,6 +47,7 @@ function addon:UpdatePreviewGuidance(frame, entry, enabled)
         return
     end
     local guide = frame.guidance or CreateGuidance(frame, entry)
+    if entry.kind == "proc" and self.RenderProcArtworkPreview and guide.shape then guide.shape:Hide() end
     guide.label:SetText(self:Format("TEST: %s", self:GetEntryDisplayLabel(entry)))
     -- Typography scaling must not change the size of the stock region guide.
     guide:SetScale(1 / self:GetReminderStyle(frame.styleKey or entry).scale)
@@ -89,6 +90,7 @@ end
 function addon:StopPreview(skipLiveRefresh)
     self.previewState.mode = "off"
     self.previewState.styleKey = nil
+    if self.StopProcArtworkPreview then self:StopProcArtworkPreview() end
     for _, frame in pairs(self.previewFrames) do
         frame:Hide()
         if frame.guidance then frame.guidance:Hide() end
@@ -101,7 +103,7 @@ function addon:StopPreview(skipLiveRefresh)
     if not skipLiveRefresh and self.RenderFreeMoveState then self:RenderFreeMoveState() end
 end
 
-function addon:RefreshPreview()
+function addon:RefreshPreview(appearanceOnly)
     local state = self.previewState
     if state.mode == "off" then return end
     if not self.optionsFrame or not self.optionsFrame:IsShown() then
@@ -118,6 +120,7 @@ function addon:RefreshPreview()
         frame:Hide()
         if frame.guidance then frame.guidance:Hide() end
     end
+    if self.StopProcArtworkPreview then self:StopProcArtworkPreview() end
     -- Rendering only runs from explicit settings actions or a spec-change event.
     -- Samples are fixed values; no ticking timer, polling, or OnUpdate is needed.
     for _, entry in ipairs(entries) do
@@ -125,11 +128,16 @@ function addon:RefreshPreview()
             local frame = self:AcquireReminderFrame(entry, "preview")
             self.previewFrames[entry.id] = frame
             self:RenderReminder(frame, entry, self:GetLocalizedPreviewContent(entry), true)
+            if entry.kind == "proc" and self.RenderProcArtworkPreview and self:GetReminderEnabled(entry) then
+                self:RenderProcArtworkPreview(entry)
+            end
         end
     end
-    if self.RenderMobilityState then self:RenderMobilityState() end
-    if self.RenderProcState then self:RenderProcState() end
-    if self.RenderFreeMoveState then self:RenderFreeMoveState() end
+    if not appearanceOnly then
+        if self.RenderMobilityState then self:RenderMobilityState() end
+        if self.RenderProcState then self:RenderProcState() end
+        if self.RenderFreeMoveState then self:RenderFreeMoveState() end
+    end
 end
 
 function addon:SetPreview(mode, entryId, styleKey)

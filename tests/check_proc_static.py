@@ -102,4 +102,36 @@ assert "schema.proc.regions[entry.id]" in database and "color = RegionColorSetti
 assert "ColorCopy(region.color)" in database and "config.regions[id].color = ColorCopy(record.color)" in database
 assert "changedColors" in database and "RefreshProcRegionColor(entry)" in database
 print("PASS RGB schema is optional per stable Proc region and color-only writes use targeted styling")
+
+# Presentation has a separate failure boundary. Protected calls here recover
+# owned rendering faults; the existing Aura/trigger ban above remains intact.
+artwork = code((root / "UI/ProcArtwork.lua").read_text(encoding="utf-8"))
+resolver = code((root / "Core/ProcAppearance.lua").read_text(encoding="utf-8"))
+catalog = code((root / "Database/ProcAssets.lua").read_text(encoding="utf-8"))
+editor = code((root / "UI/ProcAppearanceOptions.lua").read_text(encoding="utf-8"))
+for relative in ("UI/ProcArtwork.lua", "Core/ProcAppearance.lua", "Database/ProcAssets.lua", "UI/ProcAppearanceOptions.lua"):
+    assert declared.count(relative) == 1, "Presentation source must load exactly once: " + relative
+absent(artwork + resolver + editor, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_AURA", r"C_UnitAuras",
+       r"UnitBuff\s*\(", r"UnitAura\s*\(", r"GetVertexColor\s*\(", r"GetAlpha\s*\(",
+       r"SetCVar\s*\(", r"SetCVarBool\s*\(", r"GetRemainingDuration\s*\("],
+       "Appearance cannot poll, reconstruct triggers, read native opacity/color, query Aura state or write overlay CVars")
+absent(catalog, [r"CreateFrame", r"RegisterEvent", r"GetProcDefinitions", r"RegisterProcFactory", r"C_Spell", r"C_UnitAuras",
+       r"CarGOUIDB", r"Interface\\\\", r"\.(?:blp|tga|dds|png)"],
+       "Artwork catalog is inert audited client-resource metadata with no trigger registration or bundled texture paths")
+assert 'hooksecurefunc(root, "ShowOverlay"' in artwork and 'hooksecurefunc(root, "ReleaseOverlay"' in artwork
+assert 'procSuppressedOverlays' in artwork and 'RestoreProcNativeOverlay' in artwork
+assert 'procPreviewArtworkFrames' in artwork and 'procArtworkFrames' in artwork
+assert 'CreateAnimationGroup()' in artwork and 'CreateTexture(nil, "ARTWORK")' in artwork
+assert 'ResolveProcAppearance' in artwork and 'ProcPublicColor' in proc_runtime
+assert 'StopProcArtwork()' in proc_runtime and 'GetProcArtworkDiagnostic(entry)' in proc_runtime
+absent(artwork, [r"(?:overlay|record|owned)\.texture\s*:\s*(?:SetTexture|SetVertexColor|SetTexCoord|SetPoint|SetSize|CreateAnimationGroup)\s*\("],
+       "Captured native textures are not rewritten or animated by the artwork renderer")
+refresh = artwork.split('function addon:RefreshProcAppearance(entry)', 1)[1].split('function addon:', 1)[0]
+absent(refresh, [r"RenderProcState|ConfigureProc|SetDuration|CreateNativeAuraSlot|RefreshMobility"],
+       "Appearance edits refresh only owned presentation without restarting timer or gameplay providers")
+assert 'GetProcAsset(item)' in resolver and 'procAppearanceLimits' in resolver
+assert 'appearance = RegionAppearanceSetting' in database and 'CopyProcAppearance(region.appearance)' in database
+assert 'ResetProcRegionAppearance' in database
+assert 'ProcArtwork' not in (root / 'Modules/Proc/AuraState.lua').read_text(encoding='utf-8')
+print("PASS Separate appearance schema/resolver, bounded artwork pools, lifecycle hooks and native suppression ownership ship without changing Aura slots")
 print("Proc static checks passed; native security, actual matching and combat visuals require Retail acceptance.")
