@@ -1403,16 +1403,30 @@ local function options(addon)
 end
 
 local function typeText(editBox, value)
+    local row = editBox.slider and editBox or editBox.numericRow
+    if row then
+        if not row.editing then row.valueButton:Click() end
+        editBox = row.editBox
+    end
     editBox:SetText(tostring(value))
     local textChanged = editBox:GetScript("OnTextChanged")
     if textChanged then textChanged(editBox, true) end
+    return editBox
 end
 
 local function enter(editBox, value)
-    typeText(editBox, value)
+    editBox = typeText(editBox, value)
     local callback = editBox:GetScript("OnEnterPressed")
     truthy(callback, "edit box has an Enter handler")
     callback(editBox)
+end
+
+local function dragValue(row, value)
+    local slider = row.slider
+    slider:GetScript("OnMouseDown")(slider, "LeftButton")
+    slider:SetValue(value)
+    slider:GetScript("OnValueChanged")(slider, value, true)
+    slider:GetScript("OnMouseUp")(slider, "LeftButton")
 end
 
 local function choose(dropdown, value)
@@ -1518,10 +1532,10 @@ test("daily automatic-context Appearance controls use shared validation and surv
     controls.mobilityEnabled:Click(); equal(addon:GetMobilityConfig().enabled, false, "checkbox hides reminders")
     controls.mobilityEnabled:Click()
     addon:OpenAppearance("mobility", "mobility:MAGE")
-    changed(function() controls.appearanceScale:SetValue(1.35) end, "scale slider")
+    changed(function() dragValue(controls.appearanceScale, 1.35) end, "scale slider")
     equal(addon:GetMobilityConfig().style.scale, 1.35, "scale slider saves immediately")
     changed(function() enter(controls.appearanceScale.editBox, "1.6") end, "scale Enter")
-    changed(function() controls.appearanceFontSize:SetValue(36) end, "font slider")
+    changed(function() dragValue(controls.appearanceFontSize, 36) end, "font slider")
     changed(function() enter(controls.appearanceFontSize.editBox, "32") end, "font Enter")
     changed(function() choose(controls.appearanceOutline, "THICKOUTLINE") end, "outline")
     savedFont(addon, 32, "THICKOUTLINE")
@@ -1535,33 +1549,35 @@ test("daily automatic-context Appearance controls use shared validation and surv
     equal(#state.errors, 0, "GUI interactions produce no errors")
 end)
 
-test("pending XY edits are atomic, preserved until Enter, and discarded on close", function()
+test("numeric XY drafts commit their own axis and are discarded at close boundaries", function()
     local env, addon = login(nil)
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("mobility")
     typeText(controls.mobilityX, "250")
+    savedPosition(addon, env, 0, 0)
     typeText(controls.mobilityY, "not a number")
+    savedPosition(addon, env, 250, 0)
     local before = copy(addon.db)
-    enter(controls.mobilityX, "250")
-    same(addon.db, before, "invalid coordinate pair changes neither axis")
+    enter(controls.mobilityY, "not a number")
+    same(addon.db, before, "invalid axis never changes either coordinate")
     truthy(type(panel.feedback:GetText()) == "string" and #panel.feedback:GetText() > 0,
         "invalid input has visible feedback")
     controls.mobilityEnabled:Click()
-    equal(controls.mobilityX:GetText(), "250", "unrelated update preserves pending X")
-    equal(controls.mobilityY:GetText(), "not a number", "unrelated update preserves pending Y")
+    equal(controls.mobilityX.editBox:GetText(), "250", "committed X remains separate")
+    equal(controls.mobilityY.editBox:GetText(), "not a number", "unrelated update preserves pending Y")
     enter(controls.mobilityY, "-125")
     savedPosition(addon, env, 250, -125)
     typeText(controls.mobilityX, "900")
-    controls.mobilityX:SetFocus()
+    controls.mobilityX.editBox:SetFocus()
     controls.close:Click()
-    equal(controls.mobilityX:HasFocus(), false, "close clears keyboard focus")
+    equal(controls.mobilityX.editBox:HasFocus(), false, "close clears keyboard focus")
     addon:ToggleOptions()
-    equal(tonumber(controls.mobilityX:GetText()), 250, "reopen discards unapplied X")
-    equal(tonumber(controls.mobilityY:GetText()), -125, "reopen restores saved Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 250, "reopen discards unapplied X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), -125, "reopen restores saved Y")
     controls.mobilityReset:Click()
     savedPosition(addon, env, 0, 0)
-    equal(tonumber(controls.mobilityX:GetText()), 0, "center updates X field")
-    equal(tonumber(controls.mobilityY:GetText()), 0, "center updates Y field")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 0, "center updates X field")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), 0, "center updates Y field")
 end)
 
 test("invalid numeric edits show errors without changing saved values", function()
@@ -1618,7 +1634,7 @@ test("dropdown lifecycle and hidden refresh remain idle", function()
     equal(state.fontWrites, fontWrites, "hidden refresh does not redraw")
     equal(state.textWrites, textWrites, "hidden refresh does not update control text")
     local savedScale = addon:GetMobilityConfig().style.scale
-    controls.appearanceScale:SetValue(2.25)
+    dragValue(controls.appearanceScale, 2.25)
     equal(addon:GetMobilityConfig().style.scale, savedScale, "hidden slider cannot update settings")
     local calls = 0
     local update = addon.UpdateSettings
@@ -1649,29 +1665,30 @@ test("reset requires confirmation and close cancels an unconfirmed reset", funct
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
     equal(addon:GetMobilityConfig().style.scale, 1, "confirmed reset restores scale")
-    equal(tonumber(controls.mobilityX:GetText()), 0, "reset clears pending X")
-    equal(tonumber(controls.mobilityY:GetText()), 0, "reset refreshes Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 0, "reset clears pending X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), 0, "reset refreshes Y")
     truthy(panel:IsShown(), "reset keeps Options open")
 end)
 
-test("Escape from any editable field closes Options and releases input focus", function()
+test("Escape cancels inline numeric editing without closing Options", function()
     local _, addon = login(nil)
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("mobility")
-    for _, editBox in ipairs({ controls.mobilityX, controls.mobilityY, controls.appearanceFontSize.editBox, controls.appearanceScale.editBox }) do
-        if not panel:IsShown() then addon:ToggleOptions() end
-        if editBox == controls.mobilityX or editBox == controls.mobilityY then addon:SelectOptionsCategory("mobility")
+    for _, row in ipairs({ controls.mobilityX, controls.mobilityY, controls.appearanceFontSize, controls.appearanceScale }) do
+        if row == controls.mobilityX or row == controls.mobilityY then addon:SelectOptionsCategory("mobility")
         else addon:OpenAppearance("mobility") end
-        editBox:SetFocus()
+        local before = copy(addon.db)
+        local editBox = typeText(row, "-999")
         local escape = editBox:GetScript("OnEscapePressed")
         truthy(escape, "editable field has Escape handler")
         escape(editBox)
-        equal(panel:IsShown(), false, "Escape closes Options")
+        equal(panel:IsShown(), true, "inline Escape stays on the current page")
         equal(editBox:HasFocus(), false, "Escape releases keyboard focus")
+        same(addon.db, before, "Escape discards draft")
     end
 end)
 
-test("sliders round safely while numeric inputs retain precision and require Enter", function()
+test("sliders round safely while exact inputs preserve precision and valid blur commits", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
     addon:OpenAppearance("mobility", "mobility:MAGE")
@@ -1684,27 +1701,26 @@ test("sliders round safely while numeric inputs retain precision and require Ent
         end
     end
     for _, value in ipairs({ 0.5, 0.5000001, 1.049999999, 2.999999999, 3 }) do
-        controls.appearanceScale:SetValue(value)
+        dragValue(controls.appearanceScale, value)
         truthy(addon:IsNumberInRange(addon:GetMobilityConfig().style.scale, addon.limits.scale), "rounded scale stays valid")
-        truthy(math.abs(addon:GetMobilityConfig().style.scale * 20 - math.floor(addon:GetMobilityConfig().style.scale * 20 + 0.5)) < 0.00001,
-            "slider produces 0.05 increments")
+        truthy(math.abs(addon:GetMobilityConfig().style.scale * 100 - math.floor(addon:GetMobilityConfig().style.scale * 100 + 0.5)) < 0.00001,
+            "slider produces 0.01 increments")
     end
     enter(controls.appearanceScale.editBox, "1.2375")
     equal(addon:GetMobilityConfig().style.scale, 1.2375, "typed scale keeps precision")
     enter(controls.appearanceFontSize.editBox, "31.5")
     equal(addon:GetMobilityConfig().style.font.size, 31.5, "typed font size keeps precision")
     typeText(controls.appearanceScale.editBox, "2.8")
+    equal(addon:GetMobilityConfig().style.scale, 1.2375, "text remains a draft while editing")
     typeText(controls.appearanceFontSize.editBox, "70")
-    controls.appearanceScale.editBox:SetFocus()
-    controls.appearanceScale.editBox:ClearFocus()
-    controls.appearanceFontSize.editBox:SetFocus()
     controls.appearanceFontSize.editBox:ClearFocus()
-    equal(addon:GetMobilityConfig().style.scale, 1.2375, "unconfirmed scale stays pending")
-    equal(addon:GetMobilityConfig().style.font.size, 31.5, "unconfirmed font stays pending")
+    equal(addon:GetMobilityConfig().style.scale, 2.8, "switching inline editors commits a valid focused value")
+    equal(addon:GetMobilityConfig().style.font.size, 70, "valid blur commits font")
+    typeText(controls.appearanceFontSize.editBox, "65")
     panel:Hide()
     addon:ToggleOptions()
-    equal(tonumber(controls.appearanceScale.editBox:GetText()), 1.2375, "closing discards pending scale")
-    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 31.5, "closing discards pending font size")
+    equal(tonumber(controls.appearanceScale.editBox:GetText()), 2.8, "reopen retains committed scale")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 70, "closing cancels the remaining draft")
 end)
 
 test("interactive controls stay inside their pages and panel fits small screens", function()
@@ -1753,7 +1769,8 @@ test("zhCN clients use automatic localization and retain saved appearance on rel
         enter(controls.mobilityX, "invalid")
         truthy(panel.feedback:GetText():find("X", 1, true), "coordinate error is readable")
         enter(controls.mobilityX, "37")
-        equal(panel.feedback:GetText(), addon.L.saved, "success feedback follows locale")
+        equal(panel.feedback:GetText(), pass == 1 and addon.L.saved or addon.L.immediate,
+            "changed input reports saved; an unchanged correction restores neutral localized guidance")
         addon:OpenAppearance("mobility", "mobility:MAGE")
         equal(controls.appearanceOutline.choices[1]:GetText(), addon.L.none, "dropdown choice follows locale")
         enter(controls.appearanceFontSize.editBox, "32")
@@ -2745,10 +2762,11 @@ test("Mobility Options edits apply on Enter and expose working preview and copya
     truthy(panel.mobilitySpell:GetText():find("Blink", 1, true), "detected current spell displayed read-only")
     local id = addon:GetMobilityEntry().id
     typeText(controls.mobilityX, "45.5")
+    equal(addon:GetMobilityConfig().position.x, 0, "position text remains a draft")
     typeText(controls.mobilityY, "-72")
-    equal(addon:GetMobilityConfig().position.x, 0, "position waits for Enter")
-    controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
-    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 45.5, y = -72 }, "Enter commits both coordinates atomically")
+    equal(addon:GetMobilityConfig().position.x, 45.5, "valid blur commits X before editing Y")
+    controls.mobilityY.editBox:GetScript("OnEnterPressed")(controls.mobilityY.editBox)
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 45.5, y = -72 }, "Enter commits the current Y axis")
     controls.mobilityTypography:Click()
     truthy(panel.pages.appearance:IsShown(), "Typography shortcut works")
     addon:SelectOptionsCategory("mobility")
@@ -2778,27 +2796,27 @@ test("Mobility pending edits survive live refresh and diagnostic copying but inv
     typeText(controls.mobilityX, "47")
     typeText(controls.mobilityY, "-65")
     syncEvent(state, "SPELL_UPDATE_COOLDOWN")
-    equal(controls.mobilityX:GetText(), "47", "event refresh preserves pending X")
-    equal(controls.mobilityY:GetText(), "-65", "event refresh preserves pending Y")
+    equal(controls.mobilityX.editBox:GetText(), "47", "event refresh preserves pending X")
+    equal(controls.mobilityY.editBox:GetText(), "-65", "event refresh preserves pending Y")
     controls.mobilityDiagnostics:Click()
     local dialog = panel.diagnosticsFrame
-    equal(controls.mobilityX:GetText(), "47", "copy dialog preserves unsaved X")
-    equal(controls.mobilityY:GetText(), "-65", "copy dialog preserves unsaved Y")
+    equal(controls.mobilityX.editBox:GetText(), "47", "copy dialog preserves unsaved X")
+    equal(controls.mobilityY.editBox:GetText(), "-65", "copy dialog preserves unsaved Y")
     local snapshot = dialog.editBox:GetText()
     typeText(dialog.editBox, "overwrite")
     equal(dialog.editBox:GetText(), snapshot, "diagnostic snapshot permits selection but refuses user editing")
     dialog.close:Click()
-    controls.mobilityY:GetScript("OnEnterPressed")(controls.mobilityY)
+    controls.mobilityY.editBox:GetScript("OnEnterPressed")(controls.mobilityY)
     same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 47, y = -65 }, "Enter after copying commits original pending pair")
     typeText(controls.mobilityX, "invalid")
     typeText(controls.mobilityY, "19")
-    controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
+    controls.mobilityX.editBox:GetScript("OnEnterPressed")(controls.mobilityX)
     same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 47, y = -65 }, "invalid X does not partially commit Y")
     truthy(panel.feedback:GetText() ~= "", "invalid pair has visible feedback")
     panel:Hide()
     addon:ToggleOptions()
-    equal(tonumber(controls.mobilityX:GetText()), 47, "closing discards invalid pending X")
-    equal(tonumber(controls.mobilityY:GetText()), -65, "closing discards pending Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 47, "closing discards invalid pending X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), -65, "closing discards pending Y")
     equal(#state.errors, 0, "copy and edit flow raises no errors")
 end)
 
@@ -3319,14 +3337,13 @@ test("automatic Appearance context discards drafts while Proc regions share a sp
     addon:OpenAppearance("mobility")
     truthy(not controls.appearanceEntry:IsEnabled(), "Appearance context is read-only, no skill/class/spec selector")
     enter(controls.appearanceFontSize.editBox, "29")
-    typeText(controls.appearanceFontSize.editBox, "67")
     typeText(controls.appearanceScale.editBox, "2.7")
     addon:SelectOptionsCategory("proc")
     choose(controls.procEntry, "mage_fire_hot_streak_left")
     controls.procAppearance:Click()
     equal(panel.selectedAppearanceKey, "proc:MAGE:63", "Proc style context is current class and spec")
     equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "switching context discards unsubmitted draft")
-    controls.appearanceFontSize:SetValue(45)
+    dragValue(controls.appearanceFontSize, 45)
     equal(addon:GetProcConfig(63).style.font.size, 45, "Proc size saves to spec")
     controls.appearancePreview:Click()
     equal(addon.previewFrames.mage_fire_hot_streak_left.text.font[2], 45, "selected region uses spec style")
@@ -3880,7 +3897,7 @@ test("empty editor and diagnostic backgrounds release dragging without consuming
     editor:Show(); panel.mockCenter = nil
     enter(controls.appearanceFontSize.editBox, "35")
     equal(addon:GetMobilityConfig().style.font.size, 35, "Enter still edits font after background drag")
-    controls.appearanceScale:SetValue(1.25)
+    dragValue(controls.appearanceScale, 1.25)
     equal(addon:GetMobilityConfig().style.scale, 1.25, "slider drag retains slider semantics")
     choose(controls.appearanceOutline, "THICKOUTLINE")
     equal(addon:GetMobilityConfig().style.font.outline, "THICKOUTLINE", "dropdown remains functional")
@@ -3910,10 +3927,10 @@ test("faction Header and specialization Body update independently and keep scope
     truthy(panel.theme.body.gradient ~= body, "changing spec refreshes Body palette")
     equal(panel.theme.bodyKey, "fire", "Fire Body selected independently")
     local fire = panel.theme.body.gradient
-    local input = controls.mobilityX.optionsThemeRecord.fill.color
+    local input = controls.mobilityX.editBox.optionsThemeRecord.fill.color
     state.faction = "Horde"; addon:RefreshOptionsTheme()
     equal(panel.theme.body.gradient, fire, "changing faction does not rewrite Body gradient")
-    equal(controls.mobilityX.optionsThemeRecord.fill.color, input, "changing faction does not rewrite input body skin")
+    equal(controls.mobilityX.editBox.optionsThemeRecord.fill.color, input, "changing faction does not rewrite input body skin")
     equal(panel.theme.headerKey, "horde", "Horde Header selected automatically")
     truthy(panel.theme.header.gradient.first[1] > panel.theme.header.gradient.first[3], "Horde Header remains red")
     truthy(panel.theme.header.gradient.last[1] > panel.theme.header.gradient.last[3], "both faction gradient endpoints are red")
@@ -5919,7 +5936,7 @@ test("combat closure cleans drag keyboard menus picker draft and Test Mode witho
     controls.procColor:Click(); state:pickerChange(1, 0, 0)
     controls.procEntry:Click()
     truthy(controls.procEntry.menu:IsShown(), "region menu is open before cleanup")
-    typeText(controls.procPositionX, "918"); controls.procPositionX:SetFocus()
+    typeText(controls.procPositionX, "918"); controls.procPositionX.editBox:SetFocus()
     addon:BeginOptionsDrag("LeftButton")
     panel.mockCenter = { 1003, 517 }
     local savedProc = copy(addon:GetProcConfig())
@@ -5927,7 +5944,7 @@ test("combat closure cleans drag keyboard menus picker draft and Test Mode witho
     state:fire("PLAYER_REGEN_DISABLED"); state:flushTimers()
     equal(panel:IsShown(), false, "entering combat closes the entire Options window")
     truthy(not panel.dragging and not panel.moving and state.movingFrame == nil, "combat cleanup ends dragging")
-    equal(controls.procPositionX:HasFocus(), false, "combat cleanup releases keyboard focus")
+    equal(controls.procPositionX.editBox:HasFocus(), false, "combat cleanup releases keyboard focus")
     for _, dropdown in ipairs(panel.dropdowns) do equal(dropdown.menu:IsShown(), false, "all menus close") end
     equal(env.ColorPickerFrame:IsShown(), false, "owned native picker closes")
     equal(addon.procColorPickerSession, nil, "owned picker callbacks and session are detached")
@@ -5941,7 +5958,7 @@ test("combat closure cleans drag keyboard menus picker draft and Test Mode witho
     state:fire("PLAYER_REGEN_ENABLED")
     equal(panel:IsShown(), false, "automatic hiding alone never reopens at combat end")
     addon:OpenOptions()
-    equal(tonumber(controls.procPositionX:GetText()), savedProc.regions[entry.id].position.x, "reopen restores saved value rather than discarded text")
+    equal(tonumber(controls.procPositionX.editBox:GetText()), savedProc.regions[entry.id].position.x, "reopen restores saved value rather than discarded text")
     same(procFrame(addon, entry.id).text.textColor, { 0.1, 0.2, 0.9, 1 }, "cancel restores committed live region RGB")
 end)
 
@@ -6561,7 +6578,7 @@ test("XY FIX reproduces and isolates Free move from Mage ordinary position in li
     equal(#state.errors, 0, "no mock errors")
 end)
 
-test("XY FIX existing GUI Free move inputs do not write Mobility inputs and Enter remains atomic", function()
+test("XY FIX numeric Free move axes stay independent of Mobility and reject invalid input", function()
     local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2,
         chargeStart = 95, chargeDuration = 20 }, { proc = {} })
     local panel, controls = options(addon)
@@ -6571,22 +6588,23 @@ test("XY FIX existing GUI Free move inputs do not write Mobility inputs and Ente
     same(addon:GetMobilityConfig().position, pos(0, 0), "Free move editor does not modify ordinary config")
     same(addon:GetReminderPosition(addon:GetFreeMoveEntry()), pos(240, -31), "Free move Enter updates both axes")
     addon:SelectOptionsCategory("mobility")
-    equal(tonumber(controls.mobilityX:GetText()), 0, "ordinary editor reflects its own X")
-    equal(tonumber(controls.mobilityY:GetText()), 0, "ordinary editor reflects its own Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 0, "ordinary editor reflects its own X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), 0, "ordinary editor reflects its own Y")
     typeText(controls.mobilityX, "-117"); enter(controls.mobilityY, "53")
     addon:SelectOptionsCategory("mobility")
-    equal(tonumber(controls.freeMoveX:GetText()), 240, "Free move X survives ordinary editor changes")
-    equal(tonumber(controls.freeMoveY:GetText()), -31, "Free move Y survives ordinary editor changes")
+    equal(tonumber(controls.freeMoveX.editBox:GetText()), 240, "Free move X survives ordinary editor changes")
+    equal(tonumber(controls.freeMoveY.editBox:GetText()), -31, "Free move Y survives ordinary editor changes")
+    enter(controls.freeMoveX, "999")
     local before = copy(addon.db)
-    typeText(controls.freeMoveX, "999"); enter(controls.freeMoveY, "bad")
-    same(addon.db, before, "invalid pair cannot partially write either position scope")
+    enter(controls.freeMoveY, "bad")
+    same(addon.db, before, "invalid axis cannot write either position scope")
     controls.freeMoveReset:Click()
     same(addon:GetMobilityConfig().position, pos(-117, 53), "Reset Free move does not reset class group")
     same(addon:GetReminderPosition(addon:GetFreeMoveEntry()), pos(0, 0), "Reset targets Free move only")
     typeText(controls.freeMoveX, "450")
     addon:CloseOptions(); addon:OpenOptions()
     addon:SelectOptionsCategory("mobility")
-    equal(tonumber(controls.freeMoveX:GetText()), 0, "unconfirmed input discarded on close")
+    equal(tonumber(controls.freeMoveX.editBox:GetText()), 0, "unconfirmed input discarded on close")
     equal(#state.errors, 0, "GUI input isolation")
 end)
 
@@ -7863,7 +7881,8 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
 
-for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_appearance_options.lua",
+for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_numeric_renderer.lua", "proc_appearance_options.lua",
+    "numeric_controls.lua", "numeric_options.lua", "proc_numeric_options.lua",
     "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua", "proc_native_lifecycle.lua", "proc_safety.lua", "proc_preview_safety.lua", "proc_runtime_lifecycle.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,

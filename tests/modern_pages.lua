@@ -38,13 +38,18 @@ local function Choose(control, value)
 end
 
 local function UserText(edit, text)
+    if edit.valueButton then
+        if not edit.editing then edit.valueButton:Click() end
+        edit = edit.editBox
+    end
     edit:SetText(text)
     local changed = edit:GetScript("OnTextChanged")
     if changed then changed(edit, true) end
+    return edit
 end
 
 local function Enter(edit, text)
-    UserText(edit, text)
+    edit = UserText(edit, text)
     edit:GetScript("OnEnterPressed")(edit)
 end
 
@@ -119,12 +124,12 @@ test("modern artwork inputs and toggles preserve validation Enter semantics and 
     addon:UpdateSettings({ reminders = { [entry.id] = { position = { x = 18, y = -30 } } } })
     local timer = copy(addon:GetProcConfig().regions[entry.id])
     Choose(controls.procArt_mode, "custom")
-    UserText(controls.procArt_alpha, "0.45")
+    UserText(controls.procArt_alpha, "45")
     equal(addon:GetProcRegionAppearance(entry).alpha, 1, "typing alone does not save")
-    controls.procArt_alpha:GetScript("OnEnterPressed")(controls.procArt_alpha)
+    controls.procArt_alpha.editBox:GetScript("OnEnterPressed")(controls.procArt_alpha.editBox)
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.45)
-    Enter(controls.procArt_alpha, "5")
-    equal(controls.procArt_alpha.invalid, true)
+    Enter(controls.procArt_alpha, "105")
+    equal(controls.procArt_alpha.editBox.invalid, true)
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.45)
     controls.procAdvanced:Click()
     FinishSection(panel.procAdvancedSection)
@@ -135,7 +140,7 @@ test("modern artwork inputs and toggles preserve validation Enter semantics and 
     same(addon:GetProcConfig().regions[entry.id].position, timer.position)
     same(addon:GetProcConfig().regions[entry.id].color, timer.color)
     addon:SelectOptionsCategory("general")
-    equal(controls.procArt_alpha.invalid, false, "discarded draft does not retain an invalid border")
+    equal(controls.procArt_alpha.editBox.invalid, false, "discarded draft does not retain an invalid border")
 end)
 
 test("modern Proc Advanced shared fades gate input and refresh scroll layout on completion", function()
@@ -146,21 +151,20 @@ test("modern Proc Advanced shared fades gate input and refresh scroll layout on 
     controls.procAdvanced:Click()
     equal(section.transition, "expanding")
     equal(section.content.cuiSectionLocked, true)
-    equal(controls.procArt_offsetX:IsEnabled(), false, "an expanding input cannot accept edits")
+    equal(controls.procArt_offsetX.editBox:IsEnabled(), false, "an expanding input cannot accept edits")
     equal(controls.procArt_mirrorX:IsEnabled(), false, "an expanding toggle cannot accept clicks")
-    controls.procArt_offsetX:SetFocus()
-    equal(controls.procArt_offsetX:HasFocus(), false, "fade-in cannot capture keyboard focus")
+    controls.procArt_offsetX.editBox:SetFocus()
+    equal(controls.procArt_offsetX.editBox:HasFocus(), false, "fade-in cannot capture keyboard focus")
     FinishSection(section)
     equal(section.content.cuiSectionLocked, false)
-    truthy(controls.procArt_offsetX:IsEnabled())
+    truthy(controls.procArt_offsetX.slider:IsEnabled())
     local expandedHeight, expandedRange = panel.procEditor:GetHeight(), panel.procScroll.cuiRange
     panel.procScroll:SetVerticalScroll(expandedRange)
-    controls.procArt_offsetX:SetFocus()
     UserText(controls.procArt_offsetX, "249")
     local expandGroup, collapseGroup = section.expandAnimation, section.collapseAnimation
     controls.procAdvanced:Click()
     equal(section.transition, "collapsing")
-    equal(controls.procArt_offsetX:HasFocus(), false, "fade-out releases an existing keyboard focus")
+    equal(controls.procArt_offsetX.editBox:HasFocus(), false, "fade-out releases an existing keyboard focus")
     equal(section.content.cuiSectionLocked, true)
     equal(panel.procEditor:GetHeight(), expandedHeight, "fade-out keeps its layout footprint until completion")
     equal(panel.procScroll.cuiRange, expandedRange)

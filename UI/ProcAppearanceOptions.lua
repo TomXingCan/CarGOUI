@@ -6,6 +6,10 @@ local function ProcKey(entry)
     return tostring(entry.overlayID or entry.sourceSpellID or entry.id)
 end
 
+local function NumericContext(entry)
+    return entry and (entry.class .. ":" .. entry.specID .. ":" .. entry.id) or nil
+end
+
 local function AssetClassName(class)
     local names = LOCALIZED_CLASS_NAMES_MALE
     return names and names[class] or class
@@ -48,12 +52,16 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     local session = panel.procSession
 
     local function Selected() return addon:GetSelectedProcColorEntry() end
-    local function Save(patch)
+    local function Save(patch, numericContext)
         if patch.mode ~= nil then addon:CancelProcColorPicker() end
-        local ok, message = addon:SetProcRegionAppearance(Selected(), patch)
+        local entry = Selected()
+        if numericContext and numericContext ~= NumericContext(entry) then return false, addon.L.invalid end
+        local ok, message = addon:SetProcRegionAppearance(entry, patch, numericContext and {
+            skipOptionsRefresh = true, continuousAppearance = true,
+        } or nil)
         ui.Feedback(panel, ok and addon.L.saved or message or addon.L.invalid, not ok)
-        addon:RefreshOptions()
-        return ok
+        if not numericContext then addon:RefreshOptions() end
+        return ok, message
     end
     local function Section(text, height, options)
         options = options or {}
@@ -64,26 +72,29 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         self:RegisterOptionsDragSurface(frame.content)
         return frame, frame.content
     end
-    local function Number(parent, text, key, x, y, min, max, build)
-        Label(parent, text, x, y, half, 24)
-        local edit = ui.EditBox(panel, parent, x, y - 28, half)
-        edit.min, edit.max = min, max
-        edit:SetScript("OnTextChanged", function(self, user)
-            if user and not panel.refreshing then self.dirty = true end
+    local defaults = addon:NewProcAppearance()
+    local function Number(parent, text, key, y, build)
+        local offset = key == "offsetX" or key == "offsetY"
+        local range = addon.procAppearanceLimits[offset and "offset" or key]
+        local percent = key == "alpha" or key == "desaturation" or key == "intensity"
+        local integralStep = offset or key == "rotation"
+        local default = offset and defaults.offset[key == "offsetX" and "x" or "y"]
+            or defaults[key] or defaults.animation[key]
+        -- Drag steps are presentation choices, not persistence quantization.
+        -- Precise entry keeps the existing finite-number storage contract.
+        local row = CUI.NumberRow(panel, parent, text, 0, y, inner, {
+            min = range.min, max = range.max, default = default,
+            step = integralStep and 1 or .01, precision = percent and 2 or 3,
+            displayFactor = percent and 100 or 1,
+            unit = percent and "%" or key == "rotation" and "°" or not offset and "×" or nil,
+            labelWidth = 240, valueWidth = 88,
+            context = function() return NumericContext(Selected()) end,
+        }, function(value, context)
+            if context ~= NumericContext(Selected()) then return false, addon.L.invalid end
+            return Save(build and build(value) or { [key] = value }, context)
         end)
-        edit:SetScript("OnEnterPressed", function(self)
-            local value = tonumber(self:GetText())
-            if not value or value ~= value or value < min or value > max then
-                if self.SetInvalid then self:SetInvalid(true) end
-                ui.Feedback(panel, addon:Format("%s: expected a finite number from %g to %g.", text, min, max), true)
-                return
-            end
-            self.dirty = false
-            if self.SetInvalid then self:SetInvalid(false) end
-            if Save(build and build(value) or { [key] = value }) then self:ClearFocus() end
-        end)
-        controls["procArt_" .. key] = edit
-        return edit
+        controls["procArt_" .. key] = row
+        return row
     end
     local function Enum(parent, text, key, y, entries, build, x, controlWidth)
         local dropdown = Dropdown(panel, parent, text, x or 0, y, entries, nil, function(value)
@@ -108,6 +119,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     panel.procStatus = Label(selection, "", 0, -42, inner, 38)
     controls.procSelector = Dropdown(panel, selection, addon:Text("Proc"), 0, -92, {}, nil, function(value)
         addon:CancelProcColorPicker()
+        CUI.ClearNumericInteractions(panel)
         ui.ClearEdits(panel)
         session.proc = value
         panel.selectedProcEntry = nil
@@ -116,6 +128,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     controls.procSelector:SetWidth(half)
     controls.procEntry = Dropdown(panel, selection, addon:Text("Region"), right, -92, {}, nil, function(value)
         addon:CancelProcColorPicker()
+        CUI.ClearNumericInteractions(panel)
         ui.ClearEdits(panel)
         panel.selectedProcEntry = value
         local entry = Selected()
@@ -135,6 +148,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     }, function(value) Save({ mode = value }) end)
     controls.procArtReset = Button(displayContent, addon:Text("Reset artwork to Blizzard default"), 0, -68, inner, function()
         addon:CancelProcColorPicker()
+        CUI.ClearNumericInteractions(panel)
         if addon:ResetProcRegionAppearance(Selected()) then ui.Feedback(panel, addon.L.saved) end
         addon:RefreshOptions()
     end, "ghost")
@@ -169,10 +183,10 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     controls.procArtColor.swatch = artSwatch
     local third = (inner - gap * 2) / 3
 
-    local transform, transformContent = Section(addon:Text("Transform"), 116)
+    local transform, transformContent = Section(addon:Text("Transform"), 140)
     panel.procTransformSection = transform
-    Number(transformContent, addon:Text("Artwork opacity"), "alpha", 0, 0, 0, 1)
-    Number(transformContent, addon:Text("Artwork scale"), "scale", right, 0, 0.25, 3)
+    Number(transformContent, addon:Text("Artwork opacity"), "alpha", 0)
+    Number(transformContent, addon:Text("Artwork scale"), "scale", -44)
     local animation, animationContent = Section(addon:Text("Animation"), 120)
     panel.procAnimationSection = animation
     Enum(animationContent, addon:Text("Entrance"), "entrance", 0, {
@@ -188,7 +202,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         { value = "scale", label = addon:Text("Scale out") },
     }, function(value) return { animation = { exit = value } } end, (third + gap) * 2, third)
 
-    local advanced, advancedContent = Section(addon:Text("Advanced artwork settings"), 524, {
+    local advanced, advancedContent = Section(addon:Text("Advanced artwork settings"), 576, {
         collapsible = true, collapsed = true,
         onToggle = function(_, collapsed)
             session.advanced = not collapsed
@@ -202,22 +216,22 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     })
     panel.procAdvancedSection = advanced
     controls.procAdvanced = advanced.collapseButton
-    Number(advancedContent, addon:Text("Desaturation"), "desaturation", 0, 0, 0, 1)
-    Number(advancedContent, addon:Text("Rotation (degrees)"), "rotation", right, 0, -180, 180)
-    Number(advancedContent, addon:Text("Width multiplier"), "width", 0, -80, 0.25, 3)
-    Number(advancedContent, addon:Text("Height multiplier"), "height", right, -80, 0.25, 3)
-    Check(advancedContent, addon:Text("Mirror X"), "mirrorX", 0, -160)
-    Check(advancedContent, addon:Text("Mirror Y"), "mirrorY", right, -160)
-    Number(advancedContent, addon:Text("Artwork X offset"), "offsetX", 0, -208, -1000, 1000,
+    Number(advancedContent, addon:Text("Desaturation"), "desaturation", 0)
+    Number(advancedContent, addon:Text("Rotation (degrees)"), "rotation", -44)
+    Number(advancedContent, addon:Text("Width multiplier"), "width", -88)
+    Number(advancedContent, addon:Text("Height multiplier"), "height", -132)
+    Check(advancedContent, addon:Text("Mirror X"), "mirrorX", 0, -180)
+    Check(advancedContent, addon:Text("Mirror Y"), "mirrorY", right, -180)
+    Number(advancedContent, addon:Text("Artwork X offset"), "offsetX", -228,
         function(value) return { offset = { x = value } } end)
-    Number(advancedContent, addon:Text("Artwork Y offset"), "offsetY", right, -208, -1000, 1000,
+    Number(advancedContent, addon:Text("Artwork Y offset"), "offsetY", -272,
         function(value) return { offset = { y = value } } end)
-    Label(advancedContent, addon:Text("Artwork offsets use the native visual center. Timer position is independent."), 0, -280, inner, 38)
-    Number(advancedContent, addon:Text("Animation speed"), "speed", 0, -328, 0.25, 3,
+    Label(advancedContent, addon:Text("Artwork offsets use the native visual center. Timer position is independent."), 0, -316, inner, 38)
+    Number(advancedContent, addon:Text("Animation speed"), "speed", -362,
         function(value) return { animation = { speed = value } } end)
-    Number(advancedContent, addon:Text("Animation intensity"), "intensity", right, -328, 0, 1,
+    Number(advancedContent, addon:Text("Animation intensity"), "intensity", -406,
         function(value) return { animation = { intensity = value } } end)
-    Enum(advancedContent, addon:Text("Rotation direction"), "direction", -408, {
+    Enum(advancedContent, addon:Text("Rotation direction"), "direction", -458, {
         { value = "clockwise", label = addon:Text("Clockwise") },
         { value = "counterclockwise", label = addon:Text("Counterclockwise") },
     }, function(value) return { animation = { direction = value } } end)
@@ -247,43 +261,41 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     local position, positionContent = Section(addon:Text("Position / Test"), 292)
     panel.procPositionSection = position
     for _, axis in ipairs({ "X", "Y" }) do
-        local x = axis == "X" and 0 or right
-        Label(positionContent, axis == "X" and addon:Text("Timer X") or addon:Text("Timer Y"), x, 0, half, 24)
-        local edit = ui.EditBox(panel, positionContent, x, -28, half)
-        controls["procPosition" .. axis] = edit
-        edit:SetScript("OnTextChanged", function(self, user)
-            if user and not panel.refreshing then self.dirty = true end
-        end)
-        edit:SetScript("OnEnterPressed", function()
+        local coordinate = axis:lower()
+        local limits = addon.limits.offset
+        local row = CUI.NumberRow(panel, positionContent,
+            axis == "X" and addon:Text("Timer X") or addon:Text("Timer Y"), 0, axis == "X" and 0 or -44, inner, {
+                min = limits.min, max = limits.max, step = 1,
+                default = addon:NewReminderPosition()[coordinate], precision = 3,
+                labelWidth = 240, valueWidth = 88,
+                context = function() return NumericContext(Selected()) end,
+            }, function(value, context)
             local entry = Selected()
-            if not entry then return end
-            local fields = { controls.procPositionX, controls.procPositionY }
-            local xValue, yValue = tonumber(fields[1]:GetText()), tonumber(fields[2]:GetText())
-            local ok = panel.submit({ reminders = { [entry.id] = { position = { x = xValue or false, y = yValue or false } } } }, addon.L.invalidPosition)
-            for _, field in ipairs(fields) do
-                field:SetInvalid(not ok)
-                if ok then field.dirty = false; field:ClearFocus() end
-            end
-            if ok then addon:RefreshOptions() end
+            if not entry or context ~= NumericContext(entry) then return false, addon.L.invalid end
+            local ok, message = addon:UpdateSettings({ reminders = {
+                [entry.id] = { position = { [coordinate] = value } },
+            } }, { skipOptionsRefresh = true })
+            ui.Feedback(panel, ok and addon.L.saved or message or addon.L.invalidPosition, not ok)
+            return ok, message
         end)
+        controls["procPosition" .. axis] = row
     end
-    controls.procPositionReset = Button(positionContent, addon:Text("Reset timer position"), 0, -80, inner, function()
+    controls.procPositionReset = Button(positionContent, addon:Text("Reset timer position"), 0, -92, inner, function()
         local entry = Selected()
         if not entry then return end
-        controls.procPositionX.dirty, controls.procPositionY.dirty = false, false
-        controls.procPositionX:SetInvalid(false); controls.procPositionY:SetInvalid(false)
+        controls.procPositionX:CancelInteraction(); controls.procPositionY:CancelInteraction()
         panel.submit({ reminders = { [entry.id] = { position = addon:NewReminderPosition() } } })
     end, "ghost")
-    controls.procPreview = Button(positionContent, addon:Text("Test selected region"), 0, -130, half, function()
+    controls.procPreview = Button(positionContent, addon:Text("Test selected region"), 0, -142, half, function()
         local ok, message = addon:SetPreview("single", panel.selectedProcEntry)
         addon:RefreshOptions()
         if not ok then ui.Feedback(panel, message, true) end
     end, "primary")
-    controls.procStop = Button(positionContent, addon.L.previewStop, right, -130, half, function()
+    controls.procStop = Button(positionContent, addon.L.previewStop, right, -142, half, function()
         addon:StopPreview()
         addon:RefreshOptions()
     end)
-    Label(positionContent, addon:Text("Test Mode uses separate artwork samples and never hides live Blizzard graphics."), 0, -180, inner, 44)
+    Label(positionContent, addon:Text("Test Mode uses separate artwork samples and never hides live Blizzard graphics."), 0, -190, inner, 44)
     page:HookScript("OnHide", function() if panel.procGallery then panel.procGallery:Hide() end end)
     panel.procUI = ui
 end
@@ -318,6 +330,7 @@ function addon:RefreshProcAppearanceOptions()
         end
     end
     if session.region ~= panel.selectedProcEntry then
+        self.CUI.ClearNumericInteractions(panel)
         panel.procUI.ClearEdits(panel)
         if panel.procGallery then panel.procGallery:Hide() end
         panel.procScroll:SetVerticalScroll(0)
@@ -339,24 +352,25 @@ function addon:RefreshProcAppearanceOptions()
     end
     local position = entry and self:GetReminderPosition(entry)
     for _, axis in ipairs({ "X", "Y" }) do
-        local edit = controls["procPosition" .. axis]
-        if not edit.dirty then edit:SetText(position and string.format("%g", position[axis:lower()]) or "") end
+        local row = controls["procPosition" .. axis]
+        row:SetContext(NumericContext(entry))
+        row:SetValue(position and position[axis:lower()] or 0)
     end
     if appearance then
         controls.procArt_mode:SelectValue(appearance.mode)
         for _, key in ipairs({ "alpha", "scale", "desaturation", "rotation", "width", "height" }) do
-            local edit = controls["procArt_" .. key]
-            if not edit.dirty then edit:SetText(string.format("%g", appearance[key])) end
+            local row = controls["procArt_" .. key]
+            row:SetContext(NumericContext(entry)); row:SetValue(appearance[key])
         end
         for _, key in ipairs({ "mirrorX", "mirrorY" }) do controls["procArt_" .. key]:SetChecked(appearance[key]) end
         for _, key in ipairs({ "entrance", "active", "exit", "direction" }) do controls["procArt_" .. key]:SelectValue(appearance.animation[key]) end
         for _, key in ipairs({ "speed", "intensity" }) do
-            local edit = controls["procArt_" .. key]
-            if not edit.dirty then edit:SetText(string.format("%g", appearance.animation[key])) end
+            local row = controls["procArt_" .. key]
+            row:SetContext(NumericContext(entry)); row:SetValue(appearance.animation[key])
         end
         for _, axis in ipairs({ "X", "Y" }) do
-            local edit = controls["procArt_offset" .. axis]
-            if not edit.dirty then edit:SetText(string.format("%g", appearance.offset[axis:lower()])) end
+            local row = controls["procArt_offset" .. axis]
+            row:SetContext(NumericContext(entry)); row:SetValue(appearance.offset[axis:lower()])
         end
         local asset = appearance.assetKey and self:GetProcAsset(appearance.assetKey)
         panel.procAssetLabel:SetText(asset and (AssetClassName(asset.class) .. " - " .. AssetLabel(asset)) or self:Text("This Proc's native artwork"))

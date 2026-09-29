@@ -146,12 +146,9 @@ local function Animation(frame, name, kind)
     return group, group.animation
 end
 
-local function StartActive(frame)
+local function ConfigureActive(frame, group, animation)
     local settings = frame.appearance.animation
-    frame.phase = "active"
-    if settings.active == "none" then return end
     local kind = settings.active == "rotate" and "Rotation" or settings.active == "breathe" and "Alpha" or "Scale"
-    local group, animation = Animation(frame, "active_" .. settings.active, kind)
     animation:SetDuration((settings.active == "rotate" and 12 or 1.2) / settings.speed)
     if kind == "Rotation" then
         animation:SetDegrees(settings.direction == "counterclockwise" and 360 or -360)
@@ -164,7 +161,28 @@ local function StartActive(frame)
         animation:SetScaleTo(1 + settings.intensity * 0.25, 1 + settings.intensity * 0.25)
         group:SetLooping("BOUNCE")
     end
+end
+
+local function StartActive(frame)
+    local settings = frame.appearance.animation
+    frame.phase = "active"
+    if settings.active == "none" then return end
+    local kind = settings.active == "rotate" and "Rotation" or settings.active == "breathe" and "Alpha" or "Scale"
+    local group, animation = Animation(frame, "active_" .. settings.active, kind)
+    ConfigureActive(frame, group, animation)
     group:Play()
+end
+
+local function ConfigureEntrance(frame, group, animation)
+    local settings = frame.appearance.animation
+    local kind = settings.entrance == "fade" and "Alpha" or "Scale"
+    animation:SetDuration(0.25 / settings.speed)
+    if kind == "Alpha" then animation:SetFromAlpha(0); animation:SetToAlpha(1)
+    else
+        local from = settings.entrance == "pulse" and (1 + settings.intensity * 0.5) or (1 - settings.intensity * 0.75)
+        animation:SetScaleFrom(from, from); animation:SetScaleTo(1, 1)
+    end
+    group:SetLooping("NONE")
 end
 
 local function StartEntrance(frame)
@@ -173,13 +191,7 @@ local function StartEntrance(frame)
     frame.phase = "entrance"
     local kind = settings.entrance == "fade" and "Alpha" or "Scale"
     local group, animation = Animation(frame, "entrance_" .. settings.entrance, kind)
-    animation:SetDuration(0.25 / settings.speed)
-    if kind == "Alpha" then animation:SetFromAlpha(0); animation:SetToAlpha(1)
-    else
-        local from = settings.entrance == "pulse" and (1 + settings.intensity * 0.5) or (1 - settings.intensity * 0.75)
-        animation:SetScaleFrom(from, from); animation:SetScaleTo(1, 1)
-    end
-    group:SetLooping("NONE")
+    ConfigureEntrance(frame, group, animation)
     local generation, token = frame.rendererOwner:GetProcSafetyGeneration(), frame.playToken
     group:SetScript("OnFinished", function()
         if frame.rendererOwner:IsProcSafetyGenerationCurrent(generation) and frame.playToken == token
@@ -264,7 +276,7 @@ local function Signature(appearance, asset, opacity)
     return table.concat(values, ":")
 end
 
-local function Draw(self, entry, appearance, asset, opacity, preview)
+local function Draw(self, entry, appearance, asset, opacity, preview, continuous)
     local frame = Acquire(self, entry, preview)
     local root = SpellActivationOverlayFrame
     local nativeScale, uiScale = root and root.GetEffectiveScale and root:GetEffectiveScale(), UIParent:GetEffectiveScale()
@@ -277,9 +289,14 @@ local function Draw(self, entry, appearance, asset, opacity, preview)
     frame:SetSize(asset.width * ratio * appearance.scale * appearance.width,
         asset.height * ratio * appearance.scale * appearance.height)
     local signature = Signature(appearance, asset, opacity)
-    local restart = not frame.active or frame.signature ~= signature
+    local keepMotion = continuous and frame.active and frame.renderedTextureID == asset.textureID
+        and frame.appearance.animation.entrance == appearance.animation.entrance
+        and frame.appearance.animation.active == appearance.animation.active
+        and frame.appearance.animation.exit == appearance.animation.exit
+    local restart = not frame.active or (frame.signature ~= signature and not keepMotion)
     if restart then StopAnimations(frame) end
     frame.appearance, frame.rotation, frame.signature = appearance, math.rad(appearance.rotation), signature
+    frame.renderedTextureID = asset.textureID
     frame.texture:SetTexture(asset.textureID)
     frame.texture:SetVertexColor(asset.color.r, asset.color.g, asset.color.b)
     frame.texture:SetDesaturation(appearance.desaturation)
@@ -289,7 +306,16 @@ local function Draw(self, entry, appearance, asset, opacity, preview)
     frame:SetAlpha(opacity * appearance.alpha)
     frame.active, frame.exiting = true, nil
     frame:Show()
-    if restart then StartEntrance(frame) end
+    if restart then StartEntrance(frame)
+    elseif keepMotion then
+        -- A continuous numeric edit updates existing interpolation parameters;
+        -- it neither allocates callbacks nor replays the entrance every step.
+        local phase, settings = frame.phase, appearance.animation
+        local choice = phase == "entrance" and settings.entrance or settings.active
+        local group = frame.groups and frame.groups[tostring(phase) .. "_" .. choice]
+        if group and phase == "entrance" then ConfigureEntrance(frame, group, group.animation)
+        elseif group and phase == "active" then ConfigureActive(frame, group, group.animation) end
+    end
     return frame
 end
 
@@ -313,7 +339,7 @@ local function MatchesCurrent(self, overlay, record, state)
     return Public(list) and type(list) == "table" and Public(list[record.position]) and list[record.position] == overlay
 end
 
-local function RenderRegion(self, entry, visible, opacity)
+local function RenderRegion(self, entry, visible, opacity, continuous)
     local appearance = self:GetProcArtworkPresentation(entry)
     local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
     if appearance.mode == "native" then FailOpen(self, entry, "native mode"); return end
@@ -348,7 +374,7 @@ local function RenderRegion(self, entry, visible, opacity)
         local resolved, asset, reason = self:ResolveProcAppearance(entry, appearance, publicState, false)
         if not asset then FailOpen(self, entry, reason or "artwork resolver unavailable", state); return end
         -- Prepare the complete owned graphic before taking native suppression.
-        local rendered, unavailable = Draw(self, entry, resolved, asset, opacity, false)
+        local rendered, unavailable = Draw(self, entry, resolved, asset, opacity, false, continuous)
         if not rendered then FailOpen(self, entry, unavailable, state); return end
         rendered.nativeOverlay = matched
     else HideArtwork(frame) end
@@ -362,7 +388,7 @@ local function RenderRegion(self, entry, visible, opacity)
     self.procArtworkDiagnostics[entry.id] = "ready"
 end
 
-function addon:RenderProcArtwork()
+function addon:RenderProcArtwork(selected, continuous)
     if self:IsProcQuarantined() then return end
     if not self.procTracking then self:StopProcArtwork(); return end
     self.procArtworkDiagnostics = self.procArtworkDiagnostics or {}
@@ -380,8 +406,10 @@ function addon:RenderProcArtwork()
         for _, entry in ipairs(definition.regions) do
             if self:IsProcQuarantined() then return end
             -- A presentation fault must never leave the native graphic hidden.
-            local ok = self:RunProcSafe("artwork", RenderRegion, self, entry, visible, opacity)
-            if not ok then FailOpen(self, entry, "renderer failure; native retained") end
+            if not selected or entry.id == selected.id then
+                local ok = self:RunProcSafe("artwork", RenderRegion, self, entry, visible, opacity, continuous)
+                if not ok then FailOpen(self, entry, "renderer failure; native retained") end
+            end
         end
     end
 end
@@ -503,18 +531,34 @@ function addon:StopProcArtworkPreview()
     return clean
 end
 
-function addon:RenderProcArtworkPreview(entry)
+local function DrawPreview(self, entry, continuous)
+    local appearance, asset = self:ResolveProcAppearance(entry, nil, nil, true)
+    if appearance.mode == "timer" or not asset then return end
+    return Draw(self, entry, appearance, asset, 1, true, continuous)
+end
+
+function addon:RenderProcArtworkPreview(entry, continuous)
     if self:IsProcQuarantined() then return end
     -- TEST has a separate frame pool and never obtains/suppresses native handles.
-    local ok, frame = self:RunProcSafe("preview", function()
-        local appearance, asset = self:ResolveProcAppearance(entry, nil, nil, true)
-        if appearance.mode == "timer" or not asset then return end
-        return Draw(self, entry, appearance, asset, 1, true)
-    end)
+    local ok, frame = self:RunProcSafe("preview", DrawPreview, self, entry, continuous)
     if not ok or not frame then
         local clean = pcall(HideArtwork, self.procPreviewArtworkFrames and self.procPreviewArtworkFrames[entry.id])
         if not clean then self:RecordProcFailure("preview") end
     end
+end
+
+function addon:RefreshProcNumericAppearance(entry)
+    if self:IsProcQuarantined() or not self:GetCurrentProcRegion(entry) then return end
+    local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
+    if frame and frame.exiting then
+        local clean = self:RunProcSafe("artwork", HideArtwork, frame)
+        if not clean then self:RestoreProcRegionArtwork(entry.id); return end
+    end
+    self:RenderProcArtwork(entry, true)
+    -- Update only an already active sample. Do not stop/recreate the preview
+    -- session, its timer frames, or any other region's artwork while dragging.
+    local preview = self.procPreviewArtworkFrames and self.procPreviewArtworkFrames[entry.id]
+    if preview and preview.active then self:RenderProcArtworkPreview(entry, true) end
 end
 
 function addon:RefreshProcAppearance(entry)

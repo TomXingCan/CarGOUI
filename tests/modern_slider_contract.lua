@@ -21,8 +21,12 @@ local function NativeDragValue(slider, value)
     -- The native widget changes its value before dispatching OnValueChanged.
     -- Values here are already on the configured native drag step.
     truthy(slider:IsEnabled() and slider:IsMouseEnabled() and slider:IsVisible())
+    local down = slider:GetScript("OnMouseDown")
+    if down then down(slider, "LeftButton") end
     slider.value = value
     slider:GetScript("OnValueChanged")(slider, value, true)
+    local up = slider:GetScript("OnMouseUp")
+    if up then up(slider, "LeftButton") end
 end
 
 test("SLIDER CONTRACT accepts TextureAsset values and rejects existing texture objects", function()
@@ -73,8 +77,9 @@ end)
 
 test("SLIDER CONTRACT CUI slider creates and skins its native owned thumb from a neutral asset", function()
     local _, addon, state, panel, C = Fixture()
-    local slider = C.Slider(panel, panel, "Value", -100, { min = 0, max = 10 }, .5,
+    local row = C.Slider(panel, panel, "Value", -100, { min = 0, max = 10 }, .5,
         function(value) return { value = value } end)
+    local slider = row.slider
     local thumb = slider:GetThumbTexture()
     equal(slider.template, nil)
     equal(slider.thumbTextureAsset, primitive, "CUI supplies a TextureAsset instead of a Texture object")
@@ -86,30 +91,32 @@ test("SLIDER CONTRACT CUI slider creates and skins its native owned thumb from a
     same(slider.fill.gradient.last, { .400, .395, .920, 1 })
     equal(slider.orientation, "HORIZONTAL"); equal(slider.valueStep, .5); equal(slider.obeyStep, true)
     local textureCount = #state.textures
-    slider:Disable(); equal(thumb:GetAlpha(), .45); truthy(not slider.editBox:IsEnabled())
-    slider:Enable(); equal(thumb:GetAlpha(), 1); truthy(slider.editBox:IsEnabled())
+    row:Disable(); equal(thumb:GetAlpha(), .45); truthy(not row.editBox:IsEnabled())
+    row:Enable(); equal(thumb:GetAlpha(), 1); truthy(row.editBox:IsEnabled())
     equal(slider:GetThumbTexture(), thumb); equal(#state.textures, textureCount)
 end)
 
 test("SLIDER CONTRACT native values and drag callbacks retain save rounding and refresh guards", function()
     local _, _, _, panel, C = Fixture()
-    local slider = C.Slider(panel, panel, "Value", -100, { min = 0, max = 10 }, .5,
+    local row = C.Slider(panel, panel, "Value", -100, { min = 0, max = 10 }, .5,
         function(value) return { value = value } end)
+    local slider = row.slider
     local thumb = slider:GetThumbTexture()
     panel.refreshing = true
-    slider:SetValue(2)
+    row:SetValue(2)
     equal(#panel.submissions, 0, "loading settings cannot submit")
     panel.refreshing = false
-    slider:SetValue(6.26)
-    equal(panel.submissions[1].value, 6.5, "programmatic changes keep existing rounding")
-    slider.editBox.dirty = true; slider.editBox:SetInvalid(true)
+    row:SetValue(6.26); equal(#panel.submissions, 0, "All programmatic changes stay silent and precise")
+    NativeDragValue(slider, 6.26)
+    equal(panel.submissions[1].value, 6.5, "User dragging normalizes to the configured step")
+    row.editBox.dirty = true; row.editBox:SetInvalid(true)
     NativeDragValue(slider, 8.5)
     equal(slider:GetValue(), 8.5); equal(panel.submissions[2].value, 8.5)
-    equal(slider.editBox.dirty, false); equal(slider.editBox.invalid, false)
+    equal(row.editBox.dirty, false); equal(row.editBox.invalid, false)
     equal(slider.fill:GetWidth(), slider:GetWidth() * .85)
-    slider:SetValue(100)
+    NativeDragValue(slider, 10)
     equal(slider:GetValue(), 10); equal(panel.submissions[3].value, 10, "native bounds remain authoritative")
-    panel:Hide(); slider:SetValue(4)
+    panel:Hide(); row:SetValue(4)
     equal(#panel.submissions, 3, "hidden controls cannot save")
     equal(slider:GetThumbTexture(), thumb, "value changes retain the same native thumb")
 end)

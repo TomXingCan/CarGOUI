@@ -131,7 +131,13 @@ test("ARTWORK PICKER region page spec close and combat boundaries discard the ma
         elseif boundary == "page" then addon:SelectOptionsCategory("general")
         elseif boundary == "spec" then state.specID = 63; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
         elseif boundary == "close" then panel:Hide()
-        elseif boundary == "escape" then controls.procPositionX:GetScript("OnEscapePressed")(controls.procPositionX)
+        elseif boundary == "escape" then
+            -- Without a numeric editor focused, native Escape closes the
+            -- registered special frame. Numeric Escape has its own cancel test.
+            local registered = false
+            for _, name in ipairs(env.UISpecialFrames) do if env[name] == panel then registered = true end end
+            truthy(registered)
+            panel:Hide()
         elseif boundary == "combat" then state.inCombat = true; state:fire("PLAYER_REGEN_DISABLED")
         elseif boundary == "mode" then Choose(controls.procArt_mode, "timer")
         elseif boundary == "reset" then controls.procArtReset:Click() end

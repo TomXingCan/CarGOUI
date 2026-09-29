@@ -123,7 +123,7 @@ test("MODERN SHELL viewport changes clamp a visible stationary panel and preserv
 end)
 
 test("MODERN SHELL page specialization combat and Escape settle all control and branding motion", function()
-    local _, addon, state = h.login()
+    local env, addon, state = h.login()
     local panel = h.options(addon)
     truthy(panel.titleAnimation:IsPlaying(), "opening may start the configured branding motion")
     addon:OpenAppearance("mobility")
@@ -142,7 +142,15 @@ test("MODERN SHELL page specialization combat and Escape settle all control and 
     truthy(not addon:OpenOptions()); truthy(addon.pendingOptionsOpen)
     state.inCombat = false; state:fire("PLAYER_REGEN_ENABLED"); state:flushTimers()
     truthy(panel:IsShown()); equal(addon.pendingOptionsOpen, nil)
-    panel.controls.mobilityX:GetScript("OnEscapePressed")()
+    addon:SelectOptionsCategory("mobility")
+    local row = panel.controls.mobilityX
+    row.valueButton:Click()
+    row.editBox:SetText("777")
+    row.editBox:GetScript("OnTextChanged")(row.editBox, true)
+    row.editBox:GetScript("OnEscapePressed")(row.editBox)
+    truthy(panel:IsShown(), "numeric Escape only cancels inline editing")
+    equal(addon:GetMobilityConfig().position.x, 0)
+    for _, name in ipairs(env.UISpecialFrames) do if name == panel:GetName() then env[name]:Hide() end end
     truthy(not panel:IsShown()); settled(panel)
     for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil) end
 end)
@@ -163,7 +171,7 @@ test("MODERN SHELL real Proc Advanced transitions settle immediately at every na
     end
     for _, boundary in ipairs({ "page", "spec", "escape", "combat", "hide" }) do
         for _, collapsing in ipairs({ false, true }) do
-            local _, addon, state = h.login(nil, false, { specID = 62, proc = {} })
+            local env, addon, state = h.login(nil, false, { specID = 62, proc = {} })
             local panel = h.options(addon)
             -- Materialize both real spec contexts before checking that a UI-only
             -- transition and its cleanup never add cosmetic SavedVariables.
@@ -178,27 +186,29 @@ test("MODERN SHELL real Proc Advanced transitions settle immediately at every na
             controls.procAdvanced:Click()
             if collapsing then
                 FinishSection(section)
-                controls.procArt_offsetX:SetFocus()
-                controls.procArt_offsetX:SetText("149")
-                controls.procArt_offsetX:GetScript("OnTextChanged")(controls.procArt_offsetX, true)
+                local row = controls.procArt_offsetX
+                row.valueButton:Click()
+                row.editBox:SetText("149")
+                row.editBox:GetScript("OnTextChanged")(row.editBox, true)
                 controls.procAdvanced:Click()
             end
             equal(section.transition, collapsing and "collapsing" or "expanding")
             equal(section.content.cuiSectionLocked, true)
-            equal(controls.procArt_offsetX:IsMouseEnabled(), false, "transition releases descendant mouse input")
+            equal(controls.procArt_offsetX.slider:IsMouseEnabled(), false, "transition releases descendant mouse input")
             local pending = collapsing and section.collapseAnimation or section.expandAnimation
             local lateCompletion = pending:GetScript("OnFinished")
             if boundary == "page" then addon:SelectOptionsCategory("general")
             elseif boundary == "spec" then state.specID = 63; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
-            elseif boundary == "escape" then controls.procArt_alpha:GetScript("OnEscapePressed")(controls.procArt_alpha)
+            elseif boundary == "escape" then
+                for _, name in ipairs(env.UISpecialFrames) do if name == panel:GetName() then env[name]:Hide() end end
             elseif boundary == "combat" then state.inCombat = true; state:fire("PLAYER_REGEN_DISABLED")
             else panel:Hide() end
             equal(section.transition, nil, boundary .. " settles immediately without waiting for a frame")
             truthy(not section.expandAnimation:IsPlaying() and not section.collapseAnimation:IsPlaying())
             equal(section.collapsed, collapsing, "cleanup respects the latest requested session state")
             equal(section:GetHeight(), collapsing and 42 or section.expandedHeight)
-            equal(controls.procArt_offsetX:HasFocus(), false)
-            truthy(not EffectiveVisible(controls.procArt_offsetX) or not controls.procArt_offsetX:IsEnabled(),
+            equal(controls.procArt_offsetX.editBox:HasFocus(), false)
+            truthy(not EffectiveVisible(controls.procArt_offsetX.slider) or not controls.procArt_offsetX.slider:IsEnabled(),
                 "a hidden editor retains no reachable input target")
             settled(panel)
             local shown, category = panel:IsShown(), panel.activeCategory
@@ -206,7 +216,7 @@ test("MODERN SHELL real Proc Advanced transitions settle immediately at every na
             equal(panel:IsShown(), shown, "a stale native completion cannot reopen Options")
             equal(panel.activeCategory, category, "a stale completion cannot restore an old page")
             equal(section.transition, nil)
-            equal(controls.procArt_offsetX:HasFocus(), false)
+            equal(controls.procArt_offsetX.editBox:HasFocus(), false)
             same(addon.db, before, boundary .. " cleanup does not save disclosure or draft state")
         end
     end

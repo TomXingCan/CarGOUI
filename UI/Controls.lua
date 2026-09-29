@@ -76,6 +76,7 @@ local function Interactive(control, label, kind)
         hover:SetAlpha(0)
         if control.cuiRefresh then control:cuiRefresh() end
     end
+    control.cuiSettleInteraction = Settle
     Track(Panel(control), animation, Settle)
     animation:SetScript("OnFinished", function() hover:SetAlpha(control.cuiHovered and Enabled(control) and 1 or 0) end)
     local function Animate(entering)
@@ -267,6 +268,7 @@ function C.CloseMenus(panel, immediate)
 end
 
 function C.StopMotion(panel)
+    if C.ClearNumericInteractions then C.ClearNumericInteractions(panel) end
     C.CloseMenus(panel, true)
     for _, record in ipairs(panel.cuiMotion or {}) do
         record.group:Stop()
@@ -424,47 +426,258 @@ function C.Dropdown(panel, parent, text, x, y, entries, buildPatch, onSelect, pa
     return dropdown
 end
 
-function C.Slider(panel, parent, text, y, range, step, buildPatch, errorText)
-    local parentWidth = math.max(260, parent:GetWidth() or 474)
-    local trackWidth, editX = parentWidth - 144, parentWidth - 112
-    local title = C.Label(parent, text, 0, y, parentWidth, 22, "GameFontNormal")
-    local slider = CreateFrame("Slider", nil, parent)
-    slider.cuiPanel, slider.label = panel, title
-    slider:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y - 30); slider:SetSize(trackWidth, 18)
+local function NumericPublic(value)
+    return not (issecretvalue and issecretvalue(value)) and type(value) == "number"
+        and value == value and value > -math.huge and value < math.huge
+end
+
+local function NumericExactText(value, factor)
+    local text = string.format("%.15g", value * factor)
+    -- Prefer readable decimals only when display-unit parsing preserves the
+    -- original storage value exactly. Unedited text never enters a commit.
+    if tonumber(text) / factor == value then return text end
+    return string.format("%.17g", value * factor)
+end
+
+local function NumericAvailable(row)
+    if row.disabled or not row:IsVisible() then return false end
+    local parent = row
+    while parent do
+        if parent.cuiSectionLocked then return false end
+        parent = parent.GetParent and parent:GetParent()
+    end
+    return not InCombatLockdown()
+end
+
+function C.ClearNumericInteractions(panel)
+    for _, row in ipairs(panel.numericRows or {}) do row:CancelInteraction() end
+end
+
+local function NumericEvents(panel)
+    if panel.numericEvents then return panel.numericEvents end
+    local frame = CreateFrame("Frame")
+    panel.numericEvents = frame
+    frame:SetScript("OnEvent", function(_, event, button)
+        local row = panel.numericInteraction
+        if not row then return end
+        if event == "GLOBAL_MOUSE_UP" then
+            if not (issecretvalue and issecretvalue(button)) and button == "LeftButton" and row.dragging then
+                row:CancelInteraction()
+            end
+        else C.ClearNumericInteractions(panel) end
+    end)
+    panel:HookScript("OnHide", function() C.ClearNumericInteractions(panel) end)
+    return frame
+end
+
+-- Values in storage units are never rounded by a program refresh or exact edit.
+-- The step belongs only to native dragging; display precision is cosmetic.
+function C.NumberRow(panel, parent, text, x, y, width, descriptor, onCommit)
+    local range = descriptor
+    assert(NumericPublic(range.min) and NumericPublic(range.max) and range.min < range.max, "Invalid numeric range")
+    local step, factor = range.step or 1, range.displayFactor or 1
+    assert(NumericPublic(step) and step > 0 and NumericPublic(factor) and factor > 0, "Invalid numeric step or factor")
+    local row = CreateFrame("Frame", nil, parent)
+    row.cuiPanel, row.descriptor, row.disabled = panel, descriptor, false
+    row:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y); row:SetSize(width, 32)
+    row.label = C.Label(row, text, 0, -3, range.labelWidth or width * .30, 28, "GameFontNormal")
+    row.label:SetJustifyV("MIDDLE")
+    local slider = CreateFrame("Slider", nil, row)
+    row.slider = slider; slider.cuiPanel = panel
     slider:SetOrientation("HORIZONTAL"); slider:SetMinMaxValues(range.min, range.max)
-    slider:SetValueStep(step); slider:SetObeyStepOnDrag(true); slider:EnableMouse(true)
+    slider:SetValueStep(step); slider:SetObeyStepOnDrag(true); slider:EnableMouse(true); slider:EnableMouseWheel(false)
     local track = slider:CreateTexture(nil, "BACKGROUND"); track:SetPoint("LEFT", slider, "LEFT", 0, 0)
     track:SetPoint("RIGHT", slider, "RIGHT", 0, 0); track:SetHeight(4); D.Fill(track, "surfaceHover")
     local fill = slider:CreateTexture(nil, "ARTWORK"); fill:SetPoint("LEFT", slider, "LEFT", 0, 0)
     fill:SetHeight(4); D.ApplyGradient(fill)
     slider:SetThumbTexture(neutralThumbAsset)
     local thumb = slider:GetThumbTexture(); thumb:SetSize(12, 18); D.Fill(thumb, "textPrimary")
-    slider.fill, slider.track = fill, track
-    C.Label(parent, tostring(range.min), 0, y - 54, 56)
-    local maximum = C.Label(parent, tostring(range.max), trackWidth - 56, y - 54, 56); maximum:SetJustifyH("RIGHT")
-    local edit = C.EditBox(panel, parent, editX, y - 24, 112); slider.editBox = edit
-    edit:SetScript("OnTextChanged", function(self, userInput) if userInput and not panel.refreshing then self.dirty = true end end)
-    edit:SetScript("OnEnterPressed", function()
-        edit.dirty = false
-        local saved = Submit(panel, buildPatch(tonumber(edit:GetText())), errorText)
-        edit:SetInvalid(not saved)
-        if saved then edit:ClearFocus() else edit.dirty = true end
-    end)
-    local function FillValue()
-        local value = slider:GetValue() or range.min
-        local fraction = math.max(0, math.min(1, (value - range.min) / (range.max - range.min)))
-        fill:SetWidth(math.max(.001, slider:GetWidth() * fraction)); fill:SetShown(fraction > 0)
+    slider.track, slider.fill = track, fill
+    row.track, row.fill = track, fill
+    local button = C.Button(row, "", 0, 0, range.valueWidth or 80, nil, "ghost")
+    local edit = C.EditBox(panel, row, 0, 0, range.valueWidth or 80)
+    edit:SetMaxLetters(32); edit:Hide()
+    row.valueButton, row.editBox, row.editButton, row.editor = button, edit, button, edit
+    edit.numericRow = row
+    local eventFrame = NumericEvents(panel)
+    panel.numericRows = panel.numericRows or {}; panel.numericRows[#panel.numericRows + 1] = row
+    local function Context() return type(range.context) == "function" and range.context() or row.context end
+    local function Current() return row.interactionContext == Context() end
+    local function UpdateEvents(active)
+        if active then
+            panel.numericInteraction = row
+            for _, event in ipairs({ "GLOBAL_MOUSE_UP", "PLAYER_REGEN_DISABLED", "PLAYER_SPECIALIZATION_CHANGED", "PLAYER_LEAVING_WORLD" }) do
+                eventFrame:RegisterEvent(event)
+            end
+        elseif panel.numericInteraction == row then
+            panel.numericInteraction = nil; eventFrame:UnregisterAllEvents()
+        end
     end
-    slider:SetScript("OnValueChanged", function(_, value)
-        FillValue()
-        if panel.refreshing or not panel:IsShown() then return end
-        local rounded = tonumber(string.format("%.2f", math.floor(value / step + .5) * step))
-        edit.dirty = false; edit:SetInvalid(false); Submit(panel, buildPatch(rounded), errorText)
+    local function Display(value)
+        local formatted = string.format("%." .. (range.precision or 6) .. "f", value * factor)
+        if formatted:find(".", 1, true) then formatted = formatted:gsub("0+$", ""):gsub("%.$", "") end
+        if formatted == "-0" then formatted = "0" end
+        return formatted .. (range.unit or "")
+    end
+    local function Draw()
+        row.settingValue = true; slider:SetValue(row.value); row.settingValue = nil
+        local fraction = math.max(0, math.min(1, (row.value - range.min) / (range.max - range.min)))
+        fill:SetWidth(math.max(.001, slider:GetWidth() * fraction)); fill:SetShown(fraction > 0)
+        button:SetText(Display(row.value))
+        if not row.editing then edit:SetText(NumericExactText(row.value, factor)) end
+    end
+    local function SyncEnabled()
+        row.syncEnabled = true
+        slider:SetEnabled(not row.disabled and not row.editing)
+        slider:EnableMouse(not row.disabled and not row.editing)
+        button:SetEnabled(not row.disabled)
+        if row.disabled then edit:Disable() else edit:Enable() end
+        thumb:SetAlpha(row.disabled and .45 or 1)
+        row.label:SetTextColor(unpack(row.disabled and D.textDisabled or D.textPrimary))
+        row.syncEnabled = nil
+    end
+    local function Invalid()
+        edit:SetInvalid(true)
+        if panel.feedback then C.Feedback(panel, range.errorText or addon.L.invalid, true) end
+    end
+    function row:GetValue() return self.value end
+    function row:SetValue(value)
+        if not NumericPublic(value) or value < range.min or value > range.max then return false end
+        if (self.editing or self.dragging) and not Current() then self:CancelInteraction() end
+        self.value = value; Draw(); return true
+    end
+    function row:CancelInteraction()
+        local interacted = self.editing or self.dragging
+        self.editing, self.dragging, self.interactionContext = false, false, nil
+        UpdateEvents(false)
+        edit.dirty = false; edit:SetInvalid(false); edit:ClearFocus(); edit:Hide(); button:Show()
+        for _, control in ipairs({ button, edit }) do
+            control.hoverAnimation:Stop()
+            if control.cuiSettleInteraction then control.cuiSettleInteraction() end
+        end
+        -- A temporary disable ends native capture even if release happened
+        -- outside the slider or the owning page is being replaced.
+        if interacted then self.syncEnabled = true; slider:Disable(); self.syncEnabled = nil end
+        SyncEnabled()
+        if self.value ~= nil then Draw() end
+    end
+    row.CancelEdit = row.CancelInteraction
+    function row:SetContext(value)
+        if self.context ~= value then self:CancelInteraction(); self.context = value end
+    end
+    function row:SetEnabled(value)
+        self.disabled = value ~= true
+        if self.disabled then self:CancelInteraction() else SyncEnabled() end
+    end
+    function row:IsEnabled() return not self.disabled and (slider:IsEnabled() or self.editing and edit:IsEnabled()) end
+    function row:Enable() self:SetEnabled(true) end
+    function row:Disable() self:SetEnabled(false) end
+    local function Commit(value, context)
+        if value == row.value then Draw(); return true end
+        local previous = row.value
+        row.value = value; Draw()
+        local ok = not onCommit or onCommit(value, context)
+        if ok == false then
+            if Context() == context then row.value = previous; Draw() end
+            Invalid(); return false
+        end
+        return true
+    end
+    local function CommitEdit(blur)
+        if not row.editing then return end
+        if not NumericAvailable(row) or not Current() then row:CancelInteraction(); return end
+        local context = row.interactionContext
+        if not edit.dirty then row:CancelInteraction(); return end
+        local value = tonumber(edit:GetText())
+        value = value and value / factor
+        if not NumericPublic(value) or value < range.min or value > range.max then
+            if blur then row:CancelInteraction() end
+            Invalid(); return
+        end
+        -- Close the write source before a commit can synchronously refresh UI.
+        local draft = edit:GetText()
+        local unchanged = value == row.value
+        row:CancelInteraction()
+        local committed = Commit(value, context)
+        if committed and unchanged and panel.feedback then
+            -- Validation succeeded, but no setting was written. Clear a prior
+            -- draft error with ordinary guidance rather than a saved claim.
+            C.Feedback(panel, addon.L.immediate)
+        elseif not committed and not blur and NumericAvailable(row) and Context() == context then
+            row:BeginEdit(); edit:SetText(draft); edit.dirty = true; Invalid()
+        end
+    end
+    function row:BeginEdit()
+        if not NumericAvailable(self) or not button:IsEnabled() then return end
+        local previous = panel.numericInteraction
+        if previous and previous ~= self and previous.editing then previous.editBox:ClearFocus() end
+        C.ClearNumericInteractions(panel)
+        if not NumericAvailable(self) or not button:IsEnabled() then return end
+        self.editing, self.interactionContext = true, Context()
+        edit.dirty = false; edit:SetInvalid(false)
+        edit:SetText(NumericExactText(self.value, factor))
+        button:Hide(); edit:Show(); SyncEnabled(); UpdateEvents(true)
+        edit:SetFocus(); edit:HighlightText()
+    end
+    button:SetScript("OnClick", function() row:BeginEdit() end)
+    edit:SetScript("OnTextChanged", function(self, userInput)
+        if userInput and row.editing and not panel.refreshing then self.dirty = true; self:SetInvalid(false) end
     end)
-    slider:HookScript("OnSizeChanged", FillValue)
-    slider:HookScript("OnDisable", function() thumb:SetAlpha(.45); edit:Disable() end)
-    slider:HookScript("OnEnable", function() thumb:SetAlpha(1); edit:Enable() end)
-    return Register(slider, "slider", panel)
+    edit:SetScript("OnEnterPressed", function() CommitEdit(false) end)
+    edit:SetScript("OnEscapePressed", function() row:CancelInteraction() end)
+    edit:HookScript("OnEditFocusLost", function() CommitEdit(true) end)
+    edit:HookScript("OnHide", function() if row.editing then row:CancelInteraction() end end)
+    slider:SetScript("OnMouseDown", function(_, buttonName)
+        if buttonName ~= "LeftButton" or not NumericAvailable(row) or not slider:IsEnabled() then return end
+        local previous = panel.numericInteraction
+        if previous and previous ~= row and previous.editing then previous.editBox:ClearFocus() end
+        C.ClearNumericInteractions(panel)
+        if not NumericAvailable(row) or not slider:IsEnabled() then return end
+        row.dragging, row.interactionContext = true, Context(); UpdateEvents(true)
+    end)
+    slider:SetScript("OnMouseUp", function() if row.dragging then row:CancelInteraction() end end)
+    slider:SetScript("OnValueChanged", function(_, value, userInput)
+        if row.settingValue or not userInput or panel.refreshing then return end
+        if not row.dragging then Draw(); return end
+        if row.editing or not NumericAvailable(row) or not slider:IsEnabled() then Draw(); return end
+        if row.dragging and not Current() then row:CancelInteraction(); return end
+        if not NumericPublic(value) then return end
+        value = math.max(range.min, math.min(range.max, value))
+        if value ~= range.min and value ~= range.max then
+            value = math.max(range.min, math.min(range.max,
+                tonumber(string.format("%.10f", range.min + math.floor((value - range.min) / step + .5) * step))))
+        end
+        Commit(value, row.dragging and row.interactionContext or Context())
+    end)
+    slider:HookScript("OnDisable", function()
+        thumb:SetAlpha(.45)
+        if not row.syncEnabled then row:CancelInteraction() end
+    end)
+    slider:HookScript("OnEnable", function() thumb:SetAlpha(row.disabled and .45 or 1) end)
+    local function Layout()
+        local total = row:GetWidth()
+        local labelWidth, valueWidth = range.labelWidth or total * .30, range.valueWidth or 80
+        row.label:SetWidth(labelWidth)
+        slider:ClearAllPoints(); slider:SetPoint("LEFT", row, "LEFT", labelWidth + 12, 0)
+        slider:SetSize(math.max(24, total - labelWidth - valueWidth - 32), 18)
+        for _, control in ipairs({ button, edit }) do
+            control:ClearAllPoints(); control:SetPoint("RIGHT", row, "RIGHT", 0, 0); control:SetWidth(valueWidth)
+        end
+        if row.value ~= nil then Draw() end
+    end
+    row:HookScript("OnSizeChanged", Layout)
+    row:HookScript("OnHide", function() row:CancelInteraction() end)
+    parent:HookScript("OnHide", function() row:CancelInteraction() end)
+    Layout(); row:SetValue(range.default or range.min); SyncEnabled()
+    Register(slider, "slider", panel)
+    C.GuardSectionControl(row)
+    return row
+end
+
+function C.Slider(panel, parent, text, y, range, step, buildPatch, errorText)
+    return C.NumberRow(panel, parent, text, 0, y, parent:GetWidth() or 474,
+        { min = range.min, max = range.max, step = step, default = range.default or range.min, errorText = errorText },
+        function(value) return Submit(panel, buildPatch(value), errorText) end)
 end
 
 -- Keep logical control states separate from a disclosure's temporary input lock.

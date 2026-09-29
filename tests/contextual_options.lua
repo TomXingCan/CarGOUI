@@ -9,13 +9,16 @@ local function Open()
     return env, addon, state, panel, controls
 end
 
-local function UserText(edit, text)
+local function UserText(row, text)
+    if not row.editBox:HasFocus() then row.valueButton:Click() end
+    local edit = row.editBox
     edit:SetText(text)
     edit:GetScript("OnTextChanged")(edit, true)
+    return edit
 end
 
-local function Enter(edit, text)
-    UserText(edit, text)
+local function Enter(row, text)
+    local edit = UserText(row, text)
     edit:GetScript("OnEnterPressed")(edit)
 end
 
@@ -97,19 +100,19 @@ test("contextual Mobility Proc and typography tests replace samples without chan
     controls.procStop:Click(); equal(VisibleSamples(addon), 0)
 end)
 
-test("contextual Free Move position remains independent atomic and previewed from Mobility", function()
+test("contextual Free Move position remains independent immediate and previewed from Mobility", function()
     local _, addon, _, panel, controls = Open()
     addon:SelectOptionsCategory("mobility")
     local free = assert(addon:GetFreeMovePreviewEntry())
     truthy(panel.freeMoveSection:IsShown()); equal(panel.freeMoveEntryId, free.id)
-    UserText(controls.freeMoveX, "240"); Enter(controls.freeMoveY, "-31")
+    Enter(controls.freeMoveX, "240"); Enter(controls.freeMoveY, "-31")
     same(addon:GetReminderPosition(free), { anchor = "CENTER", x = 240, y = -31 })
     same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 0, y = 0 })
-    UserText(controls.mobilityX, "-117"); Enter(controls.mobilityY, "53")
+    Enter(controls.mobilityX, "-117"); Enter(controls.mobilityY, "53")
     same(addon:GetReminderPosition(free), { anchor = "CENTER", x = 240, y = -31 })
     local before = copy(addon.db)
-    UserText(controls.freeMoveX, "999"); Enter(controls.freeMoveY, "bad")
-    same(addon.db, before, "invalid independent position is an atomic rejection")
+    UserText(controls.freeMoveX, "-"); Enter(controls.freeMoveY, "bad")
+    same(addon.db, before, "invalid drafts in either independent axis never persist")
     controls.freeMoveReset:Click()
     same(addon:GetReminderPosition(free), { anchor = "CENTER", x = 0, y = 0 })
     same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = -117, y = 53 })
@@ -123,7 +126,7 @@ test("contextual Free Move position remains independent atomic and previewed fro
     controls.mobilityStop:Click(); equal(VisibleSamples(addon), 0)
     UserText(controls.freeMoveX, "450")
     addon:CloseOptions(); addon:OpenOptions()
-    equal(tonumber(controls.freeMoveX:GetText()), 150, "closing discards the unsubmitted independent draft")
+    equal(controls.freeMoveX:GetValue(), 150, "closing discards the unsubmitted independent draft")
     local _, reloaded = h.login(copy(addon.db), false, { specID = 62, proc = {} })
     equal(reloaded:GetReminderPosition(reloaded:GetFreeMovePreviewEntry()).x, 150)
 end)
@@ -139,21 +142,21 @@ test("contextual unavailable Free Move hides its whole card and stale controls c
         end
         return entries
     end
-    controls.freeMoveX:SetFocus(); UserText(controls.freeMoveX, "444")
+    UserText(controls.freeMoveX, "444")
     addon:RefreshOptions()
     equal(panel.freeMoveSection:IsShown(), false); equal(panel.freeMoveEntryId, nil)
-    equal(controls.freeMoveX:HasFocus(), false)
+    equal(controls.freeMoveX.editBox:HasFocus(), false)
     for _, key in ipairs({ "freeMoveX", "freeMoveY", "freeMoveReset", "freeMovePreview" }) do
         equal(controls[key]:IsEnabled(), false)
     end
     local before = copy(addon.db)
-    controls.freeMoveX:GetScript("OnEnterPressed")(controls.freeMoveX)
+    controls.freeMoveX.editBox:GetScript("OnEnterPressed")(controls.freeMoveX.editBox)
     controls.freeMoveReset:Click(); controls.freeMovePreview:Click()
     same(addon.db, before); equal(addon.previewState.mode, "off")
     equal(panel.mobilityEditor:GetHeight(), 424)
     available = true; addon:RefreshOptions()
     truthy(panel.freeMoveSection:IsShown()); truthy(controls.freeMoveX:IsEnabled())
-    equal(tonumber(controls.freeMoveX:GetText()), 0, "obsolete draft does not reappear")
+    equal(controls.freeMoveX:GetValue(), 0, "obsolete draft does not reappear")
     addon.GetPreviewEntries = function() return {} end
     addon:RefreshOptions()
     equal(controls.generalTest:IsEnabled(), false)
@@ -162,17 +165,24 @@ end)
 
 test("contextual tests stop immediately at close Escape combat and specialization boundaries", function()
     for _, boundary in ipairs({ "close", "escape", "combat", "spec" }) do
-        local _, addon, state, panel, controls = Open()
+        local env, addon, state, panel, controls = Open()
         addon:SelectOptionsCategory("mobility")
         controls.mobilityPreview:Click(); truthy(VisibleSamples(addon) > 0)
-        controls.mobilityX:SetFocus()
+        UserText(controls.mobilityX, "456")
         if boundary == "close" then controls.close:Click()
-        elseif boundary == "escape" then controls.mobilityX:GetScript("OnEscapePressed")(controls.mobilityX)
+        elseif boundary == "escape" then
+            -- The editor consumes its first Escape. A later unfocused Escape
+            -- uses Blizzard's UISpecialFrames close path.
+            local edit = controls.mobilityX.editBox
+            edit:GetScript("OnEscapePressed")(edit)
+            truthy(panel:IsShown(), "numeric Escape cancels only its draft")
+            for _, name in ipairs(env.UISpecialFrames) do if name == panel:GetName() then env[name]:Hide() end end
         elseif boundary == "combat" then state.inCombat = true; state:fire("PLAYER_REGEN_DISABLED")
         else state.specID = 63; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player") end
         equal(addon.previewState.mode, "off", boundary .. " stops the shared engine synchronously")
         equal(VisibleSamples(addon), 0)
-        equal(controls.mobilityX:HasFocus(), false)
+        equal(controls.mobilityX.editBox:HasFocus(), false)
+        equal(addon:GetMobilityConfig().position.x, 0, "boundary discards the numeric draft")
         for _, frame in ipairs(state.frames) do equal(frame:GetScript("OnUpdate"), nil) end
         if boundary ~= "spec" then equal(panel:IsShown(), false) end
         equal(#state.errors, 0)

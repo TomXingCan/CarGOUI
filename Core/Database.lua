@@ -452,11 +452,11 @@ function addon:GetProcRegionAppearance(entry)
     return self:NormalizeProcAppearance(type(region) == "table" and region.appearance or nil)
 end
 
-function addon:SetProcRegionAppearance(entry, patch)
+function addon:SetProcRegionAppearance(entry, patch, options)
     if not self:GetCurrentProcRegion(entry) then return false, addon:Text("Choose a defined Proc region for your current specialization.") end
     local valid, message = self:ValidateProcAppearance(patch, true)
     if not valid then return false, message end
-    return self:UpdateSettings({ proc = { regions = { [entry.id] = { appearance = patch } } } })
+    return self:UpdateSettings({ proc = { regions = { [entry.id] = { appearance = patch } } } }, options)
 end
 
 function addon:ResetProcRegionAppearance(entry)
@@ -509,7 +509,20 @@ local function PositionChanges(patch, entries)
     if any then return changes end
 end
 
-function addon:UpdateSettings(patch)
+local function NumericAppearance(patch)
+    if type(patch) ~= "table" then return false end
+    for key, value in pairs(patch) do
+        if key == "offset" then
+            for axis in pairs(value) do if axis ~= "x" and axis ~= "y" then return false end end
+        elseif key == "animation" then
+            for setting in pairs(value) do if setting ~= "speed" and setting ~= "intensity" then return false end end
+        elseif key ~= "alpha" and key ~= "scale" and key ~= "desaturation"
+            and key ~= "rotation" and key ~= "width" and key ~= "height" then return false end
+    end
+    return true
+end
+
+function addon:UpdateSettings(patch, options)
     if not self.db then return false, addon:Text("Settings are not initialized yet.") end
     if type(patch) ~= "table" then return false, addon:Text("Settings must be supplied as a table.") end
     local optionsOnly = patch.options ~= nil
@@ -523,7 +536,7 @@ function addon:UpdateSettings(patch)
         if patch.options.position and self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
         if patch.options.animatedTitle ~= nil and self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
         if patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
-        if self.RefreshOptions then self:RefreshOptions() end
+        if not (options and options.skipOptionsRefresh) and self.RefreshOptions then self:RefreshOptions() end
         return true
     end
     local class = self:GetPlayerContext()
@@ -615,11 +628,21 @@ function addon:UpdateSettings(patch)
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
         if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end
         if self.RefreshProcAppearance then
-            for _, entry in pairs(changedAppearances) do self:RefreshProcAppearance(entry) end
+            for id, entry in pairs(changedAppearances) do
+                local appearance = patch.proc.regions[id].appearance
+                -- Only validated numeric presentation edits may retain motion.
+                -- Modes, sources and resets still take the full cleanup path.
+                if options and options.continuousAppearance and NumericAppearance(appearance)
+                    and self.RefreshProcNumericAppearance then self:RefreshProcNumericAppearance(entry)
+                else self:RefreshProcAppearance(entry) end
+            end
         end
     else self:ApplySettings() end
     if patch.options and patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
-    if stylesOnly and next(changedColors) and not next(changedStyles) then
+    if options and options.skipOptionsRefresh then
+        -- A numeric row already synchronizes its committed value. Avoid menu
+        -- rebuilding and fresh callbacks on each drag; other callers refresh.
+    elseif stylesOnly and next(changedColors) and not next(changedStyles) then
         if self.RefreshProcColorControls then self:RefreshProcColorControls() end
     elseif self.RefreshOptions then self:RefreshOptions() end
     return true

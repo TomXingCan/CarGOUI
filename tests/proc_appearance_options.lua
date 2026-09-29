@@ -31,9 +31,11 @@ local function Choose(control, value)
 end
 
 local function Enter(control, value)
-    control:SetText(tostring(value))
-    control:GetScript("OnTextChanged")(control, true)
-    control:GetScript("OnEnterPressed")(control)
+    if not control.editing then control.valueButton:Click() end
+    local edit = control.editBox
+    edit:SetText(tostring(value))
+    edit:GetScript("OnTextChanged")(edit, true)
+    edit:GetScript("OnEnterPressed")(edit)
 end
 
 test("appearance region editor progressively discloses only custom controls", function()
@@ -84,14 +86,17 @@ test("appearance Proc selector scopes visible stable regions and region switches
     truthy(seen > 1, "multiple real stable regions are selectable")
     Choose(controls.procSelector, controls.procSelector.choices[1].value)
     Choose(controls.procArt_mode, "custom")
-    controls.procArt_alpha:SetText("0.25")
-    controls.procArt_alpha:GetScript("OnTextChanged")(controls.procArt_alpha, true)
+    controls.procArt_alpha.valueButton:Click()
+    local alphaEdit = controls.procArt_alpha.editBox
+    alphaEdit:SetText("25")
+    alphaEdit:GetScript("OnTextChanged")(alphaEdit, true)
     local before = addon:GetSelectedProcColorEntry().id
     for _, region in ipairs(controls.procEntry.choices) do
         if region:IsShown() and region.value ~= before then
             Choose(controls.procEntry, region.value)
-            equal(controls.procArt_alpha.dirty, false)
-            equal(controls.procArt_alpha:GetText(), "1")
+            equal(alphaEdit.dirty, false)
+            equal(controls.procArt_alpha.editing, false)
+            equal(controls.procArt_alpha:GetValue(), 1)
             return
         end
     end
@@ -176,11 +181,11 @@ test("appearance reset changes only selected region artwork and validated edits 
         end
     end
     Choose(controls.procArt_mode, "custom")
-    Enter(controls.procArt_alpha, 0.7)
+    Enter(controls.procArt_alpha, 70)
     Enter(controls.procArt_scale, 1.4)
     Enter(controls.procArt_alpha, "nan")
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.7, "invalid numeric text cannot save")
-    Enter(controls.procArt_alpha, 2)
+    Enter(controls.procArt_alpha, 200)
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.7, "numeric bounds enforced in UI")
     Choose(controls.procArt_active, "breathe")
     controls.procArtReset:Click()
@@ -217,10 +222,10 @@ test("appearance local Timer XY and reset retain independent artwork offsets", f
     local position = copy(addon:GetReminderPosition(entry))
     Enter(controls.procPositionX, "not-a-number")
     same(addon:GetReminderPosition(entry), position)
-    truthy(controls.procPositionX.invalid)
+    truthy(controls.procPositionX.editBox.invalid)
     controls.procPositionReset:Click()
     same(addon:GetReminderPosition(entry), addon:NewReminderPosition())
     same(addon:GetProcRegionAppearance(entry), appearance)
     equal(panel.activeCategory, "proc")
-    equal(controls.procPositionX:GetText(), "0"); equal(controls.procPositionY:GetText(), "0")
+    equal(controls.procPositionX:GetValue(), 0); equal(controls.procPositionY:GetValue(), 0)
 end)

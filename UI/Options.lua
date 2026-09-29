@@ -94,12 +94,11 @@ end
 
 local CUI = addon.CUI
 local Label, Button, EditBox = CUI.Label, CUI.Button, CUI.EditBox
-local CheckBox, Dropdown, Slider = CUI.CheckBox, CUI.Dropdown, CUI.Slider
+local CheckBox, Dropdown, NumberRow = CUI.CheckBox, CUI.Dropdown, CUI.NumberRow
 local Backdrop, Feedback, CloseMenus = CUI.Backdrop, CUI.Feedback, CUI.CloseMenus
 
 local function ClearEdits(panel)
-    panel.mobilityPositionDirty = false
-    panel.freeMovePositionDirty = false
+    CUI.ClearNumericInteractions(panel)
     for _, edit in ipairs(panel.editBoxes) do
         edit.dirty = false
         edit:ClearFocus()
@@ -123,6 +122,15 @@ local function Submit(panel, patch, errorText)
     return ok
 end
 
+local function SubmitNumeric(panel, patch, errorText)
+    local ok = addon:UpdateSettings(patch, { skipOptionsRefresh = true })
+    if ok then
+        CancelReset(panel)
+        Feedback(panel, L.saved)
+    else Feedback(panel, errorText or L.invalid, true) end
+    return ok
+end
+
 local function FontTooltip(control)
     control:HookScript("OnEnter", function(self)
         if not self.fontTooltip then return end
@@ -135,13 +143,6 @@ local function FontTooltip(control)
     end
     control:HookScript("OnLeave", HideTooltip)
     control:HookScript("OnHide", HideTooltip)
-end
-
-local function SetSlider(slider, value)
-    slider:SetValue(value)
-    if not slider.editBox.dirty then
-        slider.editBox:SetText(string.format("%g", value))
-    end
 end
 
 local function EligibleAppearance(kind)
@@ -166,14 +167,14 @@ local function RefreshAppearanceControls(panel)
     local controls = panel.controls
     local allowed = EligibleAppearance(panel.appearanceKind or "mobility")
     if not allowed[panel.selectedAppearanceKey] then
-        panel.selectedAppearanceKey = FirstAppearance(allowed)
         -- Never carry a draft from one entry/spec to another.
-        controls.appearanceFontSize.editBox.dirty = false
-        controls.appearanceScale.editBox.dirty = false
-        controls.appearanceFontSize.editBox:ClearFocus()
-        controls.appearanceScale.editBox:ClearFocus()
+        controls.appearanceFontSize:CancelInteraction()
+        controls.appearanceScale:CancelInteraction()
+        panel.selectedAppearanceKey = FirstAppearance(allowed)
     end
     local key = panel.selectedAppearanceKey
+    controls.appearanceFontSize:SetContext(key)
+    controls.appearanceScale:SetContext(key)
     local context = addon:GetAppearanceContext(panel.appearanceKind or "mobility")
     -- Reuse the existing field as a read-only context label, not a selector.
     controls.appearanceEntry.menu:Hide()
@@ -184,8 +185,6 @@ local function RefreshAppearanceControls(panel)
         "appearanceShadow", "appearanceScale", "appearanceReset" }) do
         controls[name]:SetEnabled(key ~= nil)
     end
-    controls.appearanceFontSize.editBox:SetEnabled(key ~= nil)
-    controls.appearanceScale.editBox:SetEnabled(key ~= nil)
     controls.appearancePreview:SetEnabled(key ~= nil and not InCombatLockdown()
         and (panel.appearanceKind == "proc" or addon:GetMobilityEntry() ~= nil))
     if key then
@@ -211,8 +210,8 @@ local function RefreshAppearanceControls(panel)
         controls.appearanceFont.fontTooltip = fontStatus
         controls.appearanceOutline:SelectValue(style.font.outline)
         controls.appearanceShadow:SetChecked(style.shadow.enabled)
-        SetSlider(controls.appearanceFontSize, style.font.size)
-        SetSlider(controls.appearanceScale, style.scale)
+        controls.appearanceFontSize:SetValue(style.font.size)
+        controls.appearanceScale:SetValue(style.scale)
     else
         controls.appearanceFontStatus:SetText("")
         controls.appearanceFont.fontTooltip = nil
@@ -225,6 +224,7 @@ end
 function addon:OpenAppearance(kind, key)
     local panel = self.optionsFrame
     if not panel then return end
+    CUI.ClearNumericInteractions(panel)
     panel.appearanceKind = kind == "proc" and "proc" or "mobility"
     local allowed = EligibleAppearance(panel.appearanceKind)
     panel.selectedAppearanceKey = FirstAppearance(allowed)
@@ -263,10 +263,9 @@ function addon:RefreshMobilityOptions()
     local entry = self.GetMobilityEntry and self:GetMobilityEntry() or nil
     local id = entry and entry.id
     if panel.mobilityEntryId ~= id then
+        controls.mobilityX:CancelInteraction()
+        controls.mobilityY:CancelInteraction()
         panel.mobilityEntryId = id
-        panel.mobilityPositionDirty = false
-        controls.mobilityX:ClearFocus()
-        controls.mobilityY:ClearFocus()
     end
     controls.mobilityEnabled:SetChecked(self:GetMobilityConfig().enabled)
     local spellName = state.spellName and self:GetLocalizedSpellName(state.spellID, state.spellName) or L.mobilityNoSpell
@@ -300,10 +299,10 @@ function addon:RefreshMobilityOptions()
                 or addon:Text("Per-skill details are available in Copy diagnostics.")))
     else SetPublicText(panel.mobilityStatus, string.format(L.mobilityStatus, self:Text(state.status or "Unknown")) .. "\n" .. reason) end
     local position = self:GetMobilityConfig().position
-    if not panel.mobilityPositionDirty then
-        SetPublicText(controls.mobilityX, position and string.format("%g", position.x) or "")
-        SetPublicText(controls.mobilityY, position and string.format("%g", position.y) or "")
-    end
+    local context = self:GetAppearanceContext("mobility")
+    local contextKey = context and context.key
+    controls.mobilityX:SetContext(contextKey); controls.mobilityY:SetContext(contextKey)
+    controls.mobilityX:SetValue(position.x); controls.mobilityY:SetValue(position.y)
     local combat = InCombat()
     controls.mobilityPreview:SetEnabled(id ~= nil and state.spellID ~= nil and not combat)
     SetPublicText(panel.mobilityPreviewNote, combat and L.previewCombat or addon:Text("TEST uses fixed samples, never live timing."))
@@ -313,17 +312,16 @@ function addon:RefreshMobilityOptions()
     end
     local freeId = freeEntry and freeEntry.id
     if panel.freeMoveEntryId ~= freeId then
-        panel.freeMoveEntryId, panel.freeMovePositionDirty = freeId, false
-        controls.freeMoveX:ClearFocus(); controls.freeMoveY:ClearFocus()
+        controls.freeMoveX:CancelInteraction(); controls.freeMoveY:CancelInteraction()
+        panel.freeMoveEntryId = freeId
     end
     panel.freeMoveSection:SetShown(freeEntry ~= nil)
     for _, key in ipairs({ "freeMoveX", "freeMoveY", "freeMoveReset" }) do controls[key]:SetEnabled(freeEntry ~= nil) end
     controls.freeMovePreview:SetEnabled(freeEntry ~= nil and not combat)
-    if not panel.freeMovePositionDirty then
-        local freePosition = freeEntry and self:GetReminderPosition(freeEntry)
-        SetPublicText(controls.freeMoveX, freePosition and string.format("%g", freePosition.x) or "")
-        SetPublicText(controls.freeMoveY, freePosition and string.format("%g", freePosition.y) or "")
-    end
+    local freeContext = freeId and contextKey and contextKey .. ":" .. freeId or nil
+    controls.freeMoveX:SetContext(freeContext); controls.freeMoveY:SetContext(freeContext)
+    local freePosition = freeEntry and self:GetReminderPosition(freeEntry) or self:NewReminderPosition()
+    controls.freeMoveX:SetValue(freePosition.x); controls.freeMoveY:SetValue(freePosition.y)
     panel.mobilityEditor:SetHeight(freeEntry and 638 or 424)
     panel.mobilityScroll:RefreshRange()
     RefreshContextualTests(panel)
@@ -383,7 +381,7 @@ function addon:ShowMobilityDiagnostics()
         panel.diagnosticsFrame = dialog
     end
     CloseMenus(panel)
-    -- Copying diagnostics should not discard numbers the user is still editing.
+    -- Ordinary focus loss uses each numeric row's validated commit/cancel path.
     for _, edit in ipairs(panel.editBoxes) do edit:ClearFocus() end
     dialog:Show()
     dialog.RefreshSnapshot()
@@ -597,16 +595,25 @@ local function BuildAppearance(self, panel, appearance)
     panel.controls.appearanceFont:SetWidth(width)
     FontTooltip(panel.controls.appearanceFont)
     panel.controls.appearanceFontStatus = Label(editor, "", 0, -184, width, 60)
-    panel.controls.appearanceFontSize = Slider(panel, editor, L.fontSize, -266, addon.limits.fontSize, 1,
-        function(value) return StylePatch({ font = { size = value or false } }) end, L.invalidFontSize)
+    local function StyleContext() return panel.selectedAppearanceKey end
+    panel.controls.appearanceFontSize = NumberRow(panel, editor, L.fontSize, 0, -266, width,
+        { min = addon.limits.fontSize.min, max = addon.limits.fontSize.max, step = 1,
+            default = addon.factoryReminderStyle.font.size, context = StyleContext, errorText = L.invalidFontSize },
+        function(value, context)
+            return SubmitNumeric(panel, { styles = { [context] = { font = { size = value } } } }, L.invalidFontSize)
+        end)
     panel.controls.appearanceOutline = Dropdown(panel, editor, L.outline, 0, -352, {
         { value = "", label = L.none }, { value = "OUTLINE", label = L.normal },
         { value = "THICKOUTLINE", label = L.thick },
     }, function(value) return StylePatch({ font = { outline = value } }) end)
     panel.controls.appearanceShadow = CheckBox(panel, editor, L.shadow, 0, -424,
         function(value) return StylePatch({ shadow = { enabled = value } }) end)
-    panel.controls.appearanceScale = Slider(panel, editor, L.scale, -476, addon.limits.scale, 0.05,
-        function(value) return StylePatch({ scale = value or false }) end, L.invalidScale)
+    panel.controls.appearanceScale = NumberRow(panel, editor, L.scale, 0, -476, width,
+        { min = addon.limits.scale.min, max = addon.limits.scale.max, step = .01,
+            default = addon.factoryReminderStyle.scale, unit = "×", context = StyleContext, errorText = L.invalidScale },
+        function(value, context)
+            return SubmitNumeric(panel, { styles = { [context] = { scale = value } } }, L.invalidScale)
+        end)
     Label(editor, L.appearanceHint, 0, -556, width, 40)
     panel.controls.appearanceReset = Button(editor, addon:Text("Reset this context's style"), 0, -606, (width - 24) / 2, function()
         ClearEdits(panel)
@@ -653,40 +660,39 @@ local function BuildMobility(self, panel, mobility)
     panel.controls.mobilityDiagnostics = Button(status.content, L.mobilityDiagnostics, right, -110, half,
         function() addon:ShowMobilityDiagnostics() end, "ghost")
 
-    -- Both editors submit an atomic pair, but only the Free move pair uses its
-    -- independent reminder identity. Ordinary offsets belong to the class group.
-    local function PositionPair(parent, prefix, dirtyKey, xLabel, yLabel, buildPatch)
-        Label(parent, xLabel, 0, 0, half, 32, "GameFontNormal")
-        Label(parent, yLabel, right, 0, half, 32, "GameFontNormal")
-        local xEdit, yEdit = EditBox(panel, parent, 0, -36, half), EditBox(panel, parent, right, -36, half)
-        panel.controls[prefix .. "X"], panel.controls[prefix .. "Y"] = xEdit, yEdit
-        local function Commit()
-            local patch = buildPatch(tonumber(xEdit:GetText()) or false, tonumber(yEdit:GetText()) or false)
-            if not patch then return end
-            panel[dirtyKey] = false
-            if Submit(panel, patch, L.invalidPosition) then xEdit:ClearFocus(); yEdit:ClearFocus()
-            else panel[dirtyKey] = true end
+    -- Each axis commits independently; an unfinished draft can never supply the
+    -- other coordinate. Both rows share scope, while Free Move owns its position.
+    local function PositionPair(parent, prefix, xLabel, yLabel, buildPatch)
+        local function Context()
+            local context = addon:GetAppearanceContext("mobility")
+            if prefix == "freeMove" then
+                return context and panel.freeMoveEntryId and context.key .. ":" .. panel.freeMoveEntryId or nil
+            end
+            return context and context.key
         end
-        for _, edit in ipairs({ xEdit, yEdit }) do
-            edit:SetScript("OnEnterPressed", Commit)
-            edit:SetScript("OnTextChanged", function(_, userInput)
-                if userInput and not panel.refreshing then panel[dirtyKey] = true end
-            end)
+        for index, axis in ipairs({ "x", "y" }) do
+            local row = NumberRow(panel, parent, axis == "x" and xLabel or yLabel, 0, -(index - 1) * 38, inner,
+                { min = addon.limits.offset.min, max = addon.limits.offset.max, step = 1, default = 0,
+                    context = Context, errorText = L.invalidPosition }, function(value)
+                    local patch = buildPatch({ [axis] = value })
+                    return patch and SubmitNumeric(panel, patch, L.invalidPosition) or false
+                end)
+            panel.controls[prefix .. axis:upper()] = row
         end
         panel.controls[prefix .. "Reset"] = Button(parent, L.entryReset, right, -76, half, function()
-            local patch = buildPatch(0, 0)
+            panel.controls[prefix .. "X"]:CancelInteraction()
+            panel.controls[prefix .. "Y"]:CancelInteraction()
+            local patch = buildPatch({ x = 0, y = 0 })
             if not patch then return end
-            panel[dirtyKey] = false
-            xEdit:ClearFocus(); yEdit:ClearFocus()
             Submit(panel, patch)
         end, "ghost")
     end
-    PositionPair(position.content, "mobility", "mobilityPositionDirty", L.entryX, L.entryY,
-        function(x, y) return { mobility = { position = { x = x, y = y } } } end)
-    PositionPair(free.content, "freeMove", "freeMovePositionDirty",
-        addon:Text("Free Move position X"), addon:Text("Free Move position Y"), function(x, y)
+    PositionPair(position.content, "mobility", L.entryX, L.entryY,
+        function(position) return { mobility = { position = position } } end)
+    PositionPair(free.content, "freeMove",
+        addon:Text("Free Move position X"), addon:Text("Free Move position Y"), function(position)
             local id = panel.freeMoveEntryId
-            return id and { reminders = { [id] = { position = { x = x, y = y } } } } or nil
+            return id and { reminders = { [id] = { position = position } } } or nil
         end)
     panel.controls.mobilityPreview = Button(position.content, addon:Text("Test Mobility"), 0, -76, half, function()
         local entry = addon.GetMobilityEntry and addon:GetMobilityEntry()
