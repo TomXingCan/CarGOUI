@@ -33,7 +33,7 @@ The picker separates Blizzard / Client and SharedMedia choices, combines duplica
 
 Known client font resources remain valid saved preferences across language changes. The existing `client-default` export identifier remains portable and resolves to the receiving client's default; the four existing named-font identifiers and the `CARGOUICFG:1:` format are unchanged. New shared selections use `LSM:<media-name>` in both saved settings and transfer payloads, never a resolved file path. A missing font renders with Client default while its logical preference remains unchanged and visible; a later font registration refreshes owned live, Preview and pooled font objects. Exports contain no translated labels or language setting. Current-class exports still exclude Options/minimap shell settings. Coordinates, scale, per-region Proc RGB, Free move offsets, import backups, and old RC compatibility retain their existing ownership. See [font architecture](FONT_SYSTEM.md).
 
-Ordinary Options labels allow wrapping at the existing font size; dropdown popups provide more room for localized names. No UTF-8 label is truncated by byte count. The brand artwork and Options layout are retained. No new fonts are bundled.
+Ordinary Options labels allow wrapping at the existing font size; dropdown popups provide more room and tooltips for localized names. No UTF-8 label is truncated by byte count. Original brand artwork is retained inside the [Modern CUI shell](MODERN_UI_1.0.1.md); the new grid and control layer replace the old global layout. No new fonts are bundled. Offline locale fixtures do not certify actual glyph metrics or clipping.
 
 ## Final client checks
 

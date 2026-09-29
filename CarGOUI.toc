@@ -2,7 +2,7 @@
 ## Title: CarGOUI
 ## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 1.0.0
+## Version: 1.0.1
 ## SavedVariables: CarGOUIDB
 ## IconTexture: Interface\AddOns\CarGOUI\Media\Branding\emblem.tga
 ## AddonCompartmentFunc: CarGOUI_OnAddonCompartmentClick
@@ -34,10 +34,13 @@ Config\Defaults.lua
 Database\ProcAssets.lua
 Core\ProcAppearance.lua
 Core\Database.lua
+Core\ProcPresentation.lua
 Database\SettingsMetadata.lua
 Core\SettingsTransfer.lua
 UI\ReminderStyle.lua
 UI\Display.lua
+Core\ProcDiagnostics.lua
+Core\ProcSafety.lua
 Modules\Proc\AuraState.lua
 UI\ProcDisplay.lua
 UI\ProcArtwork.lua
@@ -47,6 +50,9 @@ Modules\Mobility\Runtime.lua
 Modules\Mobility\FreeMove.lua
 Core\Diagnostics.lua
 UI\Preview.lua
+UI\DesignSystem.lua
+UI\Controls.lua
+UI\OptionsShell.lua
 UI\Branding.lua
 UI\Theme.lua
 UI\ProcColorPicker.lua

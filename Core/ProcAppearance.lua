@@ -112,12 +112,55 @@ function addon:NormalizeProcAppearance(value)
     return defaults
 end
 
+local function SameRegion(first, second)
+    return first and second and first.kind == "proc" and second.kind == "proc"
+        and first.id == second.id and first.class == second.class and first.specID == second.specID
+end
+
+-- Picker drafts belong only to presentation. Saved getters and transfer data
+-- remain unchanged until the shared native picker explicitly confirms a color.
+function addon:GetProcArtworkPresentation(entry)
+    local appearance = self:GetProcRegionAppearance(entry)
+    if self.GetProcPresentationPolicy and self:GetProcPresentationPolicy() == "independent" then
+        -- This is a detached rendering snapshot, not a migration of saved mode.
+        -- Explicit Preview can inspect an enabled region while live art is off.
+        appearance.mode = self:IsProcIndependentArtworkRegionEnabled(entry) and "custom" or "timer"
+    elseif self.IsProcLegacyReplacementAllowed and not self:IsProcLegacyReplacementAllowed() then
+        -- Keep saved development overrides intact; only the effective snapshot
+        -- becomes native, including isolated Preview and stale picker drafts.
+        appearance = self:NewProcAppearance()
+    end
+    local draft = self.procArtworkColorPreview
+    if appearance.mode == "custom" and SameRegion(draft, entry) and self:GetCurrentProcRegion(entry) then
+        appearance.artColor = Copy(draft.color)
+    end
+    return appearance
+end
+
+function addon:SetProcArtworkColorPreview(entry, color)
+    local draft = self.procArtworkColorPreview
+    if color == nil then
+        if not SameRegion(draft, entry) then return true end
+        self.procArtworkColorPreview = nil
+    else
+        if not self:GetCurrentProcRegion(entry) or not RGB(color) then return false end
+        if draft and not SameRegion(draft, entry) then self:SetProcArtworkColorPreview(draft, nil) end
+        self.procArtworkColorPreview = { kind = "proc", class = entry.class, specID = entry.specID,
+            id = entry.id, color = Copy(color) }
+    end
+    -- A tint draft changes only owned pixels. Retired native sources may still
+    -- be fading and must keep their suppression until their release callback.
+    if self.RefreshProcContinuousAppearance then self:RefreshProcContinuousAppearance(entry)
+    elseif self.RefreshProcAppearance then self:RefreshProcAppearance(entry) end
+    return true
+end
+
 -- Both TEST and live rendering use this resolver. It reads only explicit
 -- public SHOW data and audited metadata, never a native texture or aura.
 -- Dimensions include the asset's recommended scale; user transforms remain
 -- separate. Anchors always belong to the current region's native artwork.
 function addon:ResolveProcAppearance(entry, appearance, publicState, preview)
-    if appearance == nil and self.GetProcRegionAppearance then appearance = self:GetProcRegionAppearance(entry) end
+    if appearance == nil and self.GetProcRegionAppearance then appearance = self:GetProcArtworkPresentation(entry) end
     local result = self:NormalizeProcAppearance(appearance)
     if result.mode == "timer" then return result end
     if result.mode == "native" then result = self:NewProcAppearance() end

@@ -408,4 +408,63 @@ addon:RegisterLocale("itIT", {
     ["Unknown artwork animation field."] = "Campo animazione immagine sconosciuto.",
     ["Artwork transform is outside its finite bounds."] = "La trasformazione immagine supera i limiti finiti.",
     ["Unknown artwork setting: "] = "Impostazione immagine sconosciuta: ",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "Personaggio attuale / Test rapido",
+    ["Interface"] = "Interfaccia",
+    ["Window"] = "Finestra",
+    ["Free Move position X"] = "Posizione X del movimento libero",
+    ["Free Move position Y"] = "Posizione Y del movimento libero",
+    ["Test Free Move"] = "Prova movimento libero",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "La posizione del movimento libero è indipendente dagli spostamenti della mobilità normale.",
+    ["Per-skill details are available in Copy diagnostics."] = "I dettagli delle singole abilità sono disponibili in «Copia diagnostica».",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "I timer proc nativi condividono lo stile di questa specializzazione. Gli spostamenti delle regioni restano indipendenti; i test contestuali usano esempi separati.",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "Mostra conti alla rovescia sugli effetti proc Blizzard supportati. I test contestuali mostrano esempi separati.",
+    ["Custom color"] = "Colore personalizzato",
+    ["Timer X"] = "Timer X",
+    ["Timer Y"] = "Timer Y",
+    ["Reset timer position"] = "Ripristina posizione del timer",
+    ["Test selected region"] = "Prova regione selezionata",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "Prova mobilità",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - Istantanea manuale della sessione, senza aprire le opzioni.",
+    ["Proc testing is unavailable while Proc is quarantined."] = "I test di Proc non sono disponibili mentre Proc è isolato.",
+    ["Proc is not quarantined."] = "Proc non è isolato.",
+    ["Proc retry completed; current settings remain in effect."] = "Il riavvio di Proc è completato; le impostazioni attuali restano attive.",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Il riavvio di Proc non è riuscito. Copia la diagnostica con /cui diagnostics copy; potrebbe essere necessario ricaricare l’interfaccia.",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc è stato isolato per questa sessione dopo errori ripetuti. Usa /cui diagnostics copy, poi /cui proc retry o /reload.",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0%: mantiene i colori originali; 100%: li rimuove prima della tinta. I valori intermedi mantengono parte dei colori originali.",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "La tinta dipende dalla luminosità e dalla trasparenza dell’immagine; il colore scelto potrebbe non apparire come un colore uniforme.",
+
+    -- Independent artwork strategy.
+    ["Artwork strategy"] = "Strategia grafica",
+    ["Legacy region replacement"] = "Sostituzione regione classica",
+    ["Independent CUI"] = "CUI indipendente",
+    ["Enable independent live artwork"] = "Attiva grafica indipendente in gioco",
+    ["Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."] = "Imposta manualmente a 0 l’opacità degli avvisi incantesimo Blizzard. CUI indipendente richiede spellActivationOverlayOpacity=0 e displaySpellActivationOverlays=0. L’interruttore generale riguarda solo la grafica in gioco.",
+    ["This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."] = "Questo nasconde tutti gli avvisi Blizzard, inclusi i proc non coperti. Non è possibile mantenere un lato nativo. Dopo un arresto o un errore, ripristina manualmente l’opacità degli avvisi Blizzard.",
+    ["Enable independent artwork for this region"] = "Attiva grafica indipendente per questa regione",
+    ["Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."] = "Disattivare nasconde la grafica CUI della regione senza ripristinare un lato nativo. Le regioni attivate restano modificabili e testabili con l’interruttore generale spento. I test usano campioni separati.",
+    ["Region artwork"] = "Grafica della regione",
+    ["Reset artwork settings"] = "Ripristina impostazioni grafiche",
+    ["Enable Proc"] = "Attiva Proc",
+    ["Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples."] = "Proc indipendente usa eventi pubblici degli avvisi incantesimo. Timer e grafica hanno impostazioni separate; i test usano campioni separati.",
+    ["Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts."] = "La grafica CUI indipendente è arrestata o non disponibile. L’opacità degli avvisi Blizzard non cambia; ripristinala manualmente per vedere gli avvisi nativi.",
+    ["Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved."] = "La grafica CUI indipendente è in pausa perché i due valori degli avvisi Blizzard non sono entrambi zero. Le impostazioni di timer e grafica sono conservate.",
+    ["Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching."] = "Impossibile cambiare la strategia grafica Proc: la pulizia precedente è incompleta. Riprova o ricarica l’interfaccia prima di cambiare.",
+    ["Unknown Proc presentation strategy."] = "Strategia grafica Proc sconosciuta.",
+    ["Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc."] = "L’opacità degli avvisi incantesimo Blizzard resta un’impostazione manuale. Ripristinala nelle impostazioni di gioco per vedere gli avvisi nativi dopo un cambio o la disattivazione di Proc.",
+
+    -- Presentation strategy transfer summary.
+    ["Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."] = "Le regioni incluse senza impostazioni grafiche rimuovono le sostituzioni precedenti e usano i valori predefiniti della strategia scelta.",
+    ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "Gli ambiti Proc inclusi senza strategia usano la sostituzione classica. La grafica indipendente richiede l’attivazione esplicita di ogni regione.",
+    ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "Strategia: %s; grafica indipendente in gioco: %s; regioni incluse attivate esplicitamente: %d.",
+    ["Enabled"] = "Attivato",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "La grafica nativa resta sotto il controllo di Blizzard. CUI aggiunge solo timer. Le sostituzioni salvate Personalizzata e Solo timer restano conservate ma inattive; usa CUI indipendente per personalizzare la grafica.",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "Gli ambiti Proc inclusi senza strategia usano la grafica nativa. Le vecchie sostituzioni salvate restano inattive. La grafica indipendente richiede l’attivazione esplicita di ogni regione.",
 })

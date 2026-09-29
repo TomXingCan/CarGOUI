@@ -31,13 +31,47 @@ function addon:ApplyFontSettings(text, style, entry)
     self:ApplyReminderColor(text, entry)
 end
 
+local function ProcPreviewBlocked(self, frame)
+    if frame.channel ~= "preview" or not frame.reminderEntry or frame.reminderEntry.kind ~= "proc" then return false end
+    return not frame.procPreviewReady
+        or (frame.procGuidanceAttempted and not (frame.guidance and frame.guidance.procGuidanceReady))
+        or (self.IsProcQuarantined and self:IsProcQuarantined())
+end
+
 function addon:RefreshReminderFonts()
     for _, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
             local request = self.reminderFontRequests and self.reminderFontRequests[frame.text]
-            if request then ApplyFontFace(self, frame.text, request) end
+            if request and not ProcPreviewBlocked(self, frame) then
+                if frame.reminderEntry and frame.reminderEntry.kind == "proc" and self.RunProcSafe then
+                    if not self:IsProcQuarantined() then self:RunProcSafe("preview", ApplyFontFace, self, frame.text, request) end
+                else ApplyFontFace(self, frame.text, request) end
+            end
         end
     end
+end
+
+local function AcquireProcPreviewFrame(self, pool, entry)
+    self.procPreviewFrameAttempts = self.procPreviewFrameAttempts or {}
+    if self.procPreviewFrameAttempts[entry.id] then
+        error("Proc preview frame construction is incomplete; Reload is required.", 0)
+    end
+    -- A failed factory may already have allocated an inaccessible object.
+    -- A stable Proc sample gets one construction attempt per session, including
+    -- explicit retries. Returned objects are cached before fallible setup.
+    self.procPreviewFrameAttempts[entry.id] = true
+    local frame = CreateFrame("Frame", nil, UIParent)
+    pool[entry.id] = frame
+    self.previewFrames[entry.id] = frame
+    frame.previewKind, frame.reminderEntry, frame.entryId, frame.channel = "proc", entry, entry.id, "preview"
+    frame:Hide()
+    frame:SetFrameStrata("MEDIUM"); frame:SetFrameLevel(10); frame:EnableMouse(false)
+    frame.text = frame:CreateFontString(nil, "OVERLAY")
+    frame.text:SetPoint("CENTER", frame, "CENTER", 0, 0)
+    frame.text:SetJustifyH("CENTER")
+    self:ApplyReminderColor(frame.text, entry)
+    frame.procPreviewReady = true
+    return frame
 end
 
 function addon:AcquireReminderFrame(entry, channel)
@@ -47,7 +81,14 @@ function addon:AcquireReminderFrame(entry, channel)
         pool = {}
         self.reminderFrames[channel] = pool
     end
-    if pool[entry.id] then return pool[entry.id] end
+    local procPreview = entry.kind == "proc" and channel == "preview"
+    if pool[entry.id] then
+        if procPreview and not pool[entry.id].procPreviewReady then
+            error("Proc preview frame construction is incomplete; Reload is required.", 0)
+        end
+        return pool[entry.id]
+    end
+    if procPreview then return AcquireProcPreviewFrame(self, pool, entry) end
 
     local frame = CreateFrame("Frame", nil, UIParent)
     frame:Hide()
@@ -100,28 +141,43 @@ function addon:RenderReminder(frame, entry, content, testMode)
     frame:SetShown(enabled and text ~= "")
 end
 
+local function RefreshFrameStyle(self, frame, key)
+    if frame.nativeAuraOwned then self:StyleAuraReminder(frame)
+    else self:LayoutReminder(frame, frame.reminderEntry) end
+    if frame.mobilityOwned then
+        local size = self:GetReminderStyle(key).font.size
+        frame:SetSize(size * 16, size * 3)
+        frame.text:SetSize(size * 16, size * 3)
+    elseif frame.channel == "preview" then
+        -- Only sample strings enter the ordinary measurement path.
+        frame:SetSize(math.max(1, frame.text:GetStringWidth()) + 8,
+            math.max(1, frame.text:GetStringHeight()) + 8)
+        self:UpdatePreviewGuidance(frame, frame.reminderEntry, frame:IsShown())
+    end
+end
+
+local function RefreshFramePosition(self, frame, entry)
+    if frame.nativeAuraOwned then self:StyleAuraReminder(frame)
+    else self:LayoutReminder(frame, entry) end
+    if frame.channel == "preview" then self:UpdatePreviewGuidance(frame, entry, frame:IsShown()) end
+end
+
+local function RefreshOwnedFrame(self, frame, callback, value)
+    if ProcPreviewBlocked(self, frame) then return end
+    if frame.channel == "preview" and frame.reminderEntry.kind == "proc" and self.RunProcSafe then
+        local ok = self:RunProcSafe("preview", callback, self, frame, value)
+        if not ok and self.StopProcPreview then self:StopProcPreview() end
+    else callback(self, frame, value) end
+end
+
 -- Styling never re-queries combat state or rebinds its DurationObject/alpha.
--- Only frames belonging to this class/module or class/spec style are touched.
+-- A partial or quarantined Proc sample retains configuration without touching
+-- its unfinished widgets. A successful later sample applies the saved style.
 function addon:RefreshReminderStyle(key)
     for _, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
             if frame.styleKey == key and frame.reminderEntry then
-                if frame.nativeAuraOwned then
-                    -- Touch only the public wrapper and our Font object.
-                    self:StyleAuraReminder(frame)
-                else
-                    self:LayoutReminder(frame, frame.reminderEntry)
-                end
-                if frame.mobilityOwned then
-                    local size = self:GetReminderStyle(key).font.size
-                    frame:SetSize(size * 16, size * 3)
-                    frame.text:SetSize(size * 16, size * 3)
-                elseif frame.channel == "preview" then
-                    -- Only sample strings enter the ordinary measurement path.
-                    frame:SetSize(math.max(1, frame.text:GetStringWidth()) + 8,
-                        math.max(1, frame.text:GetStringHeight()) + 8)
-                    self:UpdatePreviewGuidance(frame, frame.reminderEntry, frame:IsShown())
-                end
+                RefreshOwnedFrame(self, frame, RefreshFrameStyle, key)
             end
         end
     end
@@ -129,7 +185,6 @@ end
 
 -- Position ownership is distinct from font ownership: Free move and ordinary
 -- Mobility intentionally share one class font, but never translate together.
--- Only public addon wrappers are positioned; native timing/alpha are untouched.
 function addon:RefreshReminderPositions(changes)
     for _, pool in pairs(self.reminderFrames or {}) do
         for _, frame in pairs(pool) do
@@ -140,13 +195,7 @@ function addon:RefreshReminderPositions(changes)
                     if entry.freeMove then changed = changes.freeMove
                     else changed = changes.mobility end
                 elseif entry.kind == "proc" then changed = changes.proc[entry.id] end
-                if changed then
-                    if frame.nativeAuraOwned then self:StyleAuraReminder(frame)
-                    else self:LayoutReminder(frame, entry) end
-                    if frame.channel == "preview" then
-                        self:UpdatePreviewGuidance(frame, entry, frame:IsShown())
-                    end
-                end
+                if changed then RefreshOwnedFrame(self, frame, RefreshFramePosition, entry) end
             end
         end
     end

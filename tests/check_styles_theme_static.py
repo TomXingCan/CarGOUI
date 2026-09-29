@@ -96,4 +96,28 @@ assert "GetAddOnMemoryUsage" in diagnostics and "GetAddOnCPUUsage" in diagnostic
 assert "scriptProfile disabled" in diagnostics
 assert not re.search(r"C_Timer|OnUpdate|SetCVar|collectgarbage", diagnostics)
 print("PASS CPU/memory diagnostics use explicit runtime snapshots without polling, forced GC or profiling changes")
+
+design = source("UI/DesignSystem.lua")
+controls = source("UI/Controls.lua")
+shell = source("UI/OptionsShell.lua")
+modern = design + controls + shell
+for path in ("UI/DesignSystem.lua", "UI/Controls.lua", "UI/OptionsShell.lua"):
+    assert entries.count(path) == 1 and entries.index(path) < entries.index("UI/Options.lua"), path
+for token in ("surfaceBase", "surfaceRaised", "surfaceHover", "surfaceSelected", "borderSubtle", "borderStrong",
+              "textPrimary", "textSecondary", "textMuted", "textDisabled", "accentStart", "accentEnd", "accentGlow",
+              "danger", "success", "spacingXS", "spacingS", "spacingM", "spacingL", "spacingXL", "controlHeight",
+              "sectionGap", "contentPadding", "motionFast", "motionNormal", "motionSlow"):
+    assert token in design, "Missing central design token: " + token
+assert "SetGradient" in design + controls and "SetColorTexture" in design + controls
+assert not re.search(r"OnUpdate|NewTicker|C_Timer|C_UnitAuras|C_Spell|UnitAura|UnitBuff|GetSpellCooldown|CreateNativeAuraSlot", modern)
+assert not re.search(r"CarGOUIDB|SavedVariables|self\.db|addon\.db|UpdateSettings", modern)
+for path in ("UI/Controls.lua", "UI/OptionsShell.lua", "UI/Options.lua", "UI/ProcAppearanceOptions.lua", "UI/SettingsTransfer.lua"):
+    assert not re.search(r"UIPanelButtonTemplate|UICheckButtonTemplate|InputBoxTemplate|UIPanelScrollFrameTemplate|UIDropDownMenuTemplate|OptionsSliderTemplate", source(path)), path
+assert "RegisterOptionsPage" in shell + options and "builder" in shell + options
+assert not re.search(r'RegisterOptionsPage\s*\(\s*\{[^}]*key\s*=\s*"classTools"', shell + options)
+assert not any("ClassTools" in path or "Research/" in path for path in entries)
+assert "CreateAnimationGroup" in controls and "OnFinished" in controls and "StopMotion" in controls
+assert "OnMouseWheel" in controls and "SetVerticalScroll" in controls
+print("PASS Modern shell has central tokens, native gradients, registered pages and owned controls without stock skins or gameplay calls")
+print("PASS Modern UI motion is event-driven; Class Tools and cosmetic SavedVariables remain absent")
 print("Scope/theme/loading static checks passed; actual-client behavior and performance remain to be accepted.")

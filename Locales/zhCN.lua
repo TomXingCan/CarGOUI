@@ -408,4 +408,63 @@ addon:RegisterLocale("zhCN", {
     ["Unknown artwork animation field."] = "未知的图像动画字段。",
     ["Artwork transform is outside its finite bounds."] = "图像变换数值超出允许的有限范围。",
     ["Unknown artwork setting: "] = "未知的图像设置：",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "当前角色 / 快速测试",
+    ["Interface"] = "界面",
+    ["Window"] = "窗口",
+    ["Free Move position X"] = "自由移动位置 X",
+    ["Free Move position Y"] = "自由移动位置 Y",
+    ["Test Free Move"] = "测试自由移动",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "自由移动位置独立于普通位移提示偏移。",
+    ["Per-skill details are available in Copy diagnostics."] = "各技能详情可通过“复制诊断信息”查看。",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "原生触发计时器共用本专精的样式。各区域偏移独立；本页测试使用单独的样本。",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "在受支持的暴雪触发图形上显示倒计时。本页测试显示单独的样本。",
+    ["Custom color"] = "自定义颜色",
+    ["Timer X"] = "计时器 X",
+    ["Timer Y"] = "计时器 Y",
+    ["Reset timer position"] = "重置计时器位置",
+    ["Test selected region"] = "测试所选区域",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "测试位移提示",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - 手动获取会话快照，无需打开选项。",
+    ["Proc testing is unavailable while Proc is quarantined."] = "Proc 已被隔离，暂时无法进行 Proc 测试。",
+    ["Proc is not quarantined."] = "Proc 未被隔离。",
+    ["Proc retry completed; current settings remain in effect."] = "Proc 重试完成，当前设置仍然生效。",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Proc 重试失败。请使用 /cui diagnostics copy 复制诊断；可能需要重新加载界面。",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc 因重复异常已在本次会话中隔离。请先使用 /cui diagnostics copy，再使用 /cui proc retry 或 /reload。",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0% 保留素材原色；100% 去除原色后再染色；中间值保留部分原色。",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "染色受素材亮暗和透明细节影响，所选颜色未必呈现为均匀的纯色。",
+
+    -- Independent artwork strategy.
+    ["Artwork strategy"] = "图形策略",
+    ["Legacy region replacement"] = "旧版区域替换",
+    ["Independent CUI"] = "独立 CUI",
+    ["Enable independent live artwork"] = "启用独立实战图形",
+    ["Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."] = "请手动将暴雪法术警报不透明度设为 0。独立 CUI 要求 spellActivationOverlayOpacity=0 且 displaySpellActivationOverlays=0。此总开关只影响实战图形。",
+    ["This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."] = "这会隐藏所有暴雪警报，包括未覆盖的 Proc；不支持单侧原生图形。独立 CUI 关闭或故障后，请手动恢复暴雪法术警报不透明度。",
+    ["Enable independent artwork for this region"] = "为此区域启用独立图形",
+    ["Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."] = "关闭后会隐藏此区域的 CUI 图形，不会恢复原生单侧。实战图形总开关关闭时，已启用的区域仍可编辑和测试。测试使用独立样本。",
+    ["Region artwork"] = "区域图形",
+    ["Reset artwork settings"] = "重置图形设置",
+    ["Enable Proc"] = "启用 Proc",
+    ["Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples."] = "独立 Proc 使用公开法术警报事件。计时与图形分别设置；测试使用独立样本。",
+    ["Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts."] = "独立 CUI 图形已停止或不可用。暴雪法术警报不透明度未变；请手动恢复以显示原生警报。",
+    ["Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved."] = "暴雪法术警报的两项设置并非都为零，独立 CUI 图形已暂停。计时与图形设置均已保留。",
+    ["Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching."] = "旧图形尚未清理完成，无法更改 Proc 图形策略。请先重试或重新加载界面。",
+    ["Unknown Proc presentation strategy."] = "未知的 Proc 图形策略。",
+    ["Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc."] = "暴雪法术警报不透明度仍需手动设置。切换策略或关闭 Proc 后，若要显示原生警报，请在游戏设置中手动恢复。",
+
+    -- Presentation strategy transfer summary.
+    ["Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."] = "包含的区域若无图形设置，将清除旧图形覆盖并使用所选策略的默认设置。",
+    ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "包含的 Proc 范围若未指定策略，将使用旧版区域替换。独立图形需要明确启用区域。",
+    ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "策略：%s；独立实战图形：%s；包含且明确启用的区域：%d。",
+    ["Enabled"] = "已启用",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "原生图形由暴雪控制，CUI 只添加计时。已保存的自定义和仅计时图形覆盖设置会保留，但不生效；如需自定义图形，请选择独立 CUI。",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "包含的 Proc 范围若未指定策略，将使用原生图形。已保存的旧覆盖设置不会生效。独立图形需要明确启用区域。",
 })

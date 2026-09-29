@@ -2,6 +2,8 @@
 
 This table records the alpha.10 **Options appearance** increment: 13 class bases, 40 class/spec themes and neutral fallback. Class/spec determines Body only; Header remains Alliance blue, Horde red or neutral.
 
+The [1.0.1 Modern CUI shell](MODERN_UI_1.0.1.md) retains these automatic identities and motif definitions as restrained layers inside a shared graphite/gradient design system. This historical coverage record does not freeze the old full-window colors or stock control skin.
+
 **Theme coverage is not Mobility or Proc coverage.** At alpha.10 only Mage Blink/Shimmer had real monitoring and Proc was Preview-only. Later implementations are recorded separately in [Mobility coverage](MOBILITY_COVERAGE.md) and [Proc coverage](PROC_COVERAGE.md); those later changes do not turn a theme table into gameplay evidence. Reminder colors, configuration scopes, coordinates and timing are not theme data.
 
 New non-Mage palettes/geometries were original design proposals, not individually user-specified art. Mage Arcane/Fire/Frost palettes and watermark endpoints remain exactly the alpha.9 design the user had approved. That prior feedback is not per-theme visual acceptance of a newer package.

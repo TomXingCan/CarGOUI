@@ -408,4 +408,63 @@ addon:RegisterLocale("ruRU", {
     ["Unknown artwork animation field."] = "Неизвестное поле анимации изображения.",
     ["Artwork transform is outside its finite bounds."] = "Преобразование изображения выходит за конечные пределы.",
     ["Unknown artwork setting: "] = "Неизвестная настройка изображения: ",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "Текущий персонаж / Быстрый тест",
+    ["Interface"] = "Интерфейс",
+    ["Window"] = "Окно",
+    ["Free Move position X"] = "Позиция свободного движения X",
+    ["Free Move position Y"] = "Позиция свободного движения Y",
+    ["Test Free Move"] = "Тест свободного движения",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "Позиция свободного движения не зависит от смещения обычных индикаторов мобильности.",
+    ["Per-skill details are available in Copy diagnostics."] = "Сведения по отдельным способностям доступны в разделе «Копировать диагностику».",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "Нативные таймеры срабатываний используют стиль этой специализации. Смещения областей независимы; контекстные тесты используют отдельные образцы.",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "Показывает обратный отсчёт на поддерживаемых эффектах срабатываний Blizzard. Контекстные тесты показывают отдельные образцы.",
+    ["Custom color"] = "Свой цвет",
+    ["Timer X"] = "Таймер X",
+    ["Timer Y"] = "Таймер Y",
+    ["Reset timer position"] = "Сбросить позицию таймера",
+    ["Test selected region"] = "Тест выбранной области",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "Тест мобильности",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - Снимок текущего сеанса вручную; открывать настройки не требуется.",
+    ["Proc testing is unavailable while Proc is quarantined."] = "Тестирование Proc недоступно, пока Proc изолирован.",
+    ["Proc is not quarantined."] = "Proc не изолирован.",
+    ["Proc retry completed; current settings remain in effect."] = "Повторный запуск Proc завершён; текущие настройки остаются в силе.",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Повторный запуск Proc не удался. Скопируйте диагностику командой /cui diagnostics copy; может потребоваться перезагрузка интерфейса.",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "После повторяющихся ошибок Proc изолирован до конца сеанса. Выполните /cui diagnostics copy, затем /cui proc retry или /reload.",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0%: сохраняет исходные цвета; 100%: убирает их перед окрашиванием. Промежуточные значения сохраняют часть исходного цвета.",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "Результат зависит от яркости и прозрачности изображения; выбранный цвет может выглядеть неоднородным.",
+
+    -- Independent artwork strategy.
+    ["Artwork strategy"] = "Стратегия графики",
+    ["Legacy region replacement"] = "Прежняя замена областей",
+    ["Independent CUI"] = "Независимая CUI",
+    ["Enable independent live artwork"] = "Включить независимую графику в игре",
+    ["Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."] = "Вручную установите непрозрачность оповещений Blizzard в 0. Независимой CUI нужны spellActivationOverlayOpacity=0 и displaySpellActivationOverlays=0. Общий переключатель влияет только на графику в игре.",
+    ["This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."] = "Это скрывает все оповещения Blizzard, включая неподдерживаемые проки. Сохранить штатную графику с одной стороны нельзя. После остановки или сбоя CUI вручную восстановите непрозрачность оповещений Blizzard.",
+    ["Enable independent artwork for this region"] = "Включить независимую графику этой области",
+    ["Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."] = "Отключение скрывает графику CUI этой области, не восстанавливая штатную сторону. Включённые области можно редактировать и тестировать при выключенном общем переключателе. Тест использует отдельные образцы.",
+    ["Region artwork"] = "Графика области",
+    ["Reset artwork settings"] = "Сбросить настройки графики",
+    ["Enable Proc"] = "Включить Proc",
+    ["Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples."] = "Независимый Proc использует открытые события оповещений о заклинаниях. Таймеры и графика настраиваются отдельно; тест использует отдельные образцы.",
+    ["Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts."] = "Независимая графика CUI остановлена или недоступна. Непрозрачность оповещений Blizzard не изменена; восстановите её вручную для штатных оповещений.",
+    ["Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved."] = "Независимая графика CUI приостановлена: оба параметра оповещений Blizzard должны быть нулевыми. Настройки таймеров и графики сохранены.",
+    ["Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching."] = "Не удалось сменить стратегию графики Proc: очистка прежней графики не завершена. Повторите попытку или перезагрузите интерфейс перед сменой.",
+    ["Unknown Proc presentation strategy."] = "Неизвестная стратегия графики Proc.",
+    ["Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc."] = "Непрозрачность оповещений Blizzard по-прежнему настраивается вручную. Восстановите её в настройках игры для штатных оповещений после смены стратегии или отключения Proc.",
+
+    -- Presentation strategy transfer summary.
+    ["Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."] = "Включённые области без настроек графики очищают прежние замены и используют значения по умолчанию выбранной стратегии.",
+    ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "Включённые области настроек Proc без стратегии используют прежнюю замену. Для независимой графики необходимо явно включить каждую область.",
+    ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "Стратегия: %s; независимая графика в игре: %s; включённых в импорт и явно активированных областей: %d.",
+    ["Enabled"] = "Включено",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "Штатной графикой управляет Blizzard. CUI добавляет только таймеры. Сохранённые замены «Своя графика» и «Только таймер» остаются в настройках, но не действуют. Для своей графики выберите независимую CUI.",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "Включённые области настроек Proc без стратегии используют штатную графику. Сохранённые старые замены не действуют. Для независимой графики необходимо явно включить каждую область.",
 })

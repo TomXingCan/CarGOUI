@@ -104,8 +104,9 @@ local function setup(saved, loggedIn, client)
     env.CarGOUIDB = saved
     env.SlashCmdList = {}
     env.UISpecialFrames = {}
-    env.UIParent = { name = "UIParent", GetWidth = function() return 1920 end,
-        GetHeight = function() return 1080 end, GetEffectiveScale = function() return 1 end }
+    env.UIParent = { name = "UIParent", GetWidth = function() return client.uiWidth or 1920 end,
+        GetHeight = function() return client.uiHeight or 1080 end,
+        GetEffectiveScale = function() return client.uiScale or 1 end }
     function env.UIParent:GetCenter() return self:GetWidth() / 2, self:GetHeight() / 2 end
     env.STANDARD_TEXT_FONT = client.standardFont or "Fonts\\FRIZQT__.ttf"
     env.GameFontNormal = { template = "GameFontNormal" }
@@ -458,6 +459,13 @@ local function setup(saved, loggedIn, client)
     local object = {}
     function object:GetName() return self.name end
     function object:GetParent() return self.parent end
+    function object:GetChildren()
+        local children = {}
+        for _, frame in ipairs(state.frames) do
+            if frame.parent == self then children[#children + 1] = frame end
+        end
+        return unpack(children)
+    end
     function object:SetParent(parent) self.parent = parent end
     function object:GetObjectType() return self.kind end
     function object:SetPoint(point, relative, relativePoint, x, y)
@@ -471,14 +479,23 @@ local function setup(saved, loggedIn, client)
     function object:GetNumPoints() return self.point and 1 or 0 end
     function object:SetAllPoints(relative) self.allPoints = relative or self.parent end
     function object:SetScrollChild(child) self.scrollChild = child end
+    function object:GetScrollChild() return self.scrollChild end
     function object:UpdateScrollChildRect() self.scrollChildUpdates = (self.scrollChildUpdates or 0) + 1 end
     function object:EnableMouseWheel(value) self.mouseWheelEnabled = value end
-    function object:SetVerticalScroll(value) self.verticalScroll = value end
+    function object:SetVerticalScroll(value)
+        local changed = self.verticalScroll ~= value
+        self.verticalScroll = value
+        if changed and self.scripts.OnVerticalScroll then self.scripts.OnVerticalScroll(self, value) end
+    end
     function object:GetVerticalScroll() return self.verticalScroll or 0 end
     function object:GetVerticalScrollRange() return self.scrollChild and math.max(0, self.scrollChild:GetHeight() - self:GetHeight()) or 0 end
-    function object:SetSize(width, height) self.width, self.height = width, height end
-    function object:SetWidth(width) self.width = width end
-    function object:SetHeight(height) self.height = height end
+    function object:SetSize(width, height)
+        local changed = self.width ~= width or self.height ~= height
+        self.width, self.height = width, height
+        if changed and self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self, width, height) end
+    end
+    function object:SetWidth(width) self:SetSize(width, self.height) end
+    function object:SetHeight(height) self:SetSize(self.width, height) end
     function object:GetWidth() return self.width or (self.allPoints and self.allPoints:GetWidth()) end
     function object:GetHeight() return self.height or (self.allPoints and self.allPoints:GetHeight()) end
     function object:SetScale(scale) self.scale = scale end
@@ -538,19 +555,33 @@ local function setup(saved, loggedIn, client)
     function object:SetFrameLevel(level) self.frameLevel = level end
     function object:GetFrameLevel() return self.frameLevel or 1 end
     function object:EnableMouse(enabled) self.mouseEnabled = enabled end
+    function object:IsMouseEnabled() return self.mouseEnabled == true end
+    function object:SetButtonState(value) self.buttonState = value end
+    function object:GetButtonState() return self.buttonState or "NORMAL" end
     function object:SetScript(event, callback)
         assert(event ~= "OnUpdate" or callback == nil
             or (self.name == "LibDBIcon10_CarGOUI" and self.isMouseDown == true),
             "Only the vendored icon's active mouse drag may use a transient OnUpdate")
-        self.scripts[event] = callback
+        self.baseScripts = self.baseScripts or {}
+        self.baseScripts[event] = callback
+        local hooks = self.scriptHooks and self.scriptHooks[event]
+        if hooks then
+            self.scripts[event] = function(...)
+                if callback then callback(...) end
+                for _, hook in ipairs(hooks) do hook(...) end
+            end
+        else self.scripts[event] = callback end
     end
     function object:GetScript(event) return self.scripts[event] end
     function object:HookScript(event, callback)
-        local previous = self.scripts[event]
-        self:SetScript(event, function(...)
-            if previous then previous(...) end
-            callback(...)
-        end)
+        -- Native post-hooks survive later SetScript replacements. Keep the
+        -- event dispatcher available to fixture calls that simulate events.
+        local previous
+        if self.baseScripts then previous = self.baseScripts[event] else previous = self.scripts[event] end
+        self.scriptHooks = self.scriptHooks or {}
+        self.scriptHooks[event] = self.scriptHooks[event] or {}
+        self.scriptHooks[event][#self.scriptHooks[event] + 1] = callback
+        self:SetScript(event, previous)
     end
     function object:RegisterEvent(event) self.events[event] = true end
     function object:UnregisterEvent(event) self.events[event] = nil end
@@ -583,8 +614,9 @@ local function setup(saved, loggedIn, client)
             "FontString requires a font before setting or measuring text")
     end
     function object:SetText(text)
-        requireFont(self)
+        requireFont(self.buttonLabel or self)
         self.textValue = text
+        if self.buttonLabel then self.buttonLabel:SetText(text) end
         if self.nativeDurationText then self.nativeRenderedText = text end
         state.textWrites = state.textWrites + 1
         if self.scripts.OnTextChanged then self.scripts.OnTextChanged(self, false) end
@@ -600,6 +632,10 @@ local function setup(saved, loggedIn, client)
             self.buttonLabel:SetText(self.textValue or "")
         end
         return self.buttonLabel
+    end
+    function object:SetFontString(fontString)
+        assert(self.kind == "Button" or self.kind == "CheckButton", "SetFontString is a native Button API")
+        self.buttonLabel = fontString
     end
     function object:GetStringWidth()
         if self.nativeDurationText then
@@ -656,7 +692,7 @@ local function setup(saved, loggedIn, client)
     function object:SetRotation(value) self.rotation = value end
     function object:SetDesaturation(value) self.desaturation = value end
     function object:SetGradient(orientation, first, last)
-        equal(orientation, "HORIZONTAL", "Options gradient is native and static")
+        truthy(orientation == "HORIZONTAL" or orientation == "VERTICAL", "native gradient direction is valid")
         self.gradient = { orientation = orientation, first = { first:GetRGBA() }, last = { last:GetRGBA() } }
         state.gradientWrites = state.gradientWrites + 1
     end
@@ -699,9 +735,16 @@ local function setup(saved, loggedIn, client)
     end
     function object:HasFocus() return self.focused or false end
     function object:HighlightText(...) self.highlight = { ... } end
-    function object:SetEnabled(value) self.enabled = not not value end
-    function object:Enable() self:SetEnabled(true) end
-    function object:Disable() self:SetEnabled(false) end
+    local function nativeSetEnabled(self, value)
+        local wasEnabled = self:IsEnabled()
+        self.enabled = not not value
+        local script = self.enabled and "OnEnable" or "OnDisable"
+        if wasEnabled ~= self.enabled and self.scripts[script] then self.scripts[script](self) end
+    end
+    function object:SetEnabled(value) nativeSetEnabled(self, value) end
+    -- Native Enable/Disable do not dispatch through a Lua SetEnabled override.
+    function object:Enable() nativeSetEnabled(self, true) end
+    function object:Disable() nativeSetEnabled(self, false) end
     function object:IsEnabled() return self.enabled ~= false end
     function object:SetChecked(value) self.checked = not not value end
     function object:GetChecked() return self.checked or false end
@@ -711,10 +754,18 @@ local function setup(saved, loggedIn, client)
     function object:SetObeyStepOnDrag(value) self.obeyStep = value end
     function object:SetOrientation(value) self.orientation = value end
     function object:SetThumbTexture(value)
-        self.thumbTexture = self:CreateTexture(nil, "ARTWORK")
+        assert(self.kind == "Slider", "SetThumbTexture is a native Slider API")
+        -- TextureAsset is a path/FileDataID, never an existing SimpleTexture.
+        assert(type(value) == "string" or type(value) == "number",
+            "Slider:SetThumbTexture requires a TextureAsset string or number")
+        self.thumbTextureAsset = value
+        self.thumbTexture = self.thumbTexture or self:CreateTexture(nil, "ARTWORK")
         self.thumbTexture:SetTexture(value)
     end
-    function object:GetThumbTexture() return self.thumbTexture end
+    function object:GetThumbTexture()
+        assert(self.kind == "Slider", "GetThumbTexture is a native Slider API")
+        return self.thumbTexture
+    end
     function object:SetValue(value)
         if self.minValue then value = math.max(self.minValue, value) end
         if self.maxValue then value = math.min(self.maxValue, value) end
@@ -729,7 +780,9 @@ local function setup(saved, loggedIn, client)
     function object:Click()
         if not self:IsEnabled() then return end
         if self.scripts.PreClick then self.scripts.PreClick(self, "LeftButton", false) end
-        if self.kind == "CheckButton" then self:SetChecked(not self:GetChecked()) end
+        -- Retail toggles CheckButton state natively before invoking OnClick;
+        -- it does not call an addon override of the Lua SetChecked method.
+        if self.kind == "CheckButton" then self.checked = not self:GetChecked() end
         if self.scripts.OnClick then self.scripts.OnClick(self, "LeftButton", false) end
         if self.scripts.PostClick then self.scripts.PostClick(self, "LeftButton", false) end
     end
@@ -796,14 +849,21 @@ local function setup(saved, loggedIn, client)
             function animation:SetDuration(value) self.duration = value end
             function animation:SetStartDelay(value) self.startDelay = value end
             function animation:SetEndDelay(value) self.endDelay = value end
-            function animation:SetFromAlpha(value) self.fromAlpha = value end
-            function animation:SetToAlpha(value) self.toAlpha = value end
             function animation:SetSmoothing(value) self.smoothing = value end
-            function animation:SetOffset(x, y) self.offset = { x, y } end
-            function animation:SetScale(x, y) self.scale = { x, y } end
-            function animation:SetFromScale(x, y) self.fromScale = { x, y } end
-            function animation:SetToScale(x, y) self.toScale = { x, y } end
-            function animation:SetDegrees(value) self.degrees = value end
+            -- Retail 12.1 exposes subtype methods only on the matching kind.
+            -- Scale uses SetScaleFrom/To, not the Alpha-style SetFrom/ToScale.
+            if kind == "Alpha" then
+                function animation:SetFromAlpha(value) self.fromAlpha = value end
+                function animation:SetToAlpha(value) self.toAlpha = value end
+            elseif kind == "Translation" then
+                function animation:SetOffset(x, y) self.offset = { x, y } end
+            elseif kind == "Scale" then
+                function animation:SetScale(x, y) self.scale = { x, y } end
+                function animation:SetScaleFrom(x, y) self.fromScale = { x, y } end
+                function animation:SetScaleTo(x, y) self.toScale = { x, y } end
+            elseif kind == "Rotation" then
+                function animation:SetDegrees(value) self.degrees = value end
+            end
             self.animations[#self.animations + 1] = animation
             return animation
         end
@@ -904,10 +964,11 @@ local function setup(saved, loggedIn, client)
             return container.enabled and container:IsVisible()
         end
         function state:refreshNativeAuras()
+            local cleared = {}
             for _, slot in ipairs(self.auraSlots) do
                 -- A native dirty pass is postponed while any public ancestor is
                 -- hidden. Addon shutdown must leave the wrapper shown/alpha=0.
-                if slot.container:IsVisible() then
+                if slot.container:IsVisible() and (slot.container.nativeAuraDirty or NativeVisible(slot.container)) then
                 local candidate
                 if NativeVisible(slot.container) then
                     for _, aura in pairs(self.proc.auras) do
@@ -928,9 +989,10 @@ local function setup(saved, loggedIn, client)
                     binding:UpdateFontString()
                 end
                 self.nativeAuraUpdates = self.nativeAuraUpdates + 1
-                slot.container.nativeAuraDirty = false
+                cleared[slot.container] = true
                 end
             end
+            for container in pairs(cleared) do container.nativeAuraDirty = false end
         end
         function state:nativeAuraText(container)
             self:nativeTick()
@@ -954,19 +1016,27 @@ local function setup(saved, loggedIn, client)
             for _, slot in ipairs(self.auraSlots) do if NativeVisible(slot.container) then count = count + 1 end end
             return count
         end
+        local nativeSlotKeys = {}
         env.CreateFrame = function(kind, name, parent, template)
             local frame = createFrame(kind, name, parent, template)
             if template and template:find("CustomAuraContainerTemplate", 1, true) then
                 equal(kind, "AuraContainer", "custom native aura template uses native AuraContainer type")
                 frame.nativeAuraContainer = true
+                frame.nativeProviderSwitchRegistered = true
+                frame.nativeDynamicListening = false
+                frame.nativeAddSlotCalls = 0
+                nativeSlotKeys[frame] = {}
                 frame.enabled = false
                 function frame:SetUnit(unit) equal(unit, "player", "only player helpful auras are configured"); self.unit = unit end
                 function frame:SetEnabled(value)
                     equal(type(value), "boolean", "native container enable is public lifecycle state")
                     self.enabled = value
+                    self.nativeDynamicListening = value and self:IsVisible() and next(nativeSlotKeys[self]) ~= nil
                     self.nativeAuraDirty = true
                 end
                 function frame:AddAuraSlot(key, filter, configuration)
+                    self.nativeAddSlotCalls = self.nativeAddSlotCalls + 1
+                    assert(not nativeSlotKeys[self][key], "Native AddAuraSlot rejects duplicate stable keys")
                     equal(filter, "HELPFUL", "Proc native filtering is helpful-player only")
                     truthy(configuration.candidateFilters.includeSpellIDs, "candidate filters declare audited aura IDs")
                     for id, enabled in pairs(configuration.candidateFilters.includeSpellIDs) do
@@ -975,7 +1045,17 @@ local function setup(saved, loggedIn, client)
                     local slot = { container = self, key = key, filters = configuration.candidateFilters, children = {} }
                     local button = createFrame("Button", nil, self)
                     slot.button = button
+                    -- Intrinsic forbidden aspects precede initializeFrame.
+                    function button:SetParent() error("AuraButton intrinsic forbids ChangeParent") end
+                    for _, method in ipairs({ "SetAllPoints", "EnableMouse", "SetAlpha", "SetScale", "SetPoint" }) do
+                        local original = button[method]
+                        button[method] = function(object, ...)
+                            assert(not object.nativeAuraRestricted, "Native child cannot be mutated after initialization")
+                            return original(object, ...)
+                        end
+                    end
                     function button:SetDurationText(text, options)
+                        assert(not self.nativeAuraRestricted, "Duration binding is initialization-only")
                         local binding = env.C_DurationUtil.CreateDurationTextBinding()
                         binding:Assign(options.binding)
                         binding:SetFontString(text)
@@ -987,12 +1067,18 @@ local function setup(saved, loggedIn, client)
                         slot.children[#slot.children + 1] = text
                         return text
                     end
-                    state.auraSlots[#state.auraSlots + 1] = slot
-                    configuration.initializeFrame(button)
+                    -- securecallfunction reports callback errors but its result
+                    -- is ignored by the native provider. AddAuraSlot can return
+                    -- normally with partially initialized content.
+                    local initialized, failure = pcall(configuration.initializeFrame, button)
+                    if not initialized then state.errors[#state.errors + 1] = failure end
                     -- Simulates the native restriction boundary after initialization.
                     button.nativeAuraRestricted = true
                     for _, text in ipairs(slot.children) do text.nativeAuraRestricted = true end
-                    state:refreshNativeAuras()
+                    nativeSlotKeys[self][key] = true
+                    state.auraSlots[#state.auraSlots + 1] = slot
+                    self.nativeDynamicListening = self.enabled and self:IsVisible()
+                    self.nativeAuraDirty = true
                     return button
                 end
             end
@@ -1046,6 +1132,11 @@ local function setup(saved, loggedIn, client)
         setfenv(chunk, env)
         chunk("CarGOUI", addon)
     end
+    -- Only explicit development fixtures reopen the historical implementation.
+    -- No shipped setting exposes this override; default fixtures stay release-safe.
+    if client.legacyProcDevelopment then
+        addon.IsProcLegacyReplacementAllowed = function() return true end
+    end
     return env, addon, state
 end
 
@@ -1056,6 +1147,15 @@ local function login(saved, late, client)
     equal(#state.errors, 0, "startup errors")
     return env, addon, state
 end
+
+local function LegacyClient(client)
+    local result = {}
+    for key, value in pairs(client or {}) do result[key] = value end
+    result.legacyProcDevelopment = true
+    return result
+end
+local function legacySetup(saved, late, client) return setup(saved, late, LegacyClient(client)) end
+local function legacyLogin(saved, late, client) return login(saved, late, LegacyClient(client)) end
 
 local function savedPosition(addon, env, x, y)
     equal(addon:GetMobilityConfig().position.x, x, "saved horizontal reminder offset")
@@ -1317,16 +1417,30 @@ local function options(addon)
 end
 
 local function typeText(editBox, value)
+    local row = editBox.slider and editBox or editBox.numericRow
+    if row then
+        if not row.editing then row.valueButton:Click() end
+        editBox = row.editBox
+    end
     editBox:SetText(tostring(value))
     local textChanged = editBox:GetScript("OnTextChanged")
     if textChanged then textChanged(editBox, true) end
+    return editBox
 end
 
 local function enter(editBox, value)
-    typeText(editBox, value)
+    editBox = typeText(editBox, value)
     local callback = editBox:GetScript("OnEnterPressed")
     truthy(callback, "edit box has an Enter handler")
     callback(editBox)
+end
+
+local function dragValue(row, value)
+    local slider = row.slider
+    slider:GetScript("OnMouseDown")(slider, "LeftButton")
+    slider:SetValue(value)
+    slider:GetScript("OnValueChanged")(slider, value, true)
+    slider:GetScript("OnMouseUp")(slider, "LeftButton")
 end
 
 local function choose(dropdown, value)
@@ -1335,6 +1449,11 @@ local function choose(dropdown, value)
     for _, option in ipairs(dropdown.choices) do
         if option.value == value then
             option:Click()
+            if dropdown.menu.cuiState == "closing" then
+                equal(dropdown.menu.cuiInteractive, false, "outgoing menu cannot accept another action")
+                equal(option:IsEnabled(), false, "outgoing rows are disabled during the close animation")
+                dropdown.menu.closeAnimation:GetScript("OnFinished")()
+            end
             equal(dropdown.menu:IsShown(), false, "dropdown closes after selection")
             return
         end
@@ -1406,6 +1525,7 @@ end)
 test("daily automatic-context Appearance controls use shared validation and survive reload", function()
     local env, addon, state = login(nil)
     local panel, controls = options(addon)
+    addon:SelectOptionsCategory("mobility")
     local writes = 0
     local update = addon.UpdateSettings
     addon.UpdateSettings = function(self, patch)
@@ -1421,15 +1541,15 @@ test("daily automatic-context Appearance controls use shared validation and surv
         callback()
         truthy(writes > before, label .. " uses shared context validation")
     end
-    typeText(controls.x, "165"); enter(controls.y, "-85")
+    typeText(controls.mobilityX, "165"); enter(controls.mobilityY, "-85")
     savedPosition(addon, env, 165, -85)
-    controls.enabled:Click(); equal(addon:GetMobilityConfig().enabled, false, "checkbox hides reminders")
-    controls.enabled:Click()
+    controls.mobilityEnabled:Click(); equal(addon:GetMobilityConfig().enabled, false, "checkbox hides reminders")
+    controls.mobilityEnabled:Click()
     addon:OpenAppearance("mobility", "mobility:MAGE")
-    changed(function() controls.appearanceScale:SetValue(1.35) end, "scale slider")
+    changed(function() dragValue(controls.appearanceScale, 1.35) end, "scale slider")
     equal(addon:GetMobilityConfig().style.scale, 1.35, "scale slider saves immediately")
     changed(function() enter(controls.appearanceScale.editBox, "1.6") end, "scale Enter")
-    changed(function() controls.appearanceFontSize:SetValue(36) end, "font slider")
+    changed(function() dragValue(controls.appearanceFontSize, 36) end, "font slider")
     changed(function() enter(controls.appearanceFontSize.editBox, "32") end, "font Enter")
     changed(function() choose(controls.appearanceOutline, "THICKOUTLINE") end, "outline")
     savedFont(addon, 32, "THICKOUTLINE")
@@ -1443,32 +1563,35 @@ test("daily automatic-context Appearance controls use shared validation and surv
     equal(#state.errors, 0, "GUI interactions produce no errors")
 end)
 
-test("pending XY edits are atomic, preserved until Enter, and discarded on close", function()
+test("numeric XY drafts commit their own axis and are discarded at close boundaries", function()
     local env, addon = login(nil)
     local panel, controls = options(addon)
-    typeText(controls.x, "250")
-    typeText(controls.y, "not a number")
+    addon:SelectOptionsCategory("mobility")
+    typeText(controls.mobilityX, "250")
+    savedPosition(addon, env, 0, 0)
+    typeText(controls.mobilityY, "not a number")
+    savedPosition(addon, env, 250, 0)
     local before = copy(addon.db)
-    enter(controls.x, "250")
-    same(addon.db, before, "invalid coordinate pair changes neither axis")
+    enter(controls.mobilityY, "not a number")
+    same(addon.db, before, "invalid axis never changes either coordinate")
     truthy(type(panel.feedback:GetText()) == "string" and #panel.feedback:GetText() > 0,
         "invalid input has visible feedback")
-    controls.enabled:Click()
-    equal(controls.x:GetText(), "250", "unrelated update preserves pending X")
-    equal(controls.y:GetText(), "not a number", "unrelated update preserves pending Y")
-    enter(controls.y, "-125")
+    controls.mobilityEnabled:Click()
+    equal(controls.mobilityX.editBox:GetText(), "250", "committed X remains separate")
+    equal(controls.mobilityY.editBox:GetText(), "not a number", "unrelated update preserves pending Y")
+    enter(controls.mobilityY, "-125")
     savedPosition(addon, env, 250, -125)
-    typeText(controls.x, "900")
-    controls.x:SetFocus()
+    typeText(controls.mobilityX, "900")
+    controls.mobilityX.editBox:SetFocus()
     controls.close:Click()
-    equal(controls.x:HasFocus(), false, "close clears keyboard focus")
+    equal(controls.mobilityX.editBox:HasFocus(), false, "close clears keyboard focus")
     addon:ToggleOptions()
-    equal(tonumber(controls.x:GetText()), 250, "reopen discards unapplied X")
-    equal(tonumber(controls.y:GetText()), -125, "reopen restores saved Y")
-    controls.centerPosition:Click()
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 250, "reopen discards unapplied X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), -125, "reopen restores saved Y")
+    controls.mobilityReset:Click()
     savedPosition(addon, env, 0, 0)
-    equal(tonumber(controls.x:GetText()), 0, "center updates X field")
-    equal(tonumber(controls.y:GetText()), 0, "center updates Y field")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 0, "center updates X field")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), 0, "center updates Y field")
 end)
 
 test("invalid numeric edits show errors without changing saved values", function()
@@ -1494,7 +1617,7 @@ test("categories expose Appearance and usable Import Export while removed Themes
     equal(found.typography, nil, "global typography category is removed")
     equal(found.themes, nil, "Themes category is removed rather than disabled")
     equal(panel.pages.themes, nil, "Themes page is not allocated")
-    for _, key in ipairs({ "general", "mobility", "proc", "preview", "importExport" }) do
+    for _, key in ipairs({ "general", "mobility", "proc", "importExport" }) do
         truthy(found[key] and found[key]:IsEnabled(), key .. " enabled")
         found[key]:Click()
         truthy(panel.pages[key]:IsShown(), key .. " page active")
@@ -1525,7 +1648,7 @@ test("dropdown lifecycle and hidden refresh remain idle", function()
     equal(state.fontWrites, fontWrites, "hidden refresh does not redraw")
     equal(state.textWrites, textWrites, "hidden refresh does not update control text")
     local savedScale = addon:GetMobilityConfig().style.scale
-    controls.appearanceScale:SetValue(2.25)
+    dragValue(controls.appearanceScale, 2.25)
     equal(addon:GetMobilityConfig().style.scale, savedScale, "hidden slider cannot update settings")
     local calls = 0
     local update = addon.UpdateSettings
@@ -1543,6 +1666,7 @@ test("reset requires confirmation and close cancels an unconfirmed reset", funct
     addon:UpdateSettings({ position = { x = 90, y = 45 } })
     addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 36 }, scale = 1.7 })
     local panel, controls = options(addon)
+    addon:SelectOptionsCategory("mobility")
     local before = copy(addon.db)
     controls.reset:Click()
     same(addon.db, before, "first reset click does not mutate settings")
@@ -1550,31 +1674,35 @@ test("reset requires confirmation and close cancels an unconfirmed reset", funct
     addon:ToggleOptions()
     controls.reset:Click()
     same(addon.db, before, "closing cancels old reset confirmation")
-    typeText(controls.x, "999")
+    typeText(controls.mobilityX, "999")
     controls.reset:Click()
     savedPosition(addon, env, 0, 0)
     savedFont(addon, 24, "OUTLINE")
     equal(addon:GetMobilityConfig().style.scale, 1, "confirmed reset restores scale")
-    equal(tonumber(controls.x:GetText()), 0, "reset clears pending X")
-    equal(tonumber(controls.y:GetText()), 0, "reset refreshes Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 0, "reset clears pending X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), 0, "reset refreshes Y")
     truthy(panel:IsShown(), "reset keeps Options open")
 end)
 
-test("Escape from any editable field closes Options and releases input focus", function()
+test("Escape cancels inline numeric editing without closing Options", function()
     local _, addon = login(nil)
     local panel, controls = options(addon)
-    for _, editBox in ipairs({ controls.x, controls.y, controls.appearanceFontSize.editBox, controls.appearanceScale.editBox }) do
-        if not panel:IsShown() then addon:ToggleOptions() end
-        editBox:SetFocus()
+    addon:SelectOptionsCategory("mobility")
+    for _, row in ipairs({ controls.mobilityX, controls.mobilityY, controls.appearanceFontSize, controls.appearanceScale }) do
+        if row == controls.mobilityX or row == controls.mobilityY then addon:SelectOptionsCategory("mobility")
+        else addon:OpenAppearance("mobility") end
+        local before = copy(addon.db)
+        local editBox = typeText(row, "-999")
         local escape = editBox:GetScript("OnEscapePressed")
         truthy(escape, "editable field has Escape handler")
         escape(editBox)
-        equal(panel:IsShown(), false, "Escape closes Options")
+        equal(panel:IsShown(), true, "inline Escape stays on the current page")
         equal(editBox:HasFocus(), false, "Escape releases keyboard focus")
+        same(addon.db, before, "Escape discards draft")
     end
 end)
 
-test("sliders round safely while numeric inputs retain precision and require Enter", function()
+test("sliders round safely while exact inputs preserve precision and valid blur commits", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
     addon:OpenAppearance("mobility", "mobility:MAGE")
@@ -1587,27 +1715,26 @@ test("sliders round safely while numeric inputs retain precision and require Ent
         end
     end
     for _, value in ipairs({ 0.5, 0.5000001, 1.049999999, 2.999999999, 3 }) do
-        controls.appearanceScale:SetValue(value)
+        dragValue(controls.appearanceScale, value)
         truthy(addon:IsNumberInRange(addon:GetMobilityConfig().style.scale, addon.limits.scale), "rounded scale stays valid")
-        truthy(math.abs(addon:GetMobilityConfig().style.scale * 20 - math.floor(addon:GetMobilityConfig().style.scale * 20 + 0.5)) < 0.00001,
-            "slider produces 0.05 increments")
+        truthy(math.abs(addon:GetMobilityConfig().style.scale * 100 - math.floor(addon:GetMobilityConfig().style.scale * 100 + 0.5)) < 0.00001,
+            "slider produces 0.01 increments")
     end
     enter(controls.appearanceScale.editBox, "1.2375")
     equal(addon:GetMobilityConfig().style.scale, 1.2375, "typed scale keeps precision")
     enter(controls.appearanceFontSize.editBox, "31.5")
     equal(addon:GetMobilityConfig().style.font.size, 31.5, "typed font size keeps precision")
     typeText(controls.appearanceScale.editBox, "2.8")
+    equal(addon:GetMobilityConfig().style.scale, 1.2375, "text remains a draft while editing")
     typeText(controls.appearanceFontSize.editBox, "70")
-    controls.appearanceScale.editBox:SetFocus()
-    controls.appearanceScale.editBox:ClearFocus()
-    controls.appearanceFontSize.editBox:SetFocus()
     controls.appearanceFontSize.editBox:ClearFocus()
-    equal(addon:GetMobilityConfig().style.scale, 1.2375, "unconfirmed scale stays pending")
-    equal(addon:GetMobilityConfig().style.font.size, 31.5, "unconfirmed font stays pending")
+    equal(addon:GetMobilityConfig().style.scale, 2.8, "switching inline editors commits a valid focused value")
+    equal(addon:GetMobilityConfig().style.font.size, 70, "valid blur commits font")
+    typeText(controls.appearanceFontSize.editBox, "65")
     panel:Hide()
     addon:ToggleOptions()
-    equal(tonumber(controls.appearanceScale.editBox:GetText()), 1.2375, "closing discards pending scale")
-    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 31.5, "closing discards pending font size")
+    equal(tonumber(controls.appearanceScale.editBox:GetText()), 2.8, "reopen retains committed scale")
+    equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 70, "closing cancels the remaining draft")
 end)
 
 test("interactive controls stay inside their pages and panel fits small screens", function()
@@ -1646,15 +1773,18 @@ test("zhCN clients use automatic localization and retain saved appearance on rel
         local panel, controls = addon.optionsFrame, addon.optionsFrame.controls
         local categories = {}
         for _, category in ipairs(panel.categories) do categories[category.key] = category end
-        equal(categories.general:GetText(), "> " .. addon.L.general, "active category follows locale")
+        equal(categories.general:GetText(), addon.L.general, "active category follows locale")
+        truthy(categories.general.selected, "selection is an owned visual state, not an ASCII prefix")
         equal(categories.mobility:GetText(), addon.L.mobility, "Mobility category follows locale")
         equal(controls.close:GetText(), "关闭", "close button uses Simplified Chinese")
         truthy(panel.feedback:GetText():find("Enter", 1, true), "opening guidance teaches Enter")
         truthy(not panel.feedback:GetText():find("Apply", 1, true), "obsolete Apply instruction gone")
-        enter(controls.x, "invalid")
+        addon:SelectOptionsCategory("mobility")
+        enter(controls.mobilityX, "invalid")
         truthy(panel.feedback:GetText():find("X", 1, true), "coordinate error is readable")
-        enter(controls.x, "37")
-        equal(panel.feedback:GetText(), addon.L.saved, "success feedback follows locale")
+        enter(controls.mobilityX, "37")
+        equal(panel.feedback:GetText(), pass == 1 and addon.L.saved or addon.L.immediate,
+            "changed input reports saved; an unchanged correction restores neutral localized guidance")
         addon:OpenAppearance("mobility", "mobility:MAGE")
         equal(controls.appearanceOutline.choices[1]:GetText(), addon.L.none, "dropdown choice follows locale")
         enter(controls.appearanceFontSize.editBox, "32")
@@ -1887,16 +2017,15 @@ test("external single/all preview renders fixed samples and cleans up on stop an
     equal(countKeys(visiblePreviews(addon)), 0, "no samples at login")
     local panel, controls = options(addon)
     equal(panel.previewFrame, nil, "obsolete static in-panel preview removed")
-    addon:SelectOptionsCategory("preview")
+    addon:SelectOptionsCategory("general")
     local entries = addon:GetPreviewEntries()
-    choose(controls.previewEntry, entries[1].id)
     addon:GetProcConfig() -- materialize current-spec configuration before comparing preview-only writes
     local saved = copy(addon.db)
-    controls.previewSingle:Click()
+    truthy(addon:SetPreview("single", entries[1].id))
     equal(addon.previewState.mode, "single", "single preview mode")
     equal(addon.previewState.entryId, entries[1].id, "selected sample remembered for session")
     equal(countKeys(visiblePreviews(addon)), 1, "single mode shows one defined entry")
-    controls.previewAll:Click()
+    controls.generalTest:Click()
     equal(addon.previewState.mode, "all", "all mode selected")
     equal(countKeys(visiblePreviews(addon)), #entries, "all current-spec entries visible")
     local frames = {}
@@ -1919,11 +2048,11 @@ test("external single/all preview renders fixed samples and cleans up on stop an
         end
     end
     same(addon.db, saved, "sample content never pollutes saved reminder settings")
-    controls.previewStop:Click()
+    controls.generalStop:Click()
     equal(addon.previewState.mode, "off", "Stop returns to off")
     equal(countKeys(visiblePreviews(addon)), 0, "Stop hides all simulated reminders")
     for _, frame in pairs(frames) do equal(frame.guidance:IsVisible(), false, "Stop hides region guidance") end
-    controls.previewAll:Click()
+    controls.generalTest:Click()
     for id, frame in pairs(frames) do equal(addon.previewFrames[id], frame, "preview frames reused") end
     controls.close:Click()
     equal(countKeys(visiblePreviews(addon)), 0, "closing window removes external preview")
@@ -1939,18 +2068,20 @@ end)
 test("external preview shares current Proc spec appearance but preserves each stock region center", function()
     local env, addon = login(nil)
     local panel, controls = options(addon)
-    addon:SelectOptionsCategory("preview")
+    addon:SelectOptionsCategory("mobility")
+    addon:SelectOptionsCategory("general")
     local entries = addon:GetPreviewEntries()
     local selected = entries[2]
-    choose(controls.previewEntry, selected.id)
-    controls.previewAll:Click()
-    typeText(controls.entryX, "34"); typeText(controls.entryY, "invalid")
+    controls.generalTest:Click()
+    addon:SelectOptionsCategory("proc")
+    choose(controls.procEntry, selected.id)
+    typeText(controls.procPositionX, "34"); typeText(controls.procPositionY, "invalid")
     local prior = copy(addon.db)
-    enter(controls.entryX, "34")
+    enter(controls.procPositionX, "34")
     same(addon.db, prior, "invalid offset pair is atomic")
-    enter(controls.entryY, "-17")
-    addon:SelectOptionsCategory("general")
-    enter(controls.x, "25"); enter(controls.y, "-50")
+    enter(controls.procPositionY, "-17")
+    addon:SelectOptionsCategory("mobility")
+    enter(controls.mobilityX, "25"); enter(controls.mobilityY, "-50")
     addon:OpenAppearance("proc", selected.id)
     enter(controls.appearanceScale.editBox, "1.5")
     enter(controls.appearanceFontSize.editBox, "40")
@@ -1984,7 +2115,7 @@ test("external preview shares current Proc spec appearance but preserves each st
     options(reloaded); reloaded:SetPreview("single", selected.id)
     reminderAnchor(reloaded.previewFrames[selected.id], selected, reloaded, reloadEnv)
     same(reloaded:GetProcConfig(63).style, addon:GetProcConfig(63).style, "spec style survives reload")
-    addon:SelectOptionsCategory("preview"); controls.entryReset:Click()
+    addon:SelectOptionsCategory("proc"); controls.procPositionReset:Click()
     same(addon:GetReminderPosition(selected), { anchor = "CENTER", x = 0, y = 0 }, "position reset only resets current coordinates")
     equal(addon:GetProcConfig(63).style.font.size, 40, "coordinate reset preserves spec appearance")
 end)
@@ -1992,20 +2123,20 @@ end)
 test("specialization changes clear obsolete previews and unsupported classes disable preview controls", function()
     local _, addon, state = login(nil)
     local panel, controls = options(addon)
-    addon:SelectOptionsCategory("preview")
-    controls.previewAll:Click()
+    addon:SelectOptionsCategory("general")
+    controls.generalTest:Click()
     state.specID = 64
     state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
     equal(countKeys(visiblePreviews(addon)), 0, "spec switch stops obsolete simulated content")
-    controls.previewAll:Click()
+    controls.generalTest:Click()
     equal(countKeys(visiblePreviews(addon)), 5, "new Preview includes current Frost regions plus class-level Free move")
     for id in pairs(visiblePreviews(addon)) do truthy(id:find("mage_frost_", 1, true) or id == "free_move_mage", "old spec samples hidden") end
     state.classToken = "UNKNOWN"
     state:fire("PLAYER_SPECIALIZATION_CHANGED", "player")
     equal(countKeys(visiblePreviews(addon)), 0, "unsupported class removes stale samples")
-    equal(controls.previewSingle:IsEnabled(), false, "unsupported single-preview action disabled")
-    equal(controls.previewAll:IsEnabled(), false, "unsupported all-preview action disabled")
-    truthy(panel.previewStatus:GetText() and #panel.previewStatus:GetText() > 0, "unsupported state explained")
+    equal(controls.mobilityPreview:IsEnabled(), false, "unsupported contextual Mobility action disabled")
+    equal(controls.generalTest:IsEnabled(), false, "unsupported all-preview action disabled")
+    truthy(panel.generalTestStatus:GetText() and #panel.generalTestStatus:GetText() > 0, "unsupported state explained")
     equal(state.realReads, 0, "specialization change does not read real reminder state")
 end)
 
@@ -2245,14 +2376,15 @@ test("branding callbacks stay isolated and ordinary settings do not resize or re
     local initialPlays, initialStops = group.plays, group.stops
     addon:UpdateReminderStyle("mobility:MAGE", { font = { size = 72, outline = "THICKOUTLINE" }, scale = 3 })
     addon:OpenAppearance("mobility", "mobility:MAGE")
-    addon:SelectOptionsCategory("preview")
+    addon:SelectOptionsCategory("mobility")
     addon:SelectOptionsCategory("general")
     panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
     panel.mockCenter = { 1000, 550 }
     panel.header:GetScript("OnDragStop")(panel.header)
     panel.mockCenter = nil
     equal(group.plays, initialPlays, "settings, categories and dragging do not restart playing sweep")
-    equal(group.stops, initialStops, "ordinary settings never interrupt sweep")
+    equal(group.stops, initialStops + 1, "page changes settle the active UI sweep once")
+    equal(group:IsPlaying(), false, "page navigation cannot leave old UI motion active")
     equal(header.wordmark:GetWidth(), base.width, "reminder font/scale do not change brand width")
     equal(header.wordmark:GetHeight(), base.height, "reminder font/scale do not change brand height")
     equal(header.wordmark:GetScale(), base.scale, "reminder scale does not change brand scale")
@@ -2317,14 +2449,14 @@ test("branding theme accents preserve artwork identity and never mutate reminder
     local resources, plays = resourceCounts(state), group.plays
     local automaticAccent = copy(header.sweep.vertexColor)
     truthy(automaticAccent, "automatic theme supplies brand highlight")
-    same(header.accentLine.vertexColor, automaticAccent, "automatic accent applies to line")
+    same(header.accentLine.vertexColor, { 1, 1, 1 }, "product gradient stays independent of faction tint")
     for _, color in ipairs({ false, "bad", {}, { 0.1, 0.2 }, { 0.1, 2, 0.3 }, { 0/0, 0.2, 0.3 } }) do
         equal(addon:UpdateBrandingTheme(color), false, "invalid theme accent rejected")
         same(header.sweep.vertexColor, automaticAccent, "invalid accent leaves previous color intact")
     end
     truthy(addon:UpdateBrandingTheme({ 0.8, 0.7, 0.4 }), "valid theme accent accepted")
     same(header.sweep.vertexColor, { 0.8, 0.7, 0.4 }, "highlight accent updates")
-    same(header.accentLine.vertexColor, { 0.8, 0.7, 0.4 }, "line accent updates")
+    same(header.accentLine.vertexColor, { 1, 1, 1 }, "faction changes preserve the cyan-violet strip")
     same(header.wordmark.vertexColor, wordmarkColor, "base wordmark colors remain authored")
     same(header.emblem.vertexColor, emblemColor, "emblem colors remain authored")
     equal(header.wordmark:GetTexture(), art, "theme retains brand artwork")
@@ -2638,15 +2770,17 @@ test("Mobility Options edits apply on Enter and expose working preview and copya
     local _, addon, state = mobilityLogin(1953, { cooldownStart = 100, cooldownDuration = 15 })
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("mobility")
+    addon:SelectOptionsCategory("mobility")
     truthy(panel.pages.mobility:IsShown(), "Mobility is a working category")
     equal(controls.mobilityEnabled:GetChecked(), true, "Mobility defaults enabled")
     truthy(panel.mobilitySpell:GetText():find("Blink", 1, true), "detected current spell displayed read-only")
     local id = addon:GetMobilityEntry().id
     typeText(controls.mobilityX, "45.5")
+    equal(addon:GetMobilityConfig().position.x, 0, "position text remains a draft")
     typeText(controls.mobilityY, "-72")
-    equal(addon:GetMobilityConfig().position.x, 0, "position waits for Enter")
-    controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
-    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 45.5, y = -72 }, "Enter commits both coordinates atomically")
+    equal(addon:GetMobilityConfig().position.x, 45.5, "valid blur commits X before editing Y")
+    controls.mobilityY.editBox:GetScript("OnEnterPressed")(controls.mobilityY.editBox)
+    same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 45.5, y = -72 }, "Enter commits the current Y axis")
     controls.mobilityTypography:Click()
     truthy(panel.pages.appearance:IsShown(), "Typography shortcut works")
     addon:SelectOptionsCategory("mobility")
@@ -2671,31 +2805,32 @@ test("Mobility pending edits survive live refresh and diagnostic copying but inv
     local _, addon, state = mobilityLogin(212653, data)
     local panel, controls = options(addon)
     addon:SelectOptionsCategory("mobility")
+    addon:SelectOptionsCategory("mobility")
     local id = addon:GetMobilityEntry().id
     typeText(controls.mobilityX, "47")
     typeText(controls.mobilityY, "-65")
     syncEvent(state, "SPELL_UPDATE_COOLDOWN")
-    equal(controls.mobilityX:GetText(), "47", "event refresh preserves pending X")
-    equal(controls.mobilityY:GetText(), "-65", "event refresh preserves pending Y")
+    equal(controls.mobilityX.editBox:GetText(), "47", "event refresh preserves pending X")
+    equal(controls.mobilityY.editBox:GetText(), "-65", "event refresh preserves pending Y")
     controls.mobilityDiagnostics:Click()
     local dialog = panel.diagnosticsFrame
-    equal(controls.mobilityX:GetText(), "47", "copy dialog preserves unsaved X")
-    equal(controls.mobilityY:GetText(), "-65", "copy dialog preserves unsaved Y")
+    equal(controls.mobilityX.editBox:GetText(), "47", "copy dialog preserves unsaved X")
+    equal(controls.mobilityY.editBox:GetText(), "-65", "copy dialog preserves unsaved Y")
     local snapshot = dialog.editBox:GetText()
     typeText(dialog.editBox, "overwrite")
     equal(dialog.editBox:GetText(), snapshot, "diagnostic snapshot permits selection but refuses user editing")
     dialog.close:Click()
-    controls.mobilityY:GetScript("OnEnterPressed")(controls.mobilityY)
+    controls.mobilityY.editBox:GetScript("OnEnterPressed")(controls.mobilityY)
     same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 47, y = -65 }, "Enter after copying commits original pending pair")
     typeText(controls.mobilityX, "invalid")
     typeText(controls.mobilityY, "19")
-    controls.mobilityX:GetScript("OnEnterPressed")(controls.mobilityX)
+    controls.mobilityX.editBox:GetScript("OnEnterPressed")(controls.mobilityX)
     same(addon:GetMobilityConfig().position, { anchor = "CENTER", x = 47, y = -65 }, "invalid X does not partially commit Y")
     truthy(panel.feedback:GetText() ~= "", "invalid pair has visible feedback")
     panel:Hide()
     addon:ToggleOptions()
-    equal(tonumber(controls.mobilityX:GetText()), 47, "closing discards invalid pending X")
-    equal(tonumber(controls.mobilityY:GetText()), -65, "closing discards pending Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 47, "closing discards invalid pending X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), -65, "closing discards pending Y")
     equal(#state.errors, 0, "copy and edit flow raises no errors")
 end)
 
@@ -3216,14 +3351,13 @@ test("automatic Appearance context discards drafts while Proc regions share a sp
     addon:OpenAppearance("mobility")
     truthy(not controls.appearanceEntry:IsEnabled(), "Appearance context is read-only, no skill/class/spec selector")
     enter(controls.appearanceFontSize.editBox, "29")
-    typeText(controls.appearanceFontSize.editBox, "67")
     typeText(controls.appearanceScale.editBox, "2.7")
     addon:SelectOptionsCategory("proc")
     choose(controls.procEntry, "mage_fire_hot_streak_left")
     controls.procAppearance:Click()
     equal(panel.selectedAppearanceKey, "proc:MAGE:63", "Proc style context is current class and spec")
     equal(tonumber(controls.appearanceFontSize.editBox:GetText()), 24, "switching context discards unsubmitted draft")
-    controls.appearanceFontSize:SetValue(45)
+    dragValue(controls.appearanceFontSize, 45)
     equal(addon:GetProcConfig(63).style.font.size, 45, "Proc size saves to spec")
     controls.appearancePreview:Click()
     equal(addon.previewFrames.mage_fire_hot_streak_left.text.font[2], 45, "selected region uses spec style")
@@ -3242,7 +3376,7 @@ test("automatic Appearance context discards drafts while Proc regions share a sp
     end
     local file = assert(io.open(root .. "/UI/Options.lua", "r")); local source = file:read("*a"); file:close()
     truthy(not source:find("real Proc / Buff monitoring is not implemented", 1, true), "obsolete Proc-only sample claim is removed")
-    truthy(panel.procStatus:GetText():find("Test Mode", 1, true) and panel.procStatus:GetText():find("separate", 1, true), "Proc page distinguishes native runtime from sample mode")
+    truthy(panel.procStatus:GetText():find("Contextual tests", 1, true) and panel.procStatus:GetText():find("separate", 1, true), "Proc page distinguishes native runtime from sample mode")
 end)
 
 test("Blink Shimmer and all Mage specs share every Mobility preference without merging Proc", function()
@@ -3327,7 +3461,7 @@ test("updating Proc spec style updates all its regions while leaving Mobility fo
     end
 end)
 
-test("Alliance Arcane resolves an Alliance-only blue Header and separate violet Arcane Body", function()
+test("Alliance Arcane preserves faction and spec identity inside the graphite CUI design", function()
     local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
     equal(state.factionReads, 0, "hidden Options performs no decorative identity reads")
     local before = copy(addon.db)
@@ -3339,10 +3473,11 @@ test("Alliance Arcane resolves an Alliance-only blue Header and separate violet 
     equal(info.themeKey, "alliance_arcane", "specified combination selected")
     equal(info.headerKey, "alliance", "Header identity depends only on faction")
     equal(info.bodyKey, "arcane", "Body identity depends only on current class and spec")
-    same(panel.theme.header.gradient.first, { 0.025, 0.075, 0.18, 1 }, "header starts in deep Alliance blue")
-    same(panel.theme.header.gradient.last, { 0.06, 0.28, 0.52, 1 }, "header remains blue rather than blending spec color")
-    same(panel.theme.body.gradient.first, { 0.064, 0.031, 0.11, 1 }, "body starts in deep Arcane violet")
-    same(panel.theme.body.gradient.last, { 0.17, 0.078, 0.245, 1 }, "body has a restrained violet gradient")
+    same(panel.theme.header.gradient.first, { 0.025, 0.075, 0.18, .18 }, "header retains a restrained faction identity layer")
+    same(panel.theme.header.gradient.last, { 0.06, 0.28, 0.52, .18 }, "header identity remains independent of spec")
+    local base, raised = addon.DesignSystem.surfaceBase, addon.DesignSystem.surfaceRaised
+    same(panel.theme.body.gradient.first, { base[1], base[2], base[3], 1 }, "body uses central graphite surface")
+    same(panel.theme.body.gradient.last, { raised[1], raised[2], raised[3], 1 }, "body depth uses the raised surface token")
     same(panel.brandingHeader.sweep.vertexColor, { 0.30, 0.66, 1.00 }, "brand emphasis belongs to faction Header")
     equal(panel.brandingHeader.wordmark.vertexColor, nil, "blue/gold wordmark receives no tint")
     same(addon.db, before, "automatic theme never writes saved reminder settings")
@@ -3776,7 +3911,7 @@ test("empty editor and diagnostic backgrounds release dragging without consuming
     editor:Show(); panel.mockCenter = nil
     enter(controls.appearanceFontSize.editBox, "35")
     equal(addon:GetMobilityConfig().style.font.size, 35, "Enter still edits font after background drag")
-    controls.appearanceScale:SetValue(1.25)
+    dragValue(controls.appearanceScale, 1.25)
     equal(addon:GetMobilityConfig().style.scale, 1.25, "slider drag retains slider semantics")
     choose(controls.appearanceOutline, "THICKOUTLINE")
     equal(addon:GetMobilityConfig().style.font.outline, "THICKOUTLINE", "dropdown remains functional")
@@ -3795,6 +3930,7 @@ end)
 test("faction Header and specialization Body update independently and keep scoped configuration untouched", function()
     local _, addon, state = login(nil, false, { specID = 62, faction = "Alliance" })
     local panel, controls = options(addon)
+    addon:SelectOptionsCategory("mobility")
     local saved = copy(addon.db)
     local header = panel.theme.header.gradient
     local brand = panel.brandingHeader.sweep.vertexColor
@@ -3805,10 +3941,10 @@ test("faction Header and specialization Body update independently and keep scope
     truthy(panel.theme.body.gradient ~= body, "changing spec refreshes Body palette")
     equal(panel.theme.bodyKey, "fire", "Fire Body selected independently")
     local fire = panel.theme.body.gradient
-    local input = controls.x.optionsThemeRecord.fill.color
+    local input = controls.mobilityX.editBox.optionsThemeRecord.fill.color
     state.faction = "Horde"; addon:RefreshOptionsTheme()
     equal(panel.theme.body.gradient, fire, "changing faction does not rewrite Body gradient")
-    equal(controls.x.optionsThemeRecord.fill.color, input, "changing faction does not rewrite input body skin")
+    equal(controls.mobilityX.editBox.optionsThemeRecord.fill.color, input, "changing faction does not rewrite input body skin")
     equal(panel.theme.headerKey, "horde", "Horde Header selected automatically")
     truthy(panel.theme.header.gradient.first[1] > panel.theme.header.gradient.first[3], "Horde Header remains red")
     truthy(panel.theme.header.gradient.last[1] > panel.theme.header.gradient.last[3], "both faction gradient endpoints are red")
@@ -3838,12 +3974,13 @@ test("Arcane Fire and Frost Body watermarks use distinct native endpoint geometr
             equal(line.parent, panel, "watermark adds no mouse-intercepting overlay frame")
             if line:IsShown() then
                 visible = visible + 1
-                equal(line.color[4], 0.16, "watermark has low fixed opacity")
+                equal(line.color[4], 0.16 * .55, "cropped watermark has reduced fixed opacity")
                 for _, point in ipairs({ line.startPoint, line.endPoint }) do
                     equal(point[1], "BOTTOMRIGHT", "native endpoint uses stable panel anchor")
                     equal(point[2], panel, "native endpoint is relative to Options")
-                    truthy(math.abs(point[3] + 122) <= 100 and math.abs(point[4] - 202) <= 100,
-                        "both endpoints fit the 200-pixel watermark bounds")
+                    truthy(point[3] >= -300.000001 and point[3] <= -23.999999
+                        and point[4] >= 79.999999 and point[4] <= 310.000001,
+                        "both endpoints fit the quiet background crop")
                 end
                 truthy(line.startPoint[3] ~= line.endPoint[3] or line.startPoint[4] ~= line.endPoint[4], "native segment is non-degenerate")
                 truthy(line.thickness == 2 or line.thickness == 3, "watermark has restrained line thickness")
@@ -3852,11 +3989,11 @@ test("Arcane Fire and Frost Body watermarks use distinct native endpoint geometr
             end
         end
         counts[spec] = visible; signatures[spec] = table.concat(pieces, ";")
-        equal(panel.theme.motifCount, visible, "reported motif count matches visible static strokes")
+        equal(panel.theme.motifVisibleCount, visible, "reported visible count matches clipped strokes")
     end
-    equal(counts[62], 60, "Arcane rune-ring motif")
-    equal(counts[63], 27, "Fire flame motif")
-    equal(counts[64], 36, "Frost crystalline motif")
+    for spec, total in pairs({ [62] = 60, [63] = 27, [64] = 36 }) do
+        truthy(counts[spec] > 0 and counts[spec] < total, "only part of each class/spec motif remains visible")
+    end
     truthy(signatures[62] ~= signatures[63] and signatures[63] ~= signatures[64] and signatures[62] ~= signatures[64],
         "each specialization has different geometry, not merely a color swap")
     same(resourceCounts(state), resources, "theme-only updates allocate no extra lines textures frames fonts or animations")
@@ -4067,10 +4204,13 @@ test("repeated full-roster theme cycles reuse 64 Lines and leave no stale motifs
                 addon:RefreshOptionsTheme()
                 local expected = #addon:BuildOptionsThemeMotif(addon.optionBodyThemes[addon:GetAutomaticThemeInfo().bodyKey].motif)
                 equal(panel.theme.motifCount, expected, "new motif owns exact active stroke count")
+                local visible = 0
                 for i, line in ipairs(panel.theme.motif) do
                     equal(line, lines[i], "every class reuses native Line pool")
-                    equal(line:IsShown(), i <= expected, "new motif hides every unused old stroke")
+                    if i > expected then equal(line:IsShown(), false, "unused old strokes stay hidden") end
+                    if line:IsShown() then visible = visible + 1 end
                 end
+                equal(visible, panel.theme.motifVisibleCount, "reported crop matches visible pool members")
                 equal(panel.theme.header.gradient, header, "Body cycling preserves same-faction Header object")
             end
         end
@@ -5241,7 +5381,7 @@ test("Proc Options checkbox releases native slots after one pass and diagnostics
     controls.procEnabled:Click()
     equal(procText(addon, state, "mage_fire_hot_streak_left"), "18.0", "checkbox reenable synchronizes the already active real aura")
     equal(addon:GetRuntimeLoadDiagnostics().nativeAuraSlots, before.nativeAuraSlots, "reenable reuses the same bounded native slots")
-    truthy(panel.procStatus:GetText():find("Test Mode", 1, true) and panel.procStatus:GetText():find("separate", 1, true), "working controls retain honest mode separation")
+    truthy(panel.procStatus:GetText():find("Contextual tests", 1, true) and panel.procStatus:GetText():find("separate", 1, true), "working controls retain honest mode separation")
 end)
 
 test("missing or secret stock geometry disables Proc with precise diagnostics and safely resumes on layout recovery", function()
@@ -5800,6 +5940,7 @@ end)
 test("combat closure cleans drag keyboard menus picker draft and Test Mode without saving uncommitted edits", function()
     local env, addon, state = auraFixture(62)
     local panel, controls = options(addon)
+    addon:SelectOptionsCategory("mobility")
     addon:SelectOptionsCategory("proc")
     local entry = regionEntry(addon, "mage_arcane_clearcasting_left")
     addon:SetProcRegionColor(entry, { r = 0.1, g = 0.2, b = 0.9 })
@@ -5809,7 +5950,7 @@ test("combat closure cleans drag keyboard menus picker draft and Test Mode witho
     controls.procColor:Click(); state:pickerChange(1, 0, 0)
     controls.procEntry:Click()
     truthy(controls.procEntry.menu:IsShown(), "region menu is open before cleanup")
-    typeText(controls.x, "918"); controls.x:SetFocus()
+    typeText(controls.procPositionX, "918"); controls.procPositionX.editBox:SetFocus()
     addon:BeginOptionsDrag("LeftButton")
     panel.mockCenter = { 1003, 517 }
     local savedProc = copy(addon:GetProcConfig())
@@ -5817,7 +5958,7 @@ test("combat closure cleans drag keyboard menus picker draft and Test Mode witho
     state:fire("PLAYER_REGEN_DISABLED"); state:flushTimers()
     equal(panel:IsShown(), false, "entering combat closes the entire Options window")
     truthy(not panel.dragging and not panel.moving and state.movingFrame == nil, "combat cleanup ends dragging")
-    equal(controls.x:HasFocus(), false, "combat cleanup releases keyboard focus")
+    equal(controls.procPositionX.editBox:HasFocus(), false, "combat cleanup releases keyboard focus")
     for _, dropdown in ipairs(panel.dropdowns) do equal(dropdown.menu:IsShown(), false, "all menus close") end
     equal(env.ColorPickerFrame:IsShown(), false, "owned native picker closes")
     equal(addon.procColorPickerSession, nil, "owned picker callbacks and session are detached")
@@ -5831,7 +5972,7 @@ test("combat closure cleans drag keyboard menus picker draft and Test Mode witho
     state:fire("PLAYER_REGEN_ENABLED")
     equal(panel:IsShown(), false, "automatic hiding alone never reopens at combat end")
     addon:OpenOptions()
-    equal(tonumber(controls.x:GetText()), savedMobility.position.x, "reopen restores saved value rather than discarded text")
+    equal(tonumber(controls.procPositionX.editBox:GetText()), savedProc.regions[entry.id].position.x, "reopen restores saved value rather than discarded text")
     same(procFrame(addon, entry.id).text.textColor, { 0.1, 0.2, 0.9, 1 }, "cancel restores committed live region RGB")
 end)
 
@@ -6451,33 +6592,33 @@ test("XY FIX reproduces and isolates Free move from Mage ordinary position in li
     equal(#state.errors, 0, "no mock errors")
 end)
 
-test("XY FIX existing GUI Free move inputs do not write Mobility inputs and Enter remains atomic", function()
+test("XY FIX numeric Free move axes stay independent of Mobility and reject invalid input", function()
     local _, addon, state = mobilityLogin(212653, { charges = 0, maxCharges = 2,
         chargeStart = 95, chargeDuration = 20 }, { proc = {} })
     local panel, controls = options(addon)
-    addon:SelectOptionsCategory("preview")
-    choose(controls.previewEntry, "free_move_mage")
-    typeText(controls.entryX, "240"); enter(controls.entryY, "-31")
+    addon:SelectOptionsCategory("mobility")
+    addon:SelectOptionsCategory("mobility")
+    typeText(controls.freeMoveX, "240"); enter(controls.freeMoveY, "-31")
     same(addon:GetMobilityConfig().position, pos(0, 0), "Free move editor does not modify ordinary config")
     same(addon:GetReminderPosition(addon:GetFreeMoveEntry()), pos(240, -31), "Free move Enter updates both axes")
     addon:SelectOptionsCategory("mobility")
-    equal(tonumber(controls.mobilityX:GetText()), 0, "ordinary editor reflects its own X")
-    equal(tonumber(controls.mobilityY:GetText()), 0, "ordinary editor reflects its own Y")
+    equal(tonumber(controls.mobilityX.editBox:GetText()), 0, "ordinary editor reflects its own X")
+    equal(tonumber(controls.mobilityY.editBox:GetText()), 0, "ordinary editor reflects its own Y")
     typeText(controls.mobilityX, "-117"); enter(controls.mobilityY, "53")
-    addon:SelectOptionsCategory("preview")
-    choose(controls.previewEntry, "free_move_mage")
-    equal(tonumber(controls.entryX:GetText()), 240, "Free move X survives ordinary editor changes")
-    equal(tonumber(controls.entryY:GetText()), -31, "Free move Y survives ordinary editor changes")
+    addon:SelectOptionsCategory("mobility")
+    equal(tonumber(controls.freeMoveX.editBox:GetText()), 240, "Free move X survives ordinary editor changes")
+    equal(tonumber(controls.freeMoveY.editBox:GetText()), -31, "Free move Y survives ordinary editor changes")
+    enter(controls.freeMoveX, "999")
     local before = copy(addon.db)
-    typeText(controls.entryX, "999"); enter(controls.entryY, "bad")
-    same(addon.db, before, "invalid pair cannot partially write either position scope")
-    controls.entryReset:Click()
+    enter(controls.freeMoveY, "bad")
+    same(addon.db, before, "invalid axis cannot write either position scope")
+    controls.freeMoveReset:Click()
     same(addon:GetMobilityConfig().position, pos(-117, 53), "Reset Free move does not reset class group")
     same(addon:GetReminderPosition(addon:GetFreeMoveEntry()), pos(0, 0), "Reset targets Free move only")
-    typeText(controls.entryX, "450")
+    typeText(controls.freeMoveX, "450")
     addon:CloseOptions(); addon:OpenOptions()
-    addon:SelectOptionsCategory("preview"); choose(controls.previewEntry, "free_move_mage")
-    equal(tonumber(controls.entryX:GetText()), 0, "unconfirmed input discarded on close")
+    addon:SelectOptionsCategory("mobility")
+    equal(tonumber(controls.freeMoveX.editBox:GetText()), 0, "unconfirmed input discarded on close")
     equal(#state.errors, 0, "GUI input isolation")
 end)
 
@@ -7448,9 +7589,9 @@ end)
 test("DRAG FIX unrelated child hide and delayed child STOP do not end a different source drag", function()
     local _, addon, state = login()
     local panel = options(addon)
-    panel.pages.preview:Show()
+    panel.pages.mobility:Show()
     begin(panel.header)
-    panel.pages.preview:Hide()
+    panel.pages.mobility:Hide()
     truthy(panel.dragging and state.movingFrame == panel, "unrelated OnHide cannot save/reanchor moving parent")
     stop(panel.header)
     begin(panel.pages.general)
@@ -7596,7 +7737,9 @@ test("RC2 drag cleanup preserves foreign global callbacks and ignores unrelated 
     for _, event in ipairs(events) do addon:RegisterEvent(event, foreign) end
     local baseline = copy(addon:GetEventDiagnostics())
     panel.header:GetScript("OnDragStart")(panel.header, "LeftButton")
-    for _, event in ipairs(events) do equal(addon:GetEventDiagnostics().perEvent[event], 2, "drag adds only its own callback") end
+    for _, event in ipairs(events) do
+        equal(addon:GetEventDiagnostics().perEvent[event], baseline.perEvent[event] + 1, "drag adds only its own callback")
+    end
     for _, event in ipairs({ "GLOBAL_MOUSE_UP", "GLOBAL_MOUSE_DOWN" }) do
         for _, button in ipairs({ "RightButton", "MiddleButton", secret("LeftButton") }) do
             state:fire(event, button)
@@ -7752,10 +7895,25 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
 
-for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua" }) do
+-- Keep historical takeover regressions intact in explicit development fixtures.
+-- Release suites below receive the unmodified production default and no opt-in.
+local legacyProcSuites = {
+    ["proc_appearance_renderer.lua"] = true, ["proc_suppression.lua"] = true,
+    ["proc_animation_contract.lua"] = true, ["proc_numeric_renderer.lua"] = true,
+    ["proc_appearance_options.lua"] = true, ["proc_numeric_options.lua"] = true,
+    ["proc_tint_options.lua"] = true, ["proc_artwork_color_picker.lua"] = true,
+    ["proc_preview_safety.lua"] = true, ["proc_safety.lua"] = true,
+    ["proc_policy_options.lua"] = true,
+    ["modern_pages.lua"] = true,
+}
+for _, suite in ipairs({ "proc_release_renderer.lua", "proc_release_options.lua", "proc_release_runtime.lua", "proc_independent_runtime.lua", "proc_independent_artwork.lua", "proc_independent_settings.lua", "proc_policy_options.lua", "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_numeric_renderer.lua", "proc_appearance_options.lua",
+    "numeric_controls.lua", "numeric_options.lua", "proc_numeric_options.lua", "proc_tint_options.lua",
+    "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua", "proc_native_lifecycle.lua", "proc_safety.lua", "proc_preview_safety.lua", "proc_runtime_lifecycle.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,
-        root = root, metadata = metadata, login = login, setup = setup, options = options,
+        root = root, testRoot = testRoot, metadata = metadata,
+        login = legacyProcSuites[suite] and legacyLogin or login, setup = legacyProcSuites[suite] and legacySetup or setup,
+        productionLogin = login, productionSetup = setup, legacyLogin = legacyLogin, legacySetup = legacySetup, options = options,
         putAura = putAura, showProc = showProc, procFrame = procFrame, procText = procText,
         mobilityLogin = mobilityLogin, currentLive = currentLive, counts = counts,
         transferSeed = transferSeed, transferPage = transferPage, prepareSettings = prepareSettings,

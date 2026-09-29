@@ -59,7 +59,7 @@ for path in entries:
     for literal in lookup.findall(source(path)):
         key = json.loads(literal)
         assert key in base, (path, 'untranslated authored source key', key)
-options = source('UI/Options.lua') + source('UI/SettingsTransfer.lua')
+options = source('UI/Options.lua') + source('UI/SettingsTransfer.lua') + source('UI/Controls.lua')
 commands = source('Config/Commands.lua')
 assert not re.search(r'(?:language|locale)\s*=|[.]pages[.](?:language|locale)|command\s*==\s*"(?:language|locale)"', options + commands, re.I)
 names = source('Core/LocalizedNames.lua')
@@ -85,7 +85,7 @@ transfer = source('Core/SettingsTransfer.lua')
 assert 'return face -- Preserve the logical preference' in transfer
 assert 'GetSharedMediaFontName' in transfer and 'GetReminderFontStatus' in transfer
 assert not re.search(r'CreateFont\(|GetFont\(|SetFont\(', transfer)
-assert 'button:GetFontString()' in options and 'label:SetWordWrap(true)' in options
+assert ('button:GetFontString()' in options or 'button:SetFontString(' in options) and 'SetWordWrap(true)' in options
 assert not re.search(r'utf8?.*sub\(|label:sub\(|text:sub\(', options, re.I)
 print('PASS Shared font discovery uses the locale-filtered registry and owned public Font probe; saved identity stays separate from effective fallback without polling or filesystem access')
 print('PASS Import delegates font resolution; Options wraps full text without byte truncation or native timer inspection')

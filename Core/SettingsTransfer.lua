@@ -32,8 +32,20 @@ local function Number(value, low, high, path)
     return value
 end
 local function Boolean(value, path)
-    if type(value) ~= "boolean" then Fail(path .. addon:Text(": expected true or false.")) end
+    if issecretvalue and issecretvalue(value) or type(value) ~= "boolean" then Fail(path .. addon:Text(": expected true or false.")) end
     return value
+end
+local function PresentationFields(source, target, path)
+    local policy = source.presentationPolicy
+    if issecretvalue and issecretvalue(policy) then Fail(addon:Text("Unknown Proc presentation strategy.")) end
+    if policy ~= nil then
+        if policy ~= "replacement" and policy ~= "independent" then Fail(addon:Text("Unknown Proc presentation strategy.")) end
+        target.presentationPolicy = policy
+    end
+    local enabled = source.independentArtworkEnabled
+    if issecretvalue and issecretvalue(enabled) or enabled ~= nil then
+        target.independentArtworkEnabled = Boolean(enabled, path .. ".independentArtworkEnabled")
+    end
 end
 local function Path(parent, key) return parent .. "/" .. key end
 
@@ -249,18 +261,22 @@ local function ValidateEnvelope(self, value, kinds)
                 local spec = tonumber(key)
                 if not spec or tostring(spec) ~= key or not roster[spec] then Fail(path .. addon:Text(": wrong or unknown specialization.")) end
                 local pp = path .. "/proc/" .. key
-                Map(proc, Keys("enabled style regions"), pp, kinds)
+                Map(proc, Keys("enabled style regions presentationPolicy independentArtworkEnabled"), pp, kinds)
                 Map(proc.regions, nil, pp .. "/regions", kinds, true)
                 local out = { enabled = Boolean(proc.enabled, pp .. ".enabled"),
                     style = Style(self, proc.style, pp .. "/style", kinds, warnings), regions = {} }
+                PresentationFields(proc, out, pp)
                 target.proc[spec] = out
                 for id, region in pairs(proc.regions) do
                     if not roster[spec][id] then Fail(pp .. addon:Text(": unknown stable region ") .. id) end
                     totalRegions = totalRegions + 1
                     if totalRegions > 256 then Fail(addon:Text("Too many Proc regions.")) end
                     local rp = pp .. "/regions/" .. id
-                    Map(region, Keys("position color appearance"), rp, kinds)
+                    Map(region, Keys("position color appearance independentArtworkEnabled"), rp, kinds)
                     local r = { position = Position(region.position, rp .. "/position", kinds) }
+                    if region.independentArtworkEnabled ~= nil then
+                        r.independentArtworkEnabled = Boolean(region.independentArtworkEnabled, rp .. ".independentArtworkEnabled")
+                    end
                     if region.color ~= nil then
                         Map(region.color, Keys("r g b"), rp .. "/color", kinds)
                         r.color = { r = Number(region.color.r, 0, 1, rp .. ".color.r"),
@@ -334,11 +350,15 @@ local function Snapshot(self, scope)
                     if type(spec) ~= "number" or not roster[spec] or type(proc) ~= "table" then Fail(addon:Text("Unknown saved specialization in ") .. class) end
                     local out = { enabled = proc.enabled == nil and true or Boolean(proc.enabled, "saved Proc enabled"),
                         style = SavedStyle(self, proc.style), regions = {} }
+                    PresentationFields(proc, out, "saved Proc")
                     target.proc[tostring(spec)] = out
                     if proc.regions ~= nil and type(proc.regions) ~= "table" then Fail(addon:Text("Malformed saved Proc regions.")) end
                     for id, region in pairs(proc.regions or {}) do
                         if not roster[spec][id] or type(region) ~= "table" then Fail(addon:Text("Unknown saved region in ") .. class .. ": " .. tostring(id)) end
                         local r = { position = SavedPosition(region.position) }
+                        if issecretvalue and issecretvalue(region.independentArtworkEnabled) or region.independentArtworkEnabled ~= nil then
+                            r.independentArtworkEnabled = Boolean(region.independentArtworkEnabled, "saved region.independentArtworkEnabled")
+                        end
                         if region.color ~= nil then
                             if not self:IsValidProcRegionColor(region.color) then Fail(addon:Text("Malformed saved Proc color.")) end
                             r.color = { r = region.color.r, g = region.color.g, b = region.color.b }
@@ -422,6 +442,10 @@ local function MergeCandidate(self, incoming, restore)
             for spec, proc in pairs(value.proc) do
                 local existing = restore and {} or Shallow(record.proc[spec])
                 existing.enabled, existing.style = proc.enabled, Copy(proc.style)
+                -- An included scope owns these optional fields. Old format-1
+                -- scopes omit them and therefore return to legacy replacement.
+                existing.presentationPolicy = proc.presentationPolicy
+                existing.independentArtworkEnabled = proc.independentArtworkEnabled
                 existing.regions = restore and {} or Shallow(existing.regions)
                 for id, region in pairs(proc.regions) do
                     -- A whole included region replaces its old override. An
@@ -461,7 +485,8 @@ local function Summary(incoming, before, context, warnings, restore)
         restore and addon:Text("This restores the complete backup; settings added after that backup are removed.")
             or addon:Text("Only included scopes are replaced. Other classes, specializations and regions are unchanged."),
         addon:Text("Included regions without RGB use the current class color, clearing any old override."),
-        addon:Text("Included regions without artwork settings use Blizzard native artwork, clearing any old artwork override."),
+        addon:Text("Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."),
+        addon:Text("Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."),
         addon:Text("Mobility and Free move offsets remain independent.") }
     for _, class in ipairs(names) do
         local record = incoming.classes[class]
@@ -470,10 +495,16 @@ local function Summary(incoming, before, context, warnings, restore)
         for spec in pairs(record.proc or {}) do orderedSpecs[#orderedSpecs + 1] = spec end
         table.sort(orderedSpecs)
         for _, spec in ipairs(orderedSpecs) do
-            local orderedRegions = {}
-            for id in pairs(record.proc[spec].regions) do orderedRegions[#orderedRegions + 1] = id end
+            local proc, orderedRegions, enabledRegions = record.proc[spec], {}, 0
+            for id, region in pairs(proc.regions) do
+                orderedRegions[#orderedRegions + 1] = id
+                if region.independentArtworkEnabled == true then enabledRegions = enabledRegions + 1 end
+            end
             table.sort(orderedRegions)
             lines[#lines + 1] = addon:Format("%s Proc %d: shared style and enabled setting; %d region record(s).", class, spec, #orderedRegions)
+            local policy = proc.presentationPolicy == "independent" and addon:Text("Independent CUI") or addon:Text("Native artwork")
+            lines[#lines + 1] = addon:Format("Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d.",
+                policy, proc.independentArtworkEnabled ~= false and addon:Text("Enabled") or addon:Text("Disabled"), enabledRegions)
             if #orderedRegions > 0 then lines[#lines + 1] = addon:Format("Regions: %s", table.concat(orderedRegions, ", ")) end
         end
     end
@@ -560,6 +591,8 @@ local function ApplyTransferredSettings(self, before, after, context, wasPreview
     local newProc = spec and newClass.proc and newClass.proc[spec] or {}
     local mobilityEnabled = oldMobility.enabled ~= newMobility.enabled
     local procEnabled = oldProc.enabled ~= newProc.enabled
+    local policyChanged = self:GetProcPresentationPolicy(oldProc) ~= self:GetProcPresentationPolicy(newProc)
+    local artworkFlagsChanged = (oldProc.independentArtworkEnabled ~= false) ~= (newProc.independentArtworkEnabled ~= false)
     local changes = { proc = {} }
     changes.mobility = not Equal(oldMobility.position, newMobility.position)
     changes.freeMove = not Equal(oldMobility.freeMovePosition, newMobility.freeMovePosition)
@@ -571,6 +604,7 @@ local function ApplyTransferredSettings(self, before, after, context, wasPreview
         if not Equal(oldRegion.position, newRegion.position) then changes.proc[id] = true end
         if not Equal(oldRegion.color, newRegion.color) then colors[id] = true end
         if not Equal(oldRegion.appearance, newRegion.appearance) then appearances[id] = true end
+        if (oldRegion.independentArtworkEnabled == true) ~= (newRegion.independentArtworkEnabled == true) then artworkFlagsChanged = true end
     end
     if not Equal(oldClass, newClass) then
         -- Existing native bindings hold state/providers, not these getter caches.
@@ -616,9 +650,13 @@ local function ApplyTransferredSettings(self, before, after, context, wasPreview
         if self.RenderMobilityState then self:RenderMobilityState() end
         if self.RenderFreeMoveState then self:RenderFreeMoveState() end
     end
-    if procEnabled then
+    if procEnabled or policyChanged then
         if self.ConfigureProc then self:ConfigureProc() end
     elseif wasPreview and self.RenderProcState then self:RenderProcState() end
+    if artworkFlagsChanged and not (procEnabled or policyChanged) then
+        if self.RenderProcArtwork then self:RenderProcArtwork() end
+        if self.RefreshPreview then self:RefreshPreview(true) end
+    end
     if self.RefreshOptions then self:RefreshOptions() end
 end
 
@@ -637,6 +675,15 @@ function addon:ConfirmSettingsImport(transaction)
         local after = CandidateSnapshot(self, record.candidate)
         -- Validate backup size again before any owned UI or database mutation.
         Serialize(record.before)
+        local spec = context.spec and tostring(context.spec)
+        local oldClass, newClass = record.before.classes[context.class] or {}, after.classes[context.class] or {}
+        local oldProc = spec and oldClass.proc and oldClass.proc[spec] or {}
+        local newProc = spec and newClass.proc and newClass.proc[spec] or {}
+        local nextPolicy = self:GetProcPresentationPolicy(newProc)
+        if self:GetProcPresentationPolicy(oldProc) ~= nextPolicy then
+            local clean, reason = self:PrepareProcPresentationTransition(nextPolicy, true)
+            if not clean then Fail(reason) end
+        end
         return after
     end)
     if not valid then

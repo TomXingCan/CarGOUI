@@ -138,8 +138,12 @@ test("Proc partial hook installation cannot suppress without a restoration hook"
     local overlay = Show()
     equal(overlay.texture.alpha, 1)
     equal(#state.nativeTextureWrites, 0, "installed Show hook stays dormant until complete")
-    truthy(addon:InstallProcArtworkHooks(), "missing release hook can be retried")
-    Show(); equal(overlay.texture.alpha, 0)
+    equal(addon:InstallProcArtworkHooks(), false, "an uncertain hook attempt cannot be repeated")
+    equal(addon:InstallProcArtworkHooks(), false)
+    truthy(addon:IsProcQuarantined())
+    equal(addon:RetryProc(), false, "unknown hook completion requires Reload")
+    Show(); equal(overlay.texture.alpha, 1)
+    equal(#state.nativeTextureWrites, 0, "partial lifecycle hooks never gain suppression authority")
 end)
 
 test("Proc suppression missing lifecycle wrong handles RGB and renderer errors fail open", function()
@@ -272,26 +276,51 @@ test("Proc suppression setter failure restores and failed restore stays owned fo
 end)
 
 test("Proc animation reset callback and CVar failures cannot leave duplicate or hidden artwork", function()
-    local env, addon, _, _, _, Set, Show = Fixture()
-    Set(leftID, { mode = "custom", animation = { entrance = "fade", active = "rotate" } })
-    local overlay = Show()
-    local frame = addon.procArtworkFrames[leftID]
-    frame.texture.CreateAnimationGroup = function() error("animation capability disappeared") end
-    frame.groups.entrance_fade:GetScript("OnFinished")()
-    equal(overlay.texture.alpha, 1)
-    truthy(not frame:IsShown(), "failed callback hides custom before restoration")
-    Set(leftID, { mode = "custom" }); Show()
-    local setRotation = frame.texture.SetRotation
-    frame.texture.SetRotation = function() error("transform setter failed") end
-    addon:RefreshProcAppearance()
-    equal(overlay.texture.alpha, 1)
-    truthy(not frame:IsShown(), "cleanup hides frame even when transform reset fails")
-    frame.texture.SetRotation = setRotation
-    Set(leftID, { mode = "timer" }); Show()
-    equal(overlay.texture.alpha, 0)
-    env.C_CVar.GetCVar = function() error("public preference reader unavailable") end
-    addon:RenderProcArtwork()
-    equal(overlay.texture.alpha, 1, "CVar API failure restores all native ownership")
+    do
+        local _, addon, _, _, _, Set, Show = Fixture()
+        Set(leftID, { mode = "custom", animation = { entrance = "fade", active = "rotate" } })
+        local overlay = Show()
+        local frame = addon.procArtworkFrames[leftID]
+        frame.texture.CreateAnimationGroup = function() error("animation capability disappeared") end
+        for _ = 1, 3 do
+            frame.groups.entrance_fade:GetScript("OnFinished")()
+            equal(overlay.texture.alpha, 1)
+            truthy(not frame:IsShown(), "failed callback hides custom before restoration")
+            Show()
+        end
+        truthy(addon:IsProcQuarantined()); equal(addon:RetryProc(), false)
+        Show(); equal(overlay.texture.alpha, 1, "unknown group creation stays fail-open until Reload")
+    end
+    do
+        local _, addon, _, _, _, Set, Show = Fixture()
+        Set(leftID, { mode = "custom" })
+        local overlay = Show()
+        local frame = addon.procArtworkFrames[leftID]
+        local setRotation = frame.texture.SetRotation
+        frame.texture.SetRotation = function() error("transform setter failed") end
+        for _ = 1, 3 do addon:RefreshProcAppearance() end
+        equal(overlay.texture.alpha, 1)
+        truthy(not frame:IsShown(), "cleanup hides frame even when transform reset fails")
+        truthy(addon:IsProcQuarantined())
+        frame.texture.SetRotation = setRotation
+        Show(); equal(overlay.texture.alpha, 1, "repair alone does not bypass quarantine")
+        truthy(addon:RetryProc()); Show(); equal(overlay.texture.alpha, 0)
+        equal(addon.procArtworkFrames[leftID], frame, "explicit retry keeps the returned frame")
+    end
+    do
+        local env, addon, _, _, _, Set, Show = Fixture()
+        Set(leftID, { mode = "timer" })
+        local overlay = Show()
+        equal(overlay.texture.alpha, 0)
+        local getCVar = env.C_CVar.GetCVar
+        env.C_CVar.GetCVar = function() error("public preference reader unavailable") end
+        for _ = 1, 3 do addon:RenderProcArtwork() end
+        equal(overlay.texture.alpha, 1, "CVar API failure restores all native ownership")
+        truthy(addon:IsProcQuarantined())
+        env.C_CVar.GetCVar = getCVar
+        Show(); equal(overlay.texture.alpha, 1, "recovered preference reader does not auto-resume")
+        truthy(addon:RetryProc()); Show(); equal(overlay.texture.alpha, 0)
+    end
 end)
 
 test("Proc all entrance active and exit presets execute within a reusable animation pool", function()
@@ -339,8 +368,14 @@ test("Proc partial artwork and animation initialization failures reuse allocated
     equal(#state.frames, frames, "failed initialization reuses cached frame")
     equal(#state.textures, textures, "failed initialization reuses cached texture")
     equal(overlay.texture.alpha, 1); truthy(not frame:IsShown())
+    truthy(addon:IsProcQuarantined(), "repeated setter failures exhaust the session budget")
     env.CreateFrame = create
     frame.texture.SetBlendMode = function(self, value) self.blendMode = value end
+    Show(); equal(overlay.texture.alpha, 1, "repair does not automatically resume rendering")
+    truthy(addon:RetryProc(), "the cached texture can recover after a setter repair")
+    Show(); equal(overlay.texture.alpha, 0)
+    equal(addon.procArtworkFrames[leftID], frame)
+    equal(#state.frames, frames); equal(#state.textures, textures)
     local createGroup = frame.texture.CreateAnimationGroup
     frame.texture.CreateAnimationGroup = function(owner)
         local group = createGroup(owner)

@@ -10,8 +10,17 @@ local function Open()
     return env, addon, state, panel, controls
 end
 
+-- Deliver the native completion boundary before interacting with revealed inputs.
+local function FinishSection(section)
+    local group = section.collapsed and section.collapseAnimation or section.expandAnimation
+    truthy(group and group:IsPlaying(), "shared section animation is active")
+    group.playing = false
+    group:GetScript("OnFinished")(group)
+    equal(section.transition, nil, "section has settled before editing")
+end
+
 local function Choose(control, value)
-    control:Click()
+    if control.menu then control:Click() end
     for _, button in ipairs(control.choices) do
         if button.value == value and button:IsShown() and button:IsEnabled() then
             button:Click()
@@ -22,9 +31,11 @@ local function Choose(control, value)
 end
 
 local function Enter(control, value)
-    control:SetText(tostring(value))
-    control:GetScript("OnTextChanged")(control, true)
-    control:GetScript("OnEnterPressed")(control)
+    if not control.editing then control.valueButton:Click() end
+    local edit = control.editBox
+    edit:SetText(tostring(value))
+    edit:GetScript("OnTextChanged")(edit, true)
+    edit:GetScript("OnEnterPressed")(edit)
 end
 
 test("appearance region editor progressively discloses only custom controls", function()
@@ -38,10 +49,12 @@ test("appearance region editor progressively discloses only custom controls", fu
     Choose(controls.procArt_mode, "custom")
     truthy(panel.procArtworkSection:IsShown()); truthy(panel.procTransformSection:IsShown())
     truthy(panel.procAnimationSection:IsShown())
-    equal(panel.procAdvancedSection:IsShown(), false)
+    truthy(panel.procAdvancedSection:IsShown(), "Advanced header remains available")
+    equal(panel.procAdvancedSection.content:IsShown(), false)
     local saved = copy(addon.db)
     controls.procAdvanced:Click()
-    truthy(panel.procAdvancedSection:IsShown())
+    FinishSection(panel.procAdvancedSection)
+    truthy(panel.procAdvancedSection.content:IsShown())
     same(addon.db, saved, "Advanced is session-only disclosure")
     Choose(controls.procArt_mode, "timer")
     equal(panel.procArtworkSection:IsShown(), false); equal(panel.procAdvancedSection:IsShown(), false)
@@ -60,7 +73,7 @@ test("appearance Proc selector scopes visible stable regions and region switches
         Choose(controls.procSelector, key)
         for _, region in ipairs(controls.procEntry.choices) do
             if region:IsShown() then
-                truthy(region:IsEnabled())
+                truthy(region.cuiAvailable, "matching region is available when its menu opens")
                 Choose(controls.procEntry, region.value)
                 local entry = addon:GetSelectedProcColorEntry()
                 equal(entry.id, region.value)
@@ -73,14 +86,17 @@ test("appearance Proc selector scopes visible stable regions and region switches
     truthy(seen > 1, "multiple real stable regions are selectable")
     Choose(controls.procSelector, controls.procSelector.choices[1].value)
     Choose(controls.procArt_mode, "custom")
-    controls.procArt_alpha:SetText("0.25")
-    controls.procArt_alpha:GetScript("OnTextChanged")(controls.procArt_alpha, true)
+    controls.procArt_alpha.valueButton:Click()
+    local alphaEdit = controls.procArt_alpha.editBox
+    alphaEdit:SetText("25")
+    alphaEdit:GetScript("OnTextChanged")(alphaEdit, true)
     local before = addon:GetSelectedProcColorEntry().id
     for _, region in ipairs(controls.procEntry.choices) do
         if region:IsShown() and region.value ~= before then
             Choose(controls.procEntry, region.value)
-            equal(controls.procArt_alpha.dirty, false)
-            equal(controls.procArt_alpha:GetText(), "1")
+            equal(alphaEdit.dirty, false)
+            equal(controls.procArt_alpha.editing, false)
+            equal(controls.procArt_alpha:GetValue(), 1)
             return
         end
     end
@@ -115,7 +131,8 @@ test("appearance gallery uses audited thumbnails bounded pages and cross-class a
     local entry = addon:GetSelectedProcColorEntry()
     tile:Click()
     equal(addon:GetProcRegionAppearance(entry).assetKey, tile.asset.key)
-    truthy(tile.selected:IsShown())
+    truthy(tile.selected, "tile gradient is selected")
+    truthy(tile.selectionLabel:IsShown(), "selected text badge is visible")
     equal(entry.class, "MAGE", "choosing artwork does not change trigger ownership")
     controls.procOwnArtwork:Click()
     equal(addon:GetProcRegionAppearance(entry).assetKey, nil)
@@ -125,17 +142,19 @@ test("appearance gallery uses audited thumbnails bounded pages and cross-class a
 end)
 
 test("appearance controls separate artwork RGB offset typography and timer settings", function()
-    local _, addon, _, panel, controls = Open()
+    local env, addon, state, panel, controls = Open()
     local entry = addon:GetSelectedProcColorEntry()
     truthy(addon:SetProcRegionColor(entry, { r = 0.1, g = 0.2, b = 0.3 }))
     truthy(addon:UpdateSettings({ reminders = { [entry.id] = { position = { x = 41, y = 72 } } } }))
     local timer = copy(addon:GetProcConfig().regions[entry.id])
     Choose(controls.procArt_mode, "custom")
     Choose(controls.procArt_colorMode, "custom")
-    truthy(panel.procArtRGB:IsShown())
-    controls.procArtRGB_r:SetText("0.8"); controls.procArtRGB_g:SetText("0.6")
-    Enter(controls.procArtRGB_b, "0.4")
+    truthy(env.ColorPickerFrame:IsShown())
+    equal(panel.procArtRGB, nil); equal(controls.procArtRGB_r, nil)
+    state:pickerChange(.8, .6, .4)
+    env.ColorPickerFrame.Footer.OkayButton:Click()
     controls.procAdvanced:Click()
+    FinishSection(panel.procAdvancedSection)
     Enter(controls.procArt_offsetX, 125); Enter(controls.procArt_offsetY, -99)
     local appearance = addon:GetProcRegionAppearance(entry)
     same(appearance.artColor, { r = 0.8, g = 0.6, b = 0.4 })
@@ -144,7 +163,7 @@ test("appearance controls separate artwork RGB offset typography and timer setti
     same(addon:GetProcConfig().regions[entry.id].position, timer.position)
     Choose(controls.procArt_colorMode, "native")
     equal(addon:GetProcRegionAppearance(entry).artColor, nil)
-    equal(panel.procArtRGB:IsShown(), false)
+    equal(panel.procArtRGB, nil)
     controls.procAppearance:Click()
     equal(panel.activeCategory, "appearance")
     equal(panel.appearanceKind, "proc", "the existing specialization typography editor is reused")
@@ -162,11 +181,11 @@ test("appearance reset changes only selected region artwork and validated edits 
         end
     end
     Choose(controls.procArt_mode, "custom")
-    Enter(controls.procArt_alpha, 0.7)
+    Enter(controls.procArt_alpha, 70)
     Enter(controls.procArt_scale, 1.4)
     Enter(controls.procArt_alpha, "nan")
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.7, "invalid numeric text cannot save")
-    Enter(controls.procArt_alpha, 2)
+    Enter(controls.procArt_alpha, 200)
     equal(addon:GetProcRegionAppearance(entry).alpha, 0.7, "numeric bounds enforced in UI")
     Choose(controls.procArt_active, "breathe")
     controls.procArtReset:Click()
@@ -181,9 +200,32 @@ test("appearance preview button uses selected independent Test lifecycle", funct
     Choose(controls.procArt_mode, "custom")
     controls.procPreview:Click()
     equal(addon.previewState.mode, "single")
+    equal(panel.activeCategory, "proc", "contextual testing keeps the region editor open")
+    equal(addon.previewState.entryId, entry.id)
     truthy(addon.previewFrames[entry.id]:IsShown())
     controls.procStop:Click()
     equal(addon.previewState.mode, "off")
     equal(addon.previewFrames[entry.id]:IsShown(), false)
     equal(panel.selectedProcEntry, entry.id)
+end)
+
+test("appearance local Timer XY and reset retain independent artwork offsets", function()
+    local _, addon, _, panel, controls = Open()
+    local entry = addon:GetSelectedProcColorEntry()
+    truthy(addon:SetProcRegionAppearance(entry, { mode = "custom", offset = { x = 125, y = -99 } }))
+    local appearance = copy(addon:GetProcRegionAppearance(entry))
+    equal(controls.procPosition, nil, "the removed Test Mode page has no jump button")
+    Enter(controls.procPositionX, 71)
+    Enter(controls.procPositionY, -43)
+    equal(addon:GetReminderPosition(entry).x, 71); equal(addon:GetReminderPosition(entry).y, -43)
+    same(addon:GetProcRegionAppearance(entry), appearance, "timer coordinates never become artwork offsets")
+    local position = copy(addon:GetReminderPosition(entry))
+    Enter(controls.procPositionX, "not-a-number")
+    same(addon:GetReminderPosition(entry), position)
+    truthy(controls.procPositionX.editBox.invalid)
+    controls.procPositionReset:Click()
+    same(addon:GetReminderPosition(entry), addon:NewReminderPosition())
+    same(addon:GetProcRegionAppearance(entry), appearance)
+    equal(panel.activeCategory, "proc")
+    equal(controls.procPositionX:GetValue(), 0); equal(controls.procPositionY:GetValue(), 0)
 end)

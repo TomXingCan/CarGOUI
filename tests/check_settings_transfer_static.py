@@ -32,16 +32,18 @@ def absent(text, patterns, label):
 
 toc = [line.strip().replace("\\", "/") for line in read("CarGOUI.toc").splitlines()
        if line.strip() and not line.strip().startswith("#")]
-for relative in ("Database/SettingsMetadata.lua", "Core/SettingsTransfer.lua", "UI/SettingsTransfer.lua"):
+for relative in ("Core/ProcPresentation.lua", "Database/SettingsMetadata.lua", "Core/SettingsTransfer.lua", "UI/SettingsTransfer.lua"):
     assert toc.count(relative) == 1, f"Required transfer source is loaded exactly once: {relative}"
     assert (root / relative).is_file()
 assert toc.index("Core/Database.lua") < toc.index("Database/SettingsMetadata.lua") < toc.index("Core/SettingsTransfer.lua")
+assert toc.index("Core/Database.lua") < toc.index("Core/ProcPresentation.lua") < toc.index("Core/SettingsTransfer.lua")
 assert toc.index("UI/SettingsTransfer.lua") < toc.index("UI/Options.lua")
 assert not any(path.startswith(("tests/", "scripts/")) for path in toc)
 print("PASS Transfer metadata, backend and page are manifest-loaded in dependency order; test fixtures are not runtime dependencies")
 
 metadata = code(read("Database/SettingsMetadata.lua"))
 backend = code(read("Core/SettingsTransfer.lua"))
+database = code(read("Core/Database.lua"))
 ui = code(read("UI/SettingsTransfer.lua"))
 options = code(read("UI/Options.lua"))
 absent(metadata, [r"function\b", r"\b(?:auraID|spellID|overlayID|textureID)\b", r"Create(?:Frame|Font)",
@@ -91,7 +93,30 @@ assert "for spec, proc in pairs(record.proc)" in snapshot
 assert "target.proc[tostring(spec)]" in snapshot
 assert 'scope == "all"' in snapshot
 print("PASS Schema identities, symbolic fonts, finite RGB and saved-only scope snapshots are explicit")
-assert 'Keys("position color appearance")' in validator
+assert 'Map(proc, Keys("enabled style regions presentationPolicy independentArtworkEnabled"), pp, kinds)' in validator
+assert 'Map(region, Keys("position color appearance independentArtworkEnabled"), rp, kinds)' in validator
+presentation = section(backend, "local function PresentationFields(", "local function Path(")
+assert 'if policy ~= "replacement" and policy ~= "independent" then Fail(' in presentation
+assert presentation.index("issecretvalue(policy)") < presentation.index('policy ~= "replacement"')
+assert 'target.presentationPolicy = policy' in presentation
+assert 'Boolean(enabled, path .. ".independentArtworkEnabled")' in presentation
+boolean = section(backend, "local function Boolean(", "local function PresentationFields(")
+assert 'issecretvalue(value)' in boolean and 'type(value) ~= "boolean"' in boolean and 'Fail(' in boolean
+assert 'PresentationFields(proc, out, pp)' in validator
+assert 'Boolean(region.independentArtworkEnabled, rp .. ".independentArtworkEnabled")' in validator
+assert 'PresentationFields(proc, out, "saved Proc")' in snapshot
+assert 'Boolean(region.independentArtworkEnabled, "saved region.independentArtworkEnabled")' in snapshot
+assert 'value.formatVersion ~= 1 or value.schemaVersion ~= 5' in validator
+assert 'formatVersion = 1, schemaVersion = 5' in snapshot
+policy_validator = section(database, "local function ProcPolicySetting(", "local function ProcArtworkSetting(")
+assert 'issecretvalue(value)' in policy_validator
+assert 'value == "replacement" or value == "independent"' in policy_validator
+artwork_validator = section(database, "local function ProcArtworkSetting(", "function addon:IsValidProcRegionColor(")
+assert 'issecretvalue(value)' in artwork_validator and 'return BooleanSetting(value)' in artwork_validator
+assert 'presentationPolicy = ProcPolicySetting' in database and 'independentArtworkEnabled = ProcArtworkSetting' in database
+assert 'if not ProcPolicySetting(config.presentationPolicy) then config.presentationPolicy = nil end' in database
+assert 'if not ProcArtworkSetting(config.independentArtworkEnabled) then config.independentArtworkEnabled = nil end' in database
+assert 'if not ProcArtworkSetting(region.independentArtworkEnabled) then region.independentArtworkEnabled = nil end' in database
 assert 'ValidateProcAppearance(value)' in backend and 'CopyProcAppearance(value)' in backend
 assert 'mode assetKey artColor desaturation alpha scale width height rotation mirrorX mirrorY offset animation' in backend
 assert 'for id in pairs(appearances) do self:RefreshProcAppearance({ id = id }) end' in backend
@@ -99,7 +124,7 @@ appearance = code(read("Core/ProcAppearance.lua"))
 assert 'GetProcAsset(item)' in appearance and 'procAppearanceEnums' in appearance
 assert 'value == value' in appearance and 'getmetatable(value) == nil' in appearance
 assert 'schemaVersion = 5' in code(read("Config/Defaults.lua"))
-print("PASS Additive appearance transfer retains schema 5/format 1 and rejects unlisted resources and unbounded presentation settings")
+print("PASS Additive appearance/policy transfer retains schema 5/format 1, exact field/type whitelists and sparse legacy defaults")
 
 context = section(backend, "local function Context(self)", "local function MergeCandidate(")
 assert "InCombatLockdown()" in context and "panel:IsShown()" in context
@@ -110,6 +135,18 @@ assert "transaction.summary ~= record.summary" in commit and "for key in pairs(t
 assert commit.index("Context(self)") < commit.index("self.db.classes =")
 assert commit.index('Snapshot(self, "all")') < commit.index("self.db.classes =")
 assert commit.index("Serialize(record.before)") < commit.index("self.db.classes =")
+assert 'if self:GetProcPresentationPolicy(oldProc) ~= nextPolicy then' in commit
+assert 'if not clean then Fail(reason) end' in commit
+preflight = commit.index("self:PrepareProcPresentationTransition(nextPolicy, true)")
+assert commit.index("CandidateSnapshot(self, record.candidate)") < commit.index("Serialize(record.before)") < preflight
+for mutation in ("pending = nil", "self.db.classes =", "self.db.options =", "self.db.settingsImportBackup ="):
+    assert preflight < commit.index(mutation), f"Policy cleanup must precede transaction mutation: {mutation}"
+assert 'local oldProc = spec and oldClass.proc and oldClass.proc[spec] or {}' in commit
+assert 'local newProc = spec and newClass.proc and newClass.proc[spec] or {}' in commit
+candidate = section(backend, "local function MergeCandidate(", "local function Summary(")
+assert 'existing.presentationPolicy = proc.presentationPolicy' in candidate
+assert 'existing.independentArtworkEnabled = proc.independentArtworkEnabled' in candidate
+assert 'existing.presentationPolicy = proc.presentationPolicy or' not in candidate
 assert commit.index("CancelProcColorPicker()") < commit.index("self.db.classes =")
 assert commit.index("StopPreview(true)") < commit.index("self.db.classes =")
 assert "record.restore and self.db.settingsImportBackup" in commit
@@ -117,10 +154,30 @@ assert "settings = Copy(record.before)" in commit and "self.db.settingsImportBac
 absent(commit, [r"self\.db\s*=", r"CarGOUIDB\s*=", r"C_Timer"],
        "Confirmation revalidates synchronously, retains SavedVariables root identity and has no deferred commit")
 apply = section(backend, "local function ApplyTransferredSettings(", "function addon:ConfirmSettingsImport(")
-assert "if mobilityEnabled then" in apply and "if procEnabled then" in apply
+assert "if mobilityEnabled then" in apply and "if procEnabled or policyChanged then" in apply
+assert 'self:GetProcPresentationPolicy(oldProc) ~= self:GetProcPresentationPolicy(newProc)' in apply
+artwork_apply = section(apply, "if artworkFlagsChanged and not (procEnabled or policyChanged) then", "if self.RefreshOptions then")
+assert 'self:RenderProcArtwork()' in artwork_apply and 'self:RefreshPreview(true)' in artwork_apply
+assert 'ConfigureProc' not in artwork_apply and 'ApplySettings' not in artwork_apply
+update = section(database, "function addon:UpdateSettings(patch, options)", "function addon:ResetDatabase()")
+scoped_update = update.split('local procContext = self:GetAppearanceContext("proc")', 1)[1]
+assert 'if self:GetProcPresentationPolicy(previous) ~= patch.proc.presentationPolicy then' in scoped_update
+assert 'if not clean then return false, reason end' in scoped_update
+patch_preflight = scoped_update.index('self:PrepareProcPresentationTransition(patch.proc.presentationPolicy, true)')
+assert update.index('ValidatePatch(patch, schema, "")') < update.index('self:PrepareProcPresentationTransition(patch.proc.presentationPolicy, true)')
+for mutation in ('if writesProc and not self:GetProcConfig()', 'MergePatch(self.db.options, patch.options)',
+                 'self:GetMobilityConfig().enabled = patch.enabled', 'MergePatch(config, patch.proc)'):
+    assert patch_preflight < scoped_update.index(mutation), f"Policy preflight must precede mixed patch mutation: {mutation}"
+flag_apply = section(scoped_update, 'if artworkFlagsOnly then', 'elseif changedPositions then')
+assert 'self:RenderProcArtwork()' in flag_apply and 'self:RefreshPreview(true)' in flag_apply
+assert 'ConfigureProc' not in flag_apply and 'ApplySettings' not in flag_apply
+reset = database.split('function addon:ResetDatabase()', 1)[1]
+assert 'if not clean then return false, reason end' in reset
+assert reset.index('self:PrepareProcPresentationTransition("replacement", true)') < reset.index('self.db.classes[class] = nil')
+assert reset.index('self:PrepareProcPresentationTransition("replacement", true)') < reset.index('self.db.options =')
 assert "elseif wasPreview" in apply and 'RefreshReminderPositions(changes)' in apply
 assert 'RefreshReminderStyle("mobility:"' in apply and 'RefreshProcRegionColor(entry)' in apply
-print("PASS Private transactions, atomic pre-import backup, repeat-restore semantics and targeted appearance refresh are guarded")
+print("PASS Import/Restore/patch/reset policy cleanup precedes commit; backup identity and artwork-only timer isolation are guarded")
 
 assert 'if panel.transfer then return panel.transfer end' in ui
 assert 'edit:SetMultiLine(true)' in ui and 'edit:SetMaxLetters(0)' in ui and 'edit:SetMaxBytes(0)' in ui
@@ -134,7 +191,7 @@ cleanup = section(ui, "function addon:ClearSettingsTransferPage()", "function ad
 assert "CancelSettingsImport" in cleanup and 'edit:SetText("")' in cleanup and "edit:ClearFocus()" in cleanup
 assert 'panel.activeCategory == "importExport"' in ui and 'InCombatLockdown()' in ui
 assert 'Feedback(ok and (message or L.transferDone)' in ui
-assert 'if not panel.pages[key] then key = "general" end' in options
+assert 'if not self.optionsPageRegistry[key] then key = "general" end' in options
 absent(options, [r'pages\.themes', r'categoryButtons\.themes', r'RefreshOptionsThemeLabels', r'key\s*=\s*"themes"'],
        "Removed Themes route has no page or label updater; unknown old route falls back to General")
 locale = read("Config/Locale.lua")

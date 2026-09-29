@@ -406,4 +406,63 @@ addon:RegisterLocale("enUS", {
     ["Unknown artwork animation field."] = "Unknown artwork animation field.",
     ["Artwork transform is outside its finite bounds."] = "Artwork transform is outside its finite bounds.",
     ["Unknown artwork setting: "] = "Unknown artwork setting: ",
+
+    -- RC2 contextual editors.
+    ["Current Character / Quick Test"] = "Current Character / Quick Test",
+    ["Interface"] = "Interface",
+    ["Window"] = "Window",
+    ["Free Move position X"] = "Free Move position X",
+    ["Free Move position Y"] = "Free Move position Y",
+    ["Test Free Move"] = "Test Free Move",
+    ["Free Move position is independent of ordinary Mobility offsets."] = "Free Move position is independent of ordinary Mobility offsets.",
+    ["Per-skill details are available in Copy diagnostics."] = "Per-skill details are available in Copy diagnostics.",
+    ["Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples."] = "Native Proc timers share this specialization style. Region offsets stay independent; contextual tests use separate samples.",
+    ["Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."] = "Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples.",
+    ["Custom color"] = "Custom color",
+    ["Timer X"] = "Timer X",
+    ["Timer Y"] = "Timer Y",
+    ["Reset timer position"] = "Reset timer position",
+    ["Test selected region"] = "Test selected region",
+
+    -- RC2 contextual editors.
+    ["Test Mobility"] = "Test Mobility",
+    ["/cui diagnostics [copy] - manual session snapshot; Options is not required."] = "/cui diagnostics [copy] - manual session snapshot; Options is not required.",
+    ["Proc testing is unavailable while Proc is quarantined."] = "Proc testing is unavailable while Proc is quarantined.",
+    ["Proc is not quarantined."] = "Proc is not quarantined.",
+    ["Proc retry completed; current settings remain in effect."] = "Proc retry completed; current settings remain in effect.",
+    ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required.",
+    ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload.",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color.",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color.",
+
+    -- Independent artwork strategy.
+    ["Artwork strategy"] = "Artwork strategy",
+    ["Legacy region replacement"] = "Legacy region replacement",
+    ["Independent CUI"] = "Independent CUI",
+    ["Enable independent live artwork"] = "Enable independent live artwork",
+    ["Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."] = "Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only.",
+    ["This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."] = "This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually.",
+    ["Enable independent artwork for this region"] = "Enable independent artwork for this region",
+    ["Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."] = "Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples.",
+    ["Region artwork"] = "Region artwork",
+    ["Reset artwork settings"] = "Reset artwork settings",
+    ["Enable Proc"] = "Enable Proc",
+    ["Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples."] = "Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples.",
+    ["Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts."] = "Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts.",
+    ["Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved."] = "Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved.",
+    ["Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching."] = "Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching.",
+    ["Unknown Proc presentation strategy."] = "Unknown Proc presentation strategy.",
+    ["Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc."] = "Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc.",
+
+    -- Presentation strategy transfer summary.
+    ["Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."] = "Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults.",
+    ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement.",
+    ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d.",
+    ["Enabled"] = "Enabled",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork.",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement.",
 })
