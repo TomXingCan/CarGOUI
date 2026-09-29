@@ -135,17 +135,18 @@ end
 
 function addon:GetReminderFontOptions()
     local result, seen = {}, {}
-    local function Add(value, label, source, always)
+    local function Add(value, label, always)
         local status = self:GetReminderFontStatus(value)
         local key = PathKey(status.effectiveFace)
         if not seen[key] and (always or (not status.fallbackReason and status.effectiveAvailable)) then
             seen[key] = true
-            result[#result + 1] = { value = value, label = self:Format(source, label) }
+            -- Picker labels identify the typeface; persisted values retain provenance.
+            result[#result + 1] = { value = value, label = label }
         end
     end
-    Add(clientFace, self:Text("Client default"), "Blizzard / Client: %s", true)
+    Add(clientFace, knownClient and knownClient.label or self:Text("Client default"), true)
     if not wideLocales[self.clientLocale] then
-        for index = 1, 4 do Add(builtins[index].value, builtins[index].label, "Blizzard / Client: %s") end
+        for index = 1, 4 do Add(builtins[index].value, builtins[index].label) end
     end
     local library = GetMedia()
     local names = {}
@@ -157,7 +158,7 @@ function addon:GetReminderFontOptions()
         if a == b then return left < right end
         return a < b
     end)
-    for _, name in ipairs(names) do Add("LSM:" .. name, name, "SharedMedia: %s") end
+    for _, name in ipairs(names) do Add("LSM:" .. name, name) end
     return result
 end
 

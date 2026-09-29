@@ -52,25 +52,25 @@ assert "adapter.procCapability.version == 1" in proc_runtime and "CompileProcDef
 assert "RegisterProcFactory" in shared and "requiresAnyKnown" in shared and "requiresKnown" in shared
 assert "byRegion[region.id]" in compiler and "binding.source.shared" in compiler
 assert "source.textureID == texture and source.locationTypeName == location" in proc_runtime
-assert 'auraHandle.auraID ~= auraID' in code((root / "UI/ProcDisplay.lua").read_text(encoding="utf-8"))
+assert 'frame.nativeAuraID ~= auraID' in code((root / "UI/ProcDisplay.lua").read_text(encoding="utf-8"))
 assert "proc_sources_69933.lua" not in toc and "fixtures" not in data_toc
 print("PASS Proc capability, conflict validation, exact graphical dispatch and immutable Aura provider guards are explicit")
 absent(runtime, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_SPELLCAST",
                  r"UnitBuff\s*\(", r"UnitAura\s*\(", r"C_UnitAuras", r"GetTime\s*\(",
-                 r"pcall\s*\(", r"GetRemainingDuration\s*\(", r"GetFormattedText\s*\(",
+                 r"GetRemainingDuration\s*\(", r"GetFormattedText\s*\(",
                  r"\.expirationTime", r"\.applications"],
        "Proc and Free move have no polling, cast inference, addon aura scan, raw timer arithmetic or secret-state probing")
 absent(runtime, [r"GetText\s*\(", r"GetStringWidth\s*\(", r"GetStringHeight\s*\(",
                  r"GetAlpha\s*\(", r"GetAuraSlotFrame\s*\(", r"GetAuraInstance\s*\("],
        "Proc never reads native aura child visibility, opacity, identity or timer text")
 assert '"CustomAuraContainerTemplate"' in native
-assert '"AuraContainer"' in native and ':SetUnit("player")' in native
-assert 'container:AddAuraSlot(key, "HELPFUL"' in native
-assert "candidateFilters = { includeSpellIDs = { [auraID] = true } }" in native
+assert '"AuraContainer"' in native and '"SetUnit", handle.container.SetUnit, handle.container, "player"' in native
+assert 'handle.container.AddAuraSlot, handle.container, handle.key, "HELPFUL"' in native
+assert "candidateFilters = { includeSpellIDs = { [handle.auraID] = true } }" in native
 assert "button:SetDurationText(text, { binding = binding })" in native
-assert "text:SetFontObject(font)" in native and "CreateFont(" in native
-assert "self.container:SetEnabled(enabled)" in native
-assert "self.container:Show()" in native
+assert "text:SetFontObject(handle.font)" in native and '"fontsCreated", handle.procOwned, CreateFont' in native
+assert "container.SetEnabled, container, value" in native
+assert "Attempt(container.Show, container)" in native
 absent(native, [r"self\.container:Hide\s*\(", r"self\.button", r"handle\.button",
                 r"\.GetAuraDataBy", r"\.GetPlayerAura"],
        "Aura lifecycle uses native helpful-spell filtering, copied binding and no retained restricted child")
@@ -102,4 +102,62 @@ assert "schema.proc.regions[entry.id]" in database and "color = RegionColorSetti
 assert "ColorCopy(region.color)" in database and "config.regions[id].color = ColorCopy(record.color)" in database
 assert "changedColors" in database and "RefreshProcRegionColor(entry)" in database
 print("PASS RGB schema is optional per stable Proc region and color-only writes use targeted styling")
+
+# Protected calls now also isolate owned construction and shutdown failures.
+# They never probe a restricted Aura, button, duration or native callback object.
+stop = proc_runtime.split('function addon:StopProc()', 1)[1].split('local function RenderProcState', 1)[0]
+assert "pcall(callback, ...)" in stop and "self.procStopping, self.procTracking = true, false" in stop
+assert "self.nativeAuraSlots[key] = handle" in native and "handle.slotAttempted" in native
+assert "handle.initializeCompleted" in native and '"slot-uncertain"' in native
+absent(native, [r"SetParent\s*\(", r"HasAuraSlot\s*\(", r"RemoveAuraSlot\s*\(",
+                r"UnregisterAuraSlot\s*\(", r"SetAuraSlotCandidateFilters\s*\("],
+       "Native ownership avoids forbidden parenting private slot methods and refresh-time filter rebuilds")
+safety = code((root / "Core/ProcSafety.lua").read_text(encoding="utf-8"))
+diagnostics = code((root / "Core/ProcDiagnostics.lua").read_text(encoding="utf-8"))
+assert "Core/ProcSafety.lua" in declared and "Core/ProcDiagnostics.lua" in declared
+assert "local BUDGET = 3" in safety and "state.quarantined" in safety and "RetryProc" in safety
+assert "RunProcSafe" in proc_runtime and "IsProcQuarantined" in proc_runtime
+absent(safety + diagnostics, [r"OnUpdate", r"NewTicker", r"C_Timer", r"collectgarbage", r"CarGOUIDB",
+       r"C_UnitAuras", r"GetText\s*\(", r"GetAlpha\s*\(", r"GetAuraSlotFrame\s*\(",
+       r"geterrorhandler\s*\(", r"seterrorhandler\s*\("],
+       "Proc-only diagnostics and quarantine have no polling GC persistence protected readback or global error handler")
+artwork = code((root / "UI/ProcArtwork.lua").read_text(encoding="utf-8"))
+resolver = code((root / "Core/ProcAppearance.lua").read_text(encoding="utf-8"))
+catalog = code((root / "Database/ProcAssets.lua").read_text(encoding="utf-8"))
+editor = code((root / "UI/ProcAppearanceOptions.lua").read_text(encoding="utf-8"))
+presentation = code((root / "Core/ProcPresentation.lua").read_text(encoding="utf-8"))
+for relative in ("UI/ProcArtwork.lua", "Core/ProcAppearance.lua", "Database/ProcAssets.lua", "UI/ProcAppearanceOptions.lua"):
+    assert declared.count(relative) == 1, "Presentation source must load exactly once: " + relative
+absent(artwork + resolver + editor + presentation, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_AURA", r"C_UnitAuras",
+       r"UnitBuff\s*\(", r"UnitAura\s*\(", r"GetVertexColor\s*\(", r"GetAlpha\s*\(",
+       r"SetCVar\s*\(", r"SetCVarBool\s*\(", r"GetRemainingDuration\s*\("],
+       "Appearance cannot poll, reconstruct triggers, read native opacity/color, query Aura state or write overlay CVars")
+absent(catalog, [r"CreateFrame", r"RegisterEvent", r"GetProcDefinitions", r"RegisterProcFactory", r"C_Spell", r"C_UnitAuras",
+       r"CarGOUIDB", r"Interface\\\\", r"\.(?:blp|tga|dds|png)"],
+       "Artwork catalog is inert audited client-resource metadata with no trigger registration or bundled texture paths")
+assert 'hooksecurefunc(root, "ShowOverlay"' in artwork and 'hooksecurefunc(root, "ReleaseOverlay"' in artwork
+assert 'procSuppressedOverlays' in artwork and 'RestoreProcNativeOverlay' in artwork
+assert 'procPreviewArtworkFrames' in artwork and 'procArtworkFrames' in artwork
+assert 'CreateAnimationGroup()' in artwork and 'CreateTexture(nil, "ARTWORK")' in artwork
+assert 'frame.texture:SetBlendMode("BLEND")' in artwork
+absent(artwork, [r'SetBlendMode\s*\(\s*"ADD"\s*\)'],
+       "Live and TEST artwork keep the native-equivalent default blend behavior")
+assert 'ResolveProcAppearance' in artwork and 'ProcPublicColor' in proc_runtime
+assert 'StopProcArtwork()' in proc_runtime and 'GetProcArtworkDiagnostic(entry)' in proc_runtime
+absent(artwork, [r"(?:overlay|record|owned)\.texture\s*:\s*(?:SetTexture|SetVertexColor|SetTexCoord|SetPoint|SetSize|CreateAnimationGroup)\s*\("],
+       "Captured native textures are not rewritten or animated by the artwork renderer")
+refresh = artwork.split('function addon:RefreshProcAppearance(entry)', 1)[1].split('function addon:', 1)[0]
+absent(refresh, [r"RenderProcState|ConfigureProc|SetDuration|CreateNativeAuraSlot|RefreshMobility"],
+       "Appearance edits refresh only owned presentation without restarting timer or gameplay providers")
+assert 'GetProcAsset(item)' in resolver and 'procAppearanceLimits' in resolver
+assert 'appearance = RegionAppearanceSetting' in database and 'CopyProcAppearance(region.appearance)' in database
+assert 'ResetProcRegionAppearance' in database
+assert 'ProcArtwork' not in (root / 'Modules/Proc/AuraState.lua').read_text(encoding='utf-8')
+assert re.search(r"function addon:IsProcLegacyReplacementAllowed\(\)\s+return false\s+end", presentation)
+assert "if self:IsProcLegacyReplacementAllowed() and self.InstallProcArtworkHooks" in proc_runtime
+assert "IsProcLegacyReplacementAllowed" in artwork and "IsProcLegacyReplacementAllowed" in resolver
+assert "IsProcLegacyReplacementAllowed" in editor
+assert "legacyProcDevelopment" not in database + presentation + proc_runtime + artwork
+assert not any("tests/" in name for name in declared)
+print("PASS Release gate disables legacy replacement while retaining cleanup, independent artwork and unchanged Aura slots")
 print("Proc static checks passed; native security, actual matching and combat visuals require Retail acceptance.")

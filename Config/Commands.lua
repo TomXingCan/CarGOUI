@@ -3,6 +3,7 @@ local _, addon = ...
 local function PrintHelp()
     addon:Print(addon:Text("/cui opens or closes Options. All display settings are available there. /cargoui remains an alias."))
     addon:Print(addon:Text("Optional commands: /cui help | status | show | hide | reset"))
+    addon:Print(addon:Text("/cui diagnostics [copy] - manual session snapshot; Options is not required."))
     addon:Print(addon:Text("/cui position <x> <y>  (-10000 to 10000; right/up are positive)"))
     addon:Print(addon:Text("Mobility Appearance is per class; Proc Appearance is per current class and specialization."))
 end
@@ -30,6 +31,21 @@ function addon:HandleSlashCommand(message)
         return
     elseif command == "status" and #args == 1 then
         PrintStatus()
+        return
+    elseif command == "proc" and #args == 2 and args[2] == "retry" then
+        if not self:IsProcQuarantined() then
+            self:Print(self:Text("Proc is not quarantined."))
+        elseif self:RetryProc() then
+            self:Print(self:Text("Proc retry completed; current settings remain in effect."))
+        else
+            self:Print(self:Text("Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."))
+        end
+        return
+    elseif command == "diagnostics" and #args == 1 then
+        self:PrintDiagnosticsSnapshot()
+        return
+    elseif command == "diagnostics" and #args == 2 and args[2] == "copy" then
+        self:ShowDiagnosticsSnapshot()
         return
     elseif (command == "show" or command == "hide") and #args == 1 then
         patch = { enabled = command == "show" }

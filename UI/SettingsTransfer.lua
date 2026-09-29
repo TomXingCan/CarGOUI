@@ -21,6 +21,7 @@ function addon:ClearSettingsTransferPage()
         edit:SetText("")
         edit:SetHeight(edit.minimumHeight)
         edit.scroll:SetVerticalScroll(0)
+        edit.scroll:RefreshRange()
     end
     state.confirmation:Hide()
     state.body:Show()
@@ -53,6 +54,9 @@ end
 function addon:CreateSettingsTransferPage(panel, page, ui)
     if panel.transfer then return panel.transfer end
     if not Available(panel) then return end
+    local CUI = addon.CUI
+    local width = page:GetWidth()
+    local inner = width - 2 * addon.DesignSystem.sectionPadding
     local state = { scope = "class", editors = {} }
     panel.transfer = state
     state.class, state.specID = self:GetPlayerContext()
@@ -88,15 +92,11 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
     end
 
     local function Editor(parent, key, y, height, readOnlyKey)
-        local scroll = CreateFrame("ScrollFrame", nil, parent, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, y)
-        scroll:SetSize(446, height)
-        scroll:EnableMouse(true)
-        scroll:EnableMouseWheel(true)
+        local scroll = CUI.ScrollFrame(panel, parent, 0, y, inner - 16, height)
         ui.ThemeControl(scroll, "input")
-        -- No RegisterOptionsDragSurface on the editing area or its scrollbar.
-        local edit = CreateFrame("EditBox", nil, scroll)
-        edit:SetSize(438, height)
+        -- The editor and thin scrollbar own input; they are never drag surfaces.
+        local edit = CUI.EditBox(panel, scroll, 0, 0, inner - 28)
+        edit:SetHeight(height)
         edit:SetMultiLine(true)
         edit:SetAutoFocus(false)
         edit:SetMaxLetters(0)
@@ -109,12 +109,12 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
         scroll:SetScrollChild(edit)
         edit.scroll, edit.minimumHeight = scroll, height
         state.editors[#state.editors + 1] = edit
-        panel.editBoxes[#panel.editBoxes + 1] = edit
         controls[key] = edit
         local function Resize()
             local _, fontHeight = edit:GetFont()
             edit:SetHeight(math.max(height, edit:GetNumLines() * ((fontHeight or 14) + 2) + 12))
             scroll:UpdateScrollChildRect()
+            scroll:RefreshRange()
         end
         edit:SetScript("OnTextChanged", function(self, userInput)
             if state.clearing then return end
@@ -140,15 +140,21 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
             end
         end)
         edit:SetScript("OnEscapePressed", function() panel:Hide() end)
-        scroll:SetScript("OnMouseWheel", function(self, delta)
-            local nextScroll = self:GetVerticalScroll() - delta * 32
-            self:SetVerticalScroll(math.max(0, math.min(self:GetVerticalScrollRange(), nextScroll)))
-        end)
         return edit
     end
 
-    ui.Label(body, L.transferHint, 0, -34, 470, 30)
-    controls.transferScope = ui.Dropdown(panel, body, L.transferScope, 0, -66, {
+    ui.Label(body, L.transferHint, 0, -34, width, 36)
+    local exportSection = CUI.Section(body, L.transferExport, 0, -80, width, { height = 166 })
+    local importSection = CUI.Section(body, L.transferInput, 0, -260, width, { height = 188 })
+    local reviewSection = CUI.Section(confirmation, L.transferReview, 0, -36, width, { height = 412 })
+    state.sections = { exportSection, importSection, reviewSection }
+    for _, section in ipairs(state.sections) do
+        section.content:SetWidth(inner)
+        addon:RegisterOptionsDragSurface(section)
+        addon:RegisterOptionsDragSurface(section.content)
+    end
+    local exportContent, importContent, reviewContent = exportSection.content, importSection.content, reviewSection.content
+    controls.transferScope = ui.Dropdown(panel, exportContent, L.transferScope, 0, 0, {
         { value = "class", label = L.transferClass },
         { value = "all", label = L.transferAll },
     }, nil, function(value)
@@ -158,8 +164,10 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
         controls.transferScope:SelectValue(value)
         addon:RefreshSettingsTransferPage()
     end)
+    controls.transferScope:SetWidth(292)
+    if controls.transferScope.label then controls.transferScope.label:SetWidth(292) end
     controls.transferScope:SelectValue("class")
-    controls.transferExport = ui.Button(body, L.transferExport, 296, -92, 82, function()
+    controls.transferExport = ui.Button(exportContent, L.transferExport, 308, -26, 148, function()
         if not Ready() then return end
         DropTransaction()
         local text, message = addon:ExportSettings(state.scope)
@@ -172,15 +180,14 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
         controls.transferSelectAll:Enable()
         Feedback(L.transferCopy)
     end)
-    controls.transferSelectAll = ui.Button(body, L.transferSelectAll, 386, -92, 88, function()
+    controls.transferSelectAll = ui.Button(exportContent, L.transferSelectAll, 472, -26, 164, function()
         if not Ready() or not state.exportText then return end
         controls.transferOutput:SetFocus()
         controls.transferOutput:HighlightText()
         Feedback(L.transferCopy)
     end)
-    Editor(body, "transferOutput", -130, 62, "exportText")
-    ui.Label(body, L.transferInput, 0, -200, 470, 20, "GameFontNormal")
-    Editor(body, "transferInput", -224, 86)
+    Editor(exportContent, "transferOutput", -70, 44, "exportText")
+    Editor(importContent, "transferInput", 0, 78)
 
     local function Prepare(restore)
         if not Ready() then return end
@@ -199,11 +206,10 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
         addon:RefreshSettingsTransferPage()
         Feedback(L.transferPending)
     end
-    controls.transferImport = ui.Button(body, L.transferImport, 0, -326, 220, function() Prepare(false) end)
-    controls.transferRestore = ui.Button(body, L.transferRestore, 232, -326, 242, function() Prepare(true) end)
-    ui.Label(confirmation, L.transferReview, 0, -36, 470, 24, "GameFontNormal")
-    Editor(confirmation, "transferSummary", -68, 240, "summaryText")
-    controls.transferConfirm = ui.Button(confirmation, L.transferConfirm, 0, -326, 220, function()
+    controls.transferImport = ui.Button(importContent, L.transferImport, 0, -96, 308, function() Prepare(false) end)
+    controls.transferRestore = ui.Button(importContent, L.transferRestore, 324, -96, 312, function() Prepare(true) end)
+    Editor(reviewContent, "transferSummary", 0, 292, "summaryText")
+    controls.transferConfirm = ui.Button(reviewContent, L.transferConfirm, 0, -316, 308, function()
         if not Ready() or not state.transaction then return end
         local transaction = state.transaction
         -- Backend owns the private transaction and rechecks combat/context/db.
@@ -214,7 +220,7 @@ function addon:CreateSettingsTransferPage(panel, page, ui)
         addon:RefreshSettingsTransferPage()
         Feedback(ok and (message or L.transferDone) or (message or L.invalid), not ok)
     end)
-    controls.transferCancel = ui.Button(confirmation, L.transferCancel, 232, -326, 242, function()
+    controls.transferCancel = ui.Button(reviewContent, L.transferCancel, 324, -316, 312, function()
         if not Ready() then return end
         addon:ClearSettingsTransferPage()
         addon:RefreshSettingsTransferPage()

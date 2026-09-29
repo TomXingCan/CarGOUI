@@ -1,4 +1,5 @@
 local _, addon = ...
+local D = addon.DesignSystem
 -- Identity can become available after the window opens (login / talent load).
 -- Subscribe only while shown; these callbacks never start a gameplay adapter.
 local events = { "PLAYER_ENTERING_WORLD", "PLAYER_SPECIALIZATION_CHANGED", "UNIT_FACTION",
@@ -76,23 +77,23 @@ function addon:GetAutomaticThemeInfo()
 end
 
 function addon:ApplyOptionsCategoryTheme(button, selected)
+    if button.SetSelected then button:SetSelected(selected); return end
     local selection = button.themeSelection
     if not selection then
-        -- Retail UIPanelButtonNoTooltipTemplate puts Left/Right/Middle in
-        -- BACKGROUND. ARTWORK -1 is above those textures and below button text.
+        -- The selected layer is addon-owned and stays below its label.
         selection = button:CreateTexture(nil, "ARTWORK", nil, -1)
         selection:SetPoint("TOPLEFT", button, "TOPLEFT", 2, -2)
         selection:SetPoint("BOTTOMRIGHT", button, "BOTTOMRIGHT", -2, 2)
         button.themeSelection = selection
     end
-    local info = self.automaticThemeInfo
-    local theme = self.optionBodyThemes[info and info.bodyKey or "neutral"]
-    Gradient(selection, theme, self.optionThemeOpacity.selection)
+    D.ApplyGradient(selection, .20)
     selection:SetShown(selected == true)
 end
 
 local function IsSelectedCategory(panel, button)
-    local key = panel.activeCategory == "appearance" and panel.appearanceKind or panel.activeCategory
+    local descriptor = addon.optionsPageRegistry and addon.optionsPageRegistry[panel.activeCategory]
+    local parent = descriptor and descriptor.navParent
+    local key = type(parent) == "function" and parent(addon, panel, descriptor) or parent or panel.activeCategory
     return button.key == key
 end
 
@@ -106,13 +107,13 @@ function addon:CreateOptionsTheme(panel)
     -- BackdropTemplate's center occupies BACKGROUND sublevel 0. These surfaces
     -- sit above it while remaining below BORDER, child widgets and text.
     theme.body = panel:CreateTexture(nil, "BACKGROUND", nil, 1)
-    theme.body:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -76)
+    theme.body:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -D.headerHeight)
     theme.body:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
     theme.sidebar = panel:CreateTexture(nil, "BACKGROUND", nil, 2)
-    theme.sidebar:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -76)
-    theme.sidebar:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", 192, 96)
+    theme.sidebar:SetPoint("TOPLEFT", panel, "TOPLEFT", 1, -D.headerHeight)
+    theme.sidebar:SetPoint("BOTTOMRIGHT", panel, "BOTTOMLEFT", D.sidebarWidth, D.footerHeight)
     theme.footer = panel:CreateTexture(nil, "BACKGROUND", nil, 2)
-    theme.footer:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 1, 96)
+    theme.footer:SetPoint("TOPLEFT", panel, "BOTTOMLEFT", 1, D.footerHeight)
     theme.footer:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -1, 1)
     -- Native Lines do not create input frames. Their BACKGROUND layer lies below
     -- child-page controls and the panel's text; no overlay frame is needed.
@@ -133,79 +134,73 @@ end
 
 local function SkinControl(record, body)
     local control, kind = record.control, record.kind
+    if control.cuiRefresh then control:cuiRefresh(); return end
     if record.fill then
-        if kind == "content" then Solid(record.fill, body.accent, 0.28)
-        else Solid(record.fill, kind == "input" and body.input or body.button, 0.97) end
+        if kind == "content" then D.ApplyGradient(record.fill, .35)
+        else D.Fill(record.fill, kind == "input" and "surfaceInput" or kind == "section" and "surfaceCard" or "surfaceRaised") end
     end
-    for _, line in ipairs(record.border or {}) do Solid(line, body.accent, 0.36) end
-    if kind == "menu" or kind == "dialog" then
-        control:SetBackdropColor(body.input[1], body.input[2], body.input[3], 1)
-        control:SetBackdropBorderColor(body.accent[1], body.accent[2], body.accent[3], 0.65)
-    end
-    if kind == "input" and control.SetTextColor then control:SetTextColor(unpack(addon.optionThemeText)) end
-    for _, method in ipairs({ "GetHighlightTexture", "GetCheckedTexture", "GetThumbTexture" }) do
-        local texture = control[method] and control[method](control)
-        if texture and texture.SetVertexColor then texture:SetVertexColor(body.accent[1], body.accent[2], body.accent[3]) end
-    end
+    for _, line in ipairs(record.border or {}) do D.Fill(line, "borderSubtle", kind == "section" and .55 or 1) end
+    if kind == "input" and control.SetTextColor then control:SetTextColor(unpack(D.textPrimary)) end
 end
 
 function addon:RegisterOptionsThemeControl(panel, control, kind)
     if not panel or not control then return end
     panel.themeControls = panel.themeControls or {}
     if control.optionsThemeRecord then return end
-    local record = { control = control, kind = kind, border = {} }
+    local record
+    if kind == "content" then
+        -- Page containers stay transparent so the root identity watermark is
+        -- visible. Only cards and controls own full surface backgrounds.
+        local divider = control:CreateTexture(nil, "BACKGROUND")
+        divider:SetPoint("TOPLEFT", control, "TOPLEFT", 0, -28)
+        divider:SetPoint("TOPRIGHT", control, "TOPRIGHT", 0, -28)
+        divider:SetHeight(1)
+        record = { fill = divider, border = {} }
+    elseif kind == "check" or kind == "slider" then record = { fill = control.track, border = {} }
+    else record = D.Skin(control, kind) end
+    record.control, record.kind = control, kind
     control.optionsThemeRecord = record
     panel.themeControls[#panel.themeControls + 1] = record
-    if kind ~= "menu" and kind ~= "dialog" then
-        local layer = (kind == "check" or kind == "slider" or kind == "content") and "BACKGROUND" or "ARTWORK"
-        local fill = control:CreateTexture(nil, layer, nil, -2)
-        record.fill = fill
-        if kind == "content" then
-            fill:SetPoint("TOPLEFT", control, "TOPLEFT", 0, -28)
-            fill:SetPoint("TOPRIGHT", control, "TOPRIGHT", 0, -28)
-            fill:SetHeight(1)
-        elseif kind == "slider" then
-            fill:SetPoint("LEFT", control, "LEFT", 0, 0)
-            fill:SetPoint("RIGHT", control, "RIGHT", 0, 0)
-            fill:SetHeight(4)
-        else
-            fill:SetPoint("TOPLEFT", control, "TOPLEFT", 1, -1)
-            fill:SetPoint("BOTTOMRIGHT", control, "BOTTOMRIGHT", -1, 1)
-        end
-        if kind ~= "content" and kind ~= "slider" and kind ~= "check" then
-            for _, edge in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
-                local border = control:CreateTexture(nil, "ARTWORK", nil, -1)
-                if edge == "TOP" or edge == "BOTTOM" then
-                    border:SetPoint(edge .. "LEFT", control, edge .. "LEFT", 0, 0)
-                    border:SetPoint(edge .. "RIGHT", control, edge .. "RIGHT", 0, 0)
-                    border:SetHeight(1)
-                else
-                    border:SetPoint("TOP" .. edge, control, "TOP" .. edge, 0, 0)
-                    border:SetPoint("BOTTOM" .. edge, control, "BOTTOM" .. edge, 0, 0)
-                    border:SetWidth(1)
-                end
-                record.border[#record.border + 1] = border
-            end
-        end
-    end
     local info = self.automaticThemeInfo
     SkinControl(record, self.optionBodyThemes[info and info.bodyKey or "neutral"])
 end
 
+-- Clip each native line to the quiet lower-right background area. The source
+-- class/spec geometry remains unchanged and no overlay frame captures input.
+local function CropStroke(x1, y1, x2, y2)
+    local dx, dy, first, last = x2 - x1, y2 - y1, 0, 1
+    local function Edge(p, q)
+        if p == 0 then return q >= 0 end
+        local ratio = q / p
+        if p < 0 then if ratio > last then return false end; first = math.max(first, ratio)
+        else if ratio < first then return false end; last = math.min(last, ratio) end
+        return true
+    end
+    if not Edge(-dx, x1 + 300) or not Edge(dx, -24 - x1)
+        or not Edge(-dy, y1 - 80) or not Edge(dy, 310 - y1) or first >= last then return end
+    return x1 + dx * first, y1 + dy * first, x1 + dx * last, y1 + dy * last
+end
+
 local function ApplyWatermark(self, panel, surfaces, body)
     local pattern = self:BuildOptionsThemeMotif(body.motif)
-    surfaces.motifKey, surfaces.motifCount = body.motif, #pattern
+    surfaces.motifKey, surfaces.motifCount, surfaces.motifVisibleCount = body.motif, #pattern, 0
     for i, line in ipairs(surfaces.motif) do
         local stroke = pattern[i]
+        local x1, y1, x2, y2
         if stroke then
+            x1, y1, x2, y2 = CropStroke(-12 + stroke[1] * 1.45, 155 + stroke[2] * 1.45,
+                -12 + stroke[3] * 1.45, 155 + stroke[4] * 1.45)
+        end
+        if x1 then
             -- Endpoints define actual native geometry. Rotating WHITE8X8 UVs
             -- on a narrow rectangular texture would not establish that shape.
             line:ClearAllPoints()
-            line:SetStartPoint("BOTTOMRIGHT", panel, -122 + stroke[1], 202 + stroke[2])
-            line:SetEndPoint("BOTTOMRIGHT", panel, -122 + stroke[3], 202 + stroke[4])
+            line:SetStartPoint("BOTTOMRIGHT", panel, x1, y1)
+            line:SetEndPoint("BOTTOMRIGHT", panel, x2, y2)
             line:SetThickness(stroke[5])
-            line:SetColorTexture(body.accent[1], body.accent[2], body.accent[3], self.optionThemeOpacity.motif)
+            line:SetColorTexture(body.accent[1], body.accent[2], body.accent[3], self.optionThemeOpacity.motif * .55)
             line:Show()
+            surfaces.motifVisibleCount = surfaces.motifVisibleCount + 1
         else line:Hide() end
     end
 end
@@ -235,19 +230,21 @@ function addon:RefreshOptionsTheme()
     surfaces.key = info.themeKey
     if surfaces.headerKey ~= info.headerKey then
         surfaces.headerKey = info.headerKey
-        Gradient(surfaces.header, header, self.optionThemeOpacity.header)
+        Gradient(surfaces.header, header, .18)
         self:UpdateBrandingTheme(header.accent)
     end
     if surfaces.bodyKey ~= info.bodyKey then
         surfaces.bodyKey = info.bodyKey
         local opacity = self.optionThemeOpacity
-        Gradient(surfaces.body, body, 1)
-        Solid(surfaces.sidebar, body.input, 0.60)
-        Solid(surfaces.footer, body.input, 0.76)
-        panel:SetBackdropColor(body.background[1], body.background[2], body.background[3], 1)
-        panel:SetBackdropBorderColor(body.accent[1], body.accent[2], body.accent[3], opacity.border)
+        -- Identity is a restrained watermark/tint. Shared controls retain the
+        -- same graphite surfaces and teal-to-violet interaction language.
+        Gradient(surfaces.body, { left = D.surfaceBase, right = D.surfaceRaised }, 1)
+        Solid(surfaces.sidebar, D.surfaceBase, .94)
+        Solid(surfaces.footer, D.surfaceRaised, .98)
+        if panel.SetBackdropColor then panel:SetBackdropColor(unpack(D.surfaceBase)) end
+        if panel.SetBackdropBorderColor then panel:SetBackdropBorderColor(unpack(D.borderSubtle)) end
         if panel.themeDivider then
-            Solid(panel.themeDivider, body.accent, opacity.line)
+            D.ApplyGradient(panel.themeDivider, .55)
         end
         ApplyWatermark(self, panel, surfaces, body)
         for _, record in ipairs(panel.themeControls or {}) do SkinControl(record, body) end

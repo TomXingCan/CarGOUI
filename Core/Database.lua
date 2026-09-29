@@ -4,6 +4,16 @@ local function BooleanSetting(value)
     return type(value) == "boolean", addon:Text("Use a checkbox value (true or false).")
 end
 
+local function ProcPolicySetting(value)
+    if issecretvalue and issecretvalue(value) then return false, addon:Text("Unknown Proc presentation strategy.") end
+    return value == "replacement" or value == "independent", addon:Text("Unknown Proc presentation strategy.")
+end
+
+local function ProcArtworkSetting(value)
+    if issecretvalue and issecretvalue(value) then return false, addon:Text("Use a checkbox value (true or false).") end
+    return BooleanSetting(value)
+end
+
 -- A region color is optional. Omission means dynamic class color; no default
 -- RGB is written to SavedVariables. This validator also rejects alpha/extra keys.
 function addon:IsValidProcRegionColor(value)
@@ -27,6 +37,12 @@ end
 local function RegionColorSetting(value)
     if issecretvalue and issecretvalue(value) then return false, addon:Text("Color must be a public RGB value.") end
     return value == false or addon:IsValidProcRegionColor(value), addon:Text("Choose finite RGB values from 0 to 1; opacity is not configurable.")
+end
+
+local function RegionAppearanceSetting(value)
+    if issecretvalue and issecretvalue(value) then return false, addon:Text("Artwork settings must contain public values.") end
+    if value == false then return true end -- Reset only this region's artwork.
+    return addon:ValidateProcAppearance(value, true)
 end
 
 local function NumberSetting(range, message)
@@ -314,6 +330,10 @@ function addon:GetProcConfig(specID)
     if class == "MAGE" then config = MigrateMageProc(self, config, specID) end
     config.style = Style(config.style)
     if type(config.enabled) ~= "boolean" then config.enabled = true end
+    -- Optional policy fields keep old scopes byte-compatible. Invalid saved
+    -- values fall back through absence; normalization never opts a scope in.
+    if not ProcPolicySetting(config.presentationPolicy) then config.presentationPolicy = nil end
+    if not ProcArtworkSetting(config.independentArtworkEnabled) then config.independentArtworkEnabled = nil end
     config.regions = type(config.regions) == "table" and config.regions or {}
     -- Normalize only the requested current specialization. Detach each region
     -- and color separately, even if an older external edit aliased the tables.
@@ -324,6 +344,8 @@ function addon:GetProcConfig(specID)
             -- into them, not only after the first render of each region.
             if region.position ~= nil then region.position = Position(region.position) end
             region.color = ColorCopy(region.color)
+            region.appearance = self:CopyProcAppearance(region.appearance)
+            if not ProcArtworkSetting(region.independentArtworkEnabled) then region.independentArtworkEnabled = nil end
             config.regions[id] = region
         end
     end
@@ -438,6 +460,25 @@ function addon:SetProcRegionColor(entry, color)
     return self:UpdateSettings({ proc = { regions = { [entry.id] = { color = color or false } } } })
 end
 
+function addon:GetProcRegionAppearance(entry)
+    if not self:GetCurrentProcRegion(entry) then return self:NewProcAppearance() end
+    local config = self:GetProcConfig()
+    local region = config and config.regions[entry.id]
+    return self:NormalizeProcAppearance(type(region) == "table" and region.appearance or nil)
+end
+
+function addon:SetProcRegionAppearance(entry, patch, options)
+    if not self:GetCurrentProcRegion(entry) then return false, addon:Text("Choose a defined Proc region for your current specialization.") end
+    local valid, message = self:ValidateProcAppearance(patch, true)
+    if not valid then return false, message end
+    return self:UpdateSettings({ proc = { regions = { [entry.id] = { appearance = patch } } } }, options)
+end
+
+function addon:ResetProcRegionAppearance(entry)
+    if not self:GetCurrentProcRegion(entry) then return false, addon:Text("Choose a defined Proc region for your current specialization.") end
+    return self:UpdateSettings({ proc = { regions = { [entry.id] = { appearance = false } } } })
+end
+
 function addon:UpdateReminderStyle(key, patch)
     if not self:GetReminderStyleKey(key) then return false, addon:Text("Edit the current class / specialization Appearance.") end
     return self:UpdateSettings({ styles = { [key] = patch } })
@@ -483,7 +524,43 @@ local function PositionChanges(patch, entries)
     if any then return changes end
 end
 
-function addon:UpdateSettings(patch)
+local function ContinuousAppearance(patch)
+    if type(patch) ~= "table" then return false end
+    local preset = false
+    for key, value in pairs(patch) do
+        if key == "offset" then
+            for axis in pairs(value) do if axis ~= "x" and axis ~= "y" then return false end end
+        elseif key == "animation" then
+            for setting in pairs(value) do
+                if setting == "entrance" or setting == "active" or setting == "exit" or setting == "direction" then preset = true
+                elseif setting ~= "speed" and setting ~= "intensity" then return false end
+            end
+        elseif key ~= "artColor" and key ~= "alpha" and key ~= "scale" and key ~= "desaturation"
+            and key ~= "rotation" and key ~= "width" and key ~= "height" then return false end
+    end
+    return true, patch.artColor ~= nil, preset
+end
+
+local function ArtworkFlagsOnly(patch)
+    local any = false
+    for key, value in pairs(patch) do
+        if key ~= "proc" then return false end
+        for field, regions in pairs(value) do
+            if field == "independentArtworkEnabled" then any = true
+            elseif field == "regions" then
+                for _, region in pairs(regions) do
+                    for setting in pairs(region) do
+                        if setting ~= "independentArtworkEnabled" then return false end
+                        any = true
+                    end
+                end
+            else return false end
+        end
+    end
+    return any
+end
+
+function addon:UpdateSettings(patch, options)
     if not self.db then return false, addon:Text("Settings are not initialized yet.") end
     if type(patch) ~= "table" then return false, addon:Text("Settings must be supplied as a table.") end
     local optionsOnly = patch.options ~= nil
@@ -497,19 +574,22 @@ function addon:UpdateSettings(patch)
         if patch.options.position and self.ApplyOptionsPosition then self:ApplyOptionsPosition() end
         if patch.options.animatedTitle ~= nil and self.RefreshTitleAnimation then self:RefreshTitleAnimation() end
         if patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
-        if self.RefreshOptions then self:RefreshOptions() end
+        if not (options and options.skipOptionsRefresh) and self.RefreshOptions then self:RefreshOptions() end
         return true
     end
-    local class = self:GetPlayerContext()
+    local class, spec = self:GetPlayerContext()
     local schema = { options = optionsSchema, enabled = BooleanSetting, position = positionSchema,
         mobility = { enabled = BooleanSetting, style = styleSchema, position = positionSchema,
             freeMovePosition = positionSchema, preferences = Preferences },
-        proc = { enabled = BooleanSetting, style = styleSchema, regions = {} }, styles = {}, reminders = {} }
+        proc = { enabled = BooleanSetting, presentationPolicy = ProcPolicySetting,
+            independentArtworkEnabled = ProcArtworkSetting, style = styleSchema, regions = {} }, styles = {}, reminders = {} }
     local entries = {}
     for _, entry in ipairs(self:GetPreviewEntries()) do
         entries[entry.id] = entry
         schema.reminders[entry.id] = { position = positionSchema }
-        if entry.kind == "proc" then schema.proc.regions[entry.id] = { position = positionSchema, color = RegionColorSetting } end
+        if entry.kind == "proc" then schema.proc.regions[entry.id] = {
+            position = positionSchema, color = RegionColorSetting, appearance = RegionAppearanceSetting,
+            independentArtworkEnabled = ProcArtworkSetting } end
     end
     for _, kind in ipairs({ "mobility", "proc" }) do
         local context = self:GetAppearanceContext(kind)
@@ -522,11 +602,25 @@ function addon:UpdateSettings(patch)
     end
     local procContext = self:GetAppearanceContext("proc")
     local writesProc = patch.proc or (procContext and patch.styles and patch.styles[procContext.key])
-    if writesProc and (not procContext or not self:GetProcConfig()) then
+    if writesProc and not procContext then
+        return false, addon:Text("Proc settings are unavailable until the current specialization module is ready.")
+    end
+    if patch.proc and patch.proc.presentationPolicy ~= nil then
+        local savedClass = self.db.classes[class]
+        local previous = savedClass and savedClass.proc and savedClass.proc[spec] or {}
+        if self:GetProcPresentationPolicy(previous) ~= patch.proc.presentationPolicy then
+            -- Force avoids a config getter normalizing SavedVariables before
+            -- cleanup succeeds. No part of a mixed patch has been written yet.
+            local clean, reason = self:PrepareProcPresentationTransition(patch.proc.presentationPolicy, true)
+            if not clean then return false, reason end
+        end
+    end
+    if writesProc and not self:GetProcConfig() then
         return false, addon:Text("Proc settings are unavailable until the current specialization module is ready.")
     end
     local changedPositions = PositionChanges(patch, entries)
-    local changedStyles, changedColors, stylesOnly = {}, {}, true
+    local artworkFlagsOnly = ArtworkFlagsOnly(patch)
+    local changedStyles, changedColors, changedAppearances, stylesOnly = {}, {}, {}, true
     local function RecordStyle(kind)
         local context = self:GetAppearanceContext(kind)
         if context then changedStyles[context.key] = true end
@@ -541,10 +635,20 @@ function addon:UpdateSettings(patch)
     end
     if patch.proc then
         local config = self:GetProcConfig()
+        -- Compute detached artwork objects before the generic merge. A reset
+        -- or optional-field sentinel must never become a saved boolean.
+        local appearances = {}
+        for id, record in pairs(patch.proc.regions or {}) do
+            if record.appearance ~= nil then
+                local previous = config.regions[id]
+                if record.appearance == false then appearances[id] = false
+                else appearances[id] = self:MergeProcAppearance(type(previous) == "table" and previous.appearance or nil, record.appearance) end
+            end
+        end
         MergePatch(config, patch.proc)
         for key in pairs(patch.proc) do if key ~= "style" and key ~= "regions" then stylesOnly = false end end
         for id, record in pairs(patch.proc.regions or {}) do
-            if record.position then stylesOnly = false end
+            if record.position or record.independentArtworkEnabled ~= nil then stylesOnly = false end
             if record.color ~= nil then
                 config.regions[id].color = ColorCopy(record.color)
                 changedColors[id] = entries[id]
@@ -552,6 +656,10 @@ function addon:UpdateSettings(patch)
                 if draft and draft.id == id and draft.class == class and draft.specID == entries[id].specID then
                     self.procRegionColorPreview = nil
                 end
+            end
+            if record.appearance ~= nil then
+                config.regions[id].appearance = appearances[id] or nil
+                changedAppearances[id] = entries[id]
             end
         end
         if patch.proc.style then RecordStyle("proc") end
@@ -568,22 +676,48 @@ function addon:UpdateSettings(patch)
         local _, canonical = self:IsSupportedFont(style.font.face)
         style.font.face = canonical
     end
-    if changedPositions then
+    if artworkFlagsOnly then
+        -- Artwork gates never rebuild native timer filters or bindings. TEST
+        -- follows the region gate while the master switch affects live only.
+        if self.RenderProcArtwork then self:RenderProcArtwork() end
+        if self.RefreshPreview then self:RefreshPreview(true) end
+    elseif changedPositions then
         if self.RefreshReminderPositions then self:RefreshReminderPositions(changedPositions) end
     elseif stylesOnly then
         if self.RefreshReminderStyle then for key in pairs(changedStyles) do self:RefreshReminderStyle(key) end end
         if self.RefreshProcRegionColor then for _, entry in pairs(changedColors) do self:RefreshProcRegionColor(entry) end end
+        if self.RefreshProcAppearance then
+            for id, entry in pairs(changedAppearances) do
+                local appearance = patch.proc.regions[id].appearance
+                -- Validated presentation edits retain native ownership. Tint
+                -- and numeric edits may retain motion; preset choices still
+                -- restart changed owned animations. Modes/sources/reset restore.
+                local continuous, tint, preset = ContinuousAppearance(appearance)
+                if continuous and (tint or preset or options and options.continuousAppearance)
+                    and self.RefreshProcContinuousAppearance then self:RefreshProcContinuousAppearance(entry, not preset)
+                else self:RefreshProcAppearance(entry) end
+            end
+        end
     else self:ApplySettings() end
     if patch.options and patch.options.minimap and self.RefreshLauncherSettings then self:RefreshLauncherSettings() end
-    if stylesOnly and next(changedColors) and not next(changedStyles) then
+    if options and options.skipOptionsRefresh then
+        -- A numeric row already synchronizes its committed value. Avoid menu
+        -- rebuilding and fresh callbacks on each drag; other callers refresh.
+    elseif stylesOnly and next(changedColors) and not next(changedStyles) then
         if self.RefreshProcColorControls then self:RefreshProcColorControls() end
     elseif self.RefreshOptions then self:RefreshOptions() end
     return true
 end
 
 function addon:ResetDatabase()
+    local class, spec = self:GetPlayerContext()
+    local savedClass = class and self.db.classes[class]
+    local previous = savedClass and savedClass.proc and savedClass.proc[spec] or {}
+    if self:GetProcPresentationPolicy(previous) ~= "replacement" then
+        local clean, reason = self:PrepareProcPresentationTransition("replacement", true)
+        if not clean then return false, reason end
+    end
     if self.CancelProcColorPicker then self:CancelProcColorPicker() end
-    local class = self:GetPlayerContext()
     if class then self.db.classes[class] = nil end
     if class == "MAGE" then self.db.migrations.scope5.procReset = true end
     -- Reset is deliberately scoped. Other classes and historical migration
@@ -594,4 +728,5 @@ function addon:ResetDatabase()
     self:RefreshConfigurationContext()
     self:ApplySettings()
     if self.RefreshOptions then self:RefreshOptions() end
+    return true
 end

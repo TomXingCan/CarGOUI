@@ -253,7 +253,7 @@ test("1.0 every locale exercises all Options pages status launcher tooltip and i
             addon:SelectOptionsCategory(key)
             truthy(page:IsShown(), locale .. " page is accessible: " .. key)
         end
-        addon:SelectOptionsCategory("preview")
+        addon:SelectOptionsCategory("general")
         truthy(addon:SetPreview("all"), locale .. " samples start")
         addon:StopPreview()
         local before = #state.messages

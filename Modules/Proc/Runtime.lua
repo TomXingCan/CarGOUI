@@ -99,20 +99,59 @@ function addon:GetProcRegionOverlayState(entry)
     return shown or hidden
 end
 
+function addon:GetProcRetryBlocker()
+    local pool = self.reminderFrames and self.reminderFrames.nativeAura or {}
+    for key, kind in pairs(self.nativeAuraWrapperAttempts or {}) do
+        if kind == "proc" and not pool[key] then return "reload-required" end
+    end
+    for _, name in ipairs({ "GetProcNativeRetryBlocker", "GetProcArtworkRetryBlocker",
+        "GetProcPreviewRetryBlocker" }) do
+        if self[name] then
+            local reason = self[name](self)
+            if reason then return reason end
+        end
+    end
+end
+
 function addon:StopProc()
-    self.procTracking = false
-    for _, event in ipairs(events) do self:UnregisterEvent(event, OnProcEvent) end
+    self:ProcDiagnosticCount("stopCalls")
+    if self.procStopping then return false, "proc-cleanup-in-progress" end
+    local notifyStopped = self.procTracking and self:IsProcIndependentPolicy()
+    self.procStopping, self.procTracking = true, false
+    self:InvalidateProcSafetyGeneration()
+    local clean = true
+    local function Attempt(callback, ...)
+        local ok, result = pcall(callback, ...)
+        if not ok or result == false then clean = false end
+    end
+    -- Clear our business subscriptions before any native cleanup can reenter.
+    for _, event in ipairs(events) do Attempt(self.UnregisterEvent, self, event, OnProcEvent) end
+    if self.StopProcArtwork then Attempt(self.StopProcArtwork, self) end
+    if self.StopProcPreview then Attempt(self.StopProcPreview, self) end
+    -- Partially constructed handles are registered before allocation. Never
+    -- discard an owner merely because a public disable/restore call failed.
+    for _, handle in pairs(self.nativeAuraSlots or {}) do
+        if handle.procOwned then Attempt(handle.SetEnabled, handle, false) end
+    end
     for _, frame in pairs(self.reminderFrames and self.reminderFrames.nativeAura or {}) do
-        if frame.reminderEntry.kind == "proc" then self:DisableAuraReminder(frame) end
+        if frame.reminderEntry and frame.reminderEntry.kind == "proc" then
+            Attempt(frame.SetAlpha, frame, 0)
+            Attempt(frame.Show, frame)
+        end
     end
     self.procDefinitions, self.procByOverlay, self.procOverlayStates = nil, nil, nil
     self.procByRegion, self.procOverlaySources, self.procRegionDiagnostics = nil, nil, nil
+    if notifyStopped then Attempt(self.NotifyProcIndependentArtwork, self, "stopped") end
+    self.procStopping = nil
+    if not clean then self:RecordProcFailure("stop") end
+    return clean, not clean and "proc-cleanup-incomplete" or nil
 end
 
-function addon:RenderProcState(changedDefinitions)
-    if not self.procTracking then return end
-    local visible = CVar("displaySpellActivationOverlays", true)
-    local opacity = CVar("spellActivationOverlayOpacity")
+local function RenderProcState(self, changedDefinitions)
+    if self:IsProcQuarantined() or not self.procTracking then return end
+    local independent = self:IsProcIndependentPolicy()
+    local visible = independent or CVar("displaySpellActivationOverlays", true)
+    local opacity = independent and 1 or CVar("spellActivationOverlayOpacity")
     local keep = {}
     self.procRegionDiagnostics = self.procRegionDiagnostics or {}
     self.procStatusReason = "Native aura tracking; Lua does not read aura presence, stacks or time."
@@ -137,7 +176,7 @@ function addon:RenderProcState(changedDefinitions)
                 if not frame.procGeometryReady then self.procStatusReason = frame.procGeometryReason end
                 local enabled = visible and allowed and frame.procGeometryReady
                 self.procRegionDiagnostics[entry.id] = gate
-                    .. "; display CVar=" .. tostring(visible)
+                    .. (independent and "; independent timer gate" or "; display CVar=" .. tostring(visible))
                     .. "; layout=" .. (frame.procGeometryReady and "ready" or (frame.procGeometryReason or "unavailable"))
                     .. "; native slot requested=" .. tostring(not not enabled)
                     .. "; Preview suppresses wrapper=" .. tostring(not not suppressed)
@@ -155,11 +194,18 @@ function addon:RenderProcState(changedDefinitions)
             if frame.reminderEntry.kind == "proc" and not keep[id] then self:DisableAuraReminder(frame) end
         end
     end
+    if self.RenderProcArtwork then self:RenderProcArtwork() end
 end
 
-function addon:ConfigureProc()
+function addon:RenderProcState(changedDefinitions)
+    return self:RunProcSafe("render", RenderProcState, self, changedDefinitions)
+end
+
+local function ConfigureProc(self)
     local definitions = self:GetProcDefinitions()
     local class, spec = self:GetCurrentModuleIdentity()
+    self:SetProcDiagnosticState("currentClass", class or "unavailable")
+    self:SetProcDiagnosticState("currentSpec", spec or "unavailable")
     local config = #definitions > 0 and self:GetProcConfig() or nil
     local supported, reason = self:CanUseNativeAuraSlots()
     if not config or not config.enabled or not supported then
@@ -167,28 +213,53 @@ function addon:ConfigureProc()
         self.procStatusReason = not supported and reason or "Proc is disabled or unavailable for this specialization."
         return
     end
+    local policy = self:GetProcPresentationPolicy(config)
+    if (self.procPresentationPolicy or "replacement") ~= policy then
+        local clean, problem = self:PrepareProcPresentationTransition(policy, true)
+        if not clean then self.procStatusReason = problem; return false end
+        self.procPresentationPolicy = policy
+    else self.procPresentationPolicy = policy end
     if self.procClass ~= class or self.procSpec ~= spec or not self.procTracking then
-        self:StopProc()
+        local clean = self:StopProc()
+        if not clean then return false end
         self.procOverlayStates = {}
     end
     if self.procDefinitions ~= definitions then
+        if self.StopProcArtwork and not self:StopProcArtwork() then
+            self:RecordProcFailure("configure"); return false
+        end
         local compiled, conflict = self:CompileProcDefinitions(definitions, class, spec)
-        if not compiled then self:StopProc(); self.procStatusReason = conflict; return end
+        if not compiled then
+            self:StopProc(); self.procStatusReason = conflict
+            self:RecordProcFailure("configure"); return false
+        end
         self.procByOverlay, self.procByRegion = compiled.byOverlay, compiled.byRegion
     end
     self.procClass, self.procSpec, self.procDefinitions = class, spec, definitions
     self.procTracking, self.procStatusReason = true, "Native aura tracking; Lua does not read aura presence, stacks or time."
+    if not self:IsProcIndependentPolicy() then
+        self:NotifyProcLegacyArtworkDisabled(config)
+        if self:IsProcLegacyReplacementAllowed() and self.InstallProcArtworkHooks then self:InstallProcArtworkHooks() end
+    end
+    if self:IsProcQuarantined() then return false end
     for _, event in ipairs(events) do self:RegisterEvent(event, OnProcEvent) end
     self:RenderProcState()
 end
 
-OnProcEvent = function(self, event, id, texture, locationType, scale)
-    if not self.procTracking then return end
+function addon:ConfigureProc()
+    self:ProcDiagnosticCount("configureCalls")
+    if self:IsProcQuarantined() then return false, "proc-quarantined" end
+    return self:RunProcSafe("configure", ConfigureProc, self)
+end
+
+local function DispatchProcEvent(self, event, id, texture, locationType, scale, r, g, b)
+    if self:IsProcQuarantined() or not self.procTracking then return end
     local changed, seen = {}, {}
     local function Changed(definition)
         if not seen[definition.id] then changed[#changed + 1] = definition; seen[definition.id] = true end
     end
     if event == "SPELL_ACTIVATION_OVERLAY_SHOW" then
+        self:ProcDiagnosticCount("showEvents")
         if not ID(id) or not ID(texture) or not Public(locationType) or not Scale(scale) then
             Trace(self, event, id, texture, locationType, scale, "ignored: non-public/invalid event argument")
             return
@@ -215,16 +286,19 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
                 self.procOverlayStates[source.stateKey] = state
                 for _, entry in ipairs(source.regions) do
                     local key = entry.nativeLocation or entry.location
-                    -- Stock ignores SHOW with its display CVar off. Merely
-                    -- enabling it later cannot replay this graphical state.
-                    state[key] = { shown = CVar("displaySpellActivationOverlays", true),
-                        scale = scale, sequence = self.procEventSequence }
+                    -- Replacement follows stock preferences. Independent
+                    -- presentation records the validated public event itself.
+                    state[key] = { shown = self:IsProcIndependentPolicy() or CVar("displaySpellActivationOverlays", true),
+                        scale = scale, sequence = self.procEventSequence,
+                        ownerID = id, textureID = texture, sourceKey = source.stateKey,
+                        color = self.ProcPublicColor and self:ProcPublicColor(r, g, b) }
                 end
                 Changed(definition)
             end
         end
         if #changed == 0 then Trace(self, event, id, texture, locationType, scale, "ignored: texture/location mismatch"); return end
     elseif event == "SPELL_ACTIVATION_OVERLAY_HIDE" then
+        self:ProcDiagnosticCount("hideEvents")
         if not Public(id) or (id ~= nil and not ID(id)) then
             Trace(self, event, id, nil, nil, nil, "ignored: non-public/invalid owner")
             return
@@ -251,16 +325,22 @@ OnProcEvent = function(self, event, id, texture, locationType, scale)
     elseif event == "PLAYER_ENTERING_WORLD" then
         -- Native containers resynchronize the real aura provider. No cached
         -- combat timers or cast/stack counts are replayed into the new world.
+        if self.StopProcArtwork then self:StopProcArtwork() end
         self.procOverlayStates = {}
         Trace(self, event, nil, nil, nil, nil, "native aura resync; cleared public graphical gate history")
     end
     self:RenderProcState(#changed > 0 and changed or nil)
 end
 
+OnProcEvent = function(self, ...)
+    if self:IsProcQuarantined() or not self.procTracking then return end
+    return self:RunProcSafe("event", DispatchProcEvent, self, ...)
+end
+
 -- Lightweight catalog invalidation is independent of Mobility and active
 -- Proc business listeners. Empty/disabled specs need it to discover a newly
 -- learned eligible talent without starting an aura monitor or cooldown query.
-local function OnProcCatalogChanged(self)
+local function RefreshProcCatalog(self)
     if not self.initialized then return end
     local adapter = self.activeClassAdapter
     if not adapter or not adapter.procCapability then return end
@@ -273,6 +353,10 @@ local function OnProcCatalogChanged(self)
     if self.RefreshPreview then self:RefreshPreview() end
     if self.RefreshOptions then self:RefreshOptions() end
 end
+local function OnProcCatalogChanged(self)
+    if self:IsProcQuarantined() then return end
+    return self:RunProcSafe("catalog", RefreshProcCatalog, self)
+end
 for _, event in ipairs({ "SPELLS_CHANGED", "PLAYER_TALENT_UPDATE", "TRAIT_CONFIG_UPDATED" }) do
     addon:RegisterEvent(event, OnProcCatalogChanged)
 end
@@ -281,7 +365,8 @@ function addon:GetProcDiagnostics()
     local definitions, regions, enabled = self.procDefinitions or self:GetProcDefinitions(), 0, 0
     for _, definition in ipairs(definitions) do regions = regions + #definition.regions end
     for _, frame in pairs(self.reminderFrames and self.reminderFrames.nativeAura or {}) do
-        if frame.reminderEntry.kind == "proc" and frame.auraHandle.enabled then enabled = enabled + 1 end
+        if frame.reminderEntry and frame.reminderEntry.kind == "proc"
+            and frame.auraHandle and frame.auraHandle.requestedEnabled then enabled = enabled + 1 end
     end
     local version, build, date, interface
     if GetBuildInfo then version, build, date, interface = GetBuildInfo() end
@@ -289,6 +374,9 @@ function addon:GetProcDiagnostics()
         "Client: version=" .. PublicText(version) .. "; build=" .. PublicText(build)
             .. "; interface=" .. PublicText(interface) .. "; build date=" .. PublicText(date),
         "Proc mapping audit target: 12.1.0.69933; client event receipt does not prove aura exposure.",
+        "Proc presentation: saved=" .. self:GetProcPresentationPolicy()
+            .. "; active=" .. (self.procPresentationPolicy or "replacement")
+            .. "; Blizzard settings are never changed by CarGOUI.",
     }
     for _, definition in ipairs(definitions) do
         local sources = {}
@@ -300,12 +388,15 @@ function addon:GetProcDiagnostics()
         for _, entry in ipairs(definition.regions) do
             details[#details + 1] = "  " .. entry.id .. ": "
                 .. (self.procRegionDiagnostics and self.procRegionDiagnostics[entry.id] or "not initialized")
+            if self.GetProcArtworkDiagnostic then
+                details[#details + 1] = "    presentation: " .. self:GetProcArtworkDiagnostic(entry)
+            end
         end
     end
     details[#details + 1] = "Recent public native graphic events (bounded 16; no aura payloads):"
     for _, line in ipairs(self.procEventTrace or {}) do details[#details + 1] = line end
     return "Proc: " .. (self.procTracking and "Native tracking" or "inactive")
-        .. "; definitions=" .. #definitions .. "; regions=" .. regions .. "; enabled native slots=" .. enabled
+        .. "; definitions=" .. #definitions .. "; regions=" .. regions .. "; requested native slots=" .. enabled
         .. "\n" .. (self.procStatusReason or "Not initialized.")
         .. "\nNative slots own actual presence/duration; enabled slots are not a count of visible auras."
         .. "\n" .. table.concat(details, "\n")
