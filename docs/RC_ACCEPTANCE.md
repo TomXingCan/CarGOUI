@@ -1,5 +1,20 @@
 # 1.0.1 release closeout status
 
+The author confirmed the final RC checks complete and explicitly authorized
+formal 1.0.1 integration and publication, including the version-only closeout.
+The accepted identity is:
+
+- Source: `9bef4c3b654c4a45a705b74cb1b0a46431367ace`.
+- Archive: `CarGOUI-1.0.1-RC-closeout-1-9bef4c3b654c.zip`.
+- SHA256: `85264a3ce0f769a2a4a6983f9910274fa15360203927f66c6001a52b2eabb5dc`.
+
+Source: **author confirmation**. No new raw snapshots, measurements or video
+were supplied, so no new per-class/source outcomes are asserted here. #15's
+release-admission decision is approved while its technical investigation
+continues. An open #15 is not by itself a blocker, nor is approval a claim that
+a permanent leak has been fixed. #16 remains complete only for the delivered
+diagnostics and Proc quarantine subset.
+
 The author accepted four P1 independent Proc checks on `bc91f3fe975e059fda2196cb4b6d75d40e371006`:
 real acquisition/consumption/reacquisition/end, artwork switches preserving Timer,
 saved-zero cold startup, and stock-opacity restoration pausing independent
@@ -12,17 +27,22 @@ artwork with CUI Timer. Old per-region Custom/Timer Only suppression is unavaila
 data is retained, with no saved/imported route to reopen takeover. Its old
 first-SHOW and consumption exposure defects are not marked fixed.
 
-Use [the final release checklist](RELEASE_1_0_1_CHECKLIST.md) and
-[#15 admission review](PROC_MEMORY_RELEASE_REVIEW.md) for remaining work. Do not
-repeat all historical experiments or read old v1.0.0 authorization as permission
-to merge, tag or publish 1.0.1. Historical evidence and checklist rows below remain
-as context; untested rows are not silently signed off by the P1 confirmation.
+Use [the final release checklist](RELEASE_1_0_1_CHECKLIST.md) for the authorized
+integration and verification sequence, and the [#15 review](PROC_MEMORY_RELEASE_REVIEW.md)
+for remaining technical questions. Authorization comes from the current 1.0.1
+task, independently of the old v1.0.0 permission. Historical evidence and
+checklist rows below remain context, not new prerequisites or invented passes.
+
+The accepted RC's actual Lua 5.1, six static suites and publisher results remain
+historical evidence. The new formal package's commit, checksum and actual test
+results must be recorded after it is produced. Authorization and RC acceptance
+do not establish completion of a remote merge, tag, Release or upload.
 
 ---
 
 # Release acceptance: RC3 baseline and 1.0.0 localization
 
-RC3 was based on RC2 (`b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`) and added launchers/minimap preferences. The user subsequently reported RC3 working in their test environment, without a complete per-build/class/manager matrix. Version 1.0.0 preserves that baseline and adds automatic localization. [LAUNCHER_RC3.md](LAUNCHER_RC3.md) and [DRAG_RC2.md](DRAG_RC2.md) retain focused checks and evidence boundaries. Publication is authorized for the new task, but authorization/prepared text is not proof of a remote upload; [1.0.0 release notes](RELEASE_1.0.0.md) record current capability limitations. Automated tests/source declarations cannot establish native dragging, encoding, glyphs, taint or combat behavior.
+RC3 was based on RC2 (`b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`) and added launchers/minimap preferences. The user subsequently reported RC3 working in their test environment, without a complete per-build/class/manager matrix. Version 1.0.0 preserved that baseline and added automatic localization. [LAUNCHER_RC3.md](LAUNCHER_RC3.md) and [DRAG_RC2.md](DRAG_RC2.md) retain focused checks and evidence boundaries. The historical 1.0.0 publishing task was authorized; its [release notes](RELEASE_1.0.0.md) record that version's capability limitations. Automated tests/source declarations cannot establish native dragging, encoding, glyphs, taint or combat behavior. The following procedures and unchecked rows are retained historical references, not additional 1.0.1 admission gates.
 
 ## Final client regression
 
@@ -50,7 +70,7 @@ Record native empty-table JSON round trips (the protocol accepts both empty `{}`
 - Offline encoding uses Python JSON/Base64 bridged to Lua to test validation and transactions. WoW's actual codec, combat security, clipboard interaction, visual appearance and CPU/memory remain client acceptance items.
 - Existing gameplay mappings and safety paths are retained. Coverage tables in the repository distinguish implemented/admitted timer regions, event-only or excluded effects and pending client checks. Not every specialization necessarily has a native Proc timer.
 
-## Before a formal release
+## Historical v1.0.0 release checklist
 
 - [x] User reported RC3 working in their test environment; retain the scope of that feedback without inventing individual matrix passes.
 - [ ] Record new localization's native-client and native-speaker acceptance, including fonts/layout and exact locale/build.

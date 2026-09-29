@@ -1,16 +1,17 @@
 # Changelog
 
-## 1.0.1 — Unreleased / release preparation
+## 1.0.1
 
 - Fix font selection and integrate registered LibSharedMedia fonts while preserving logical saved choices, client-language filtering and safe rendering fallback. Keep the embedded library's original LGPL 2.1 terms and complete notices.
 - Add the shared Modern CUI shell, reusable controls, exact inline numeric editing, separate Timer/artwork tint controls, and contextual Proc Test/Stop actions.
 - Add the audited Blizzard artwork catalog and independent per-region visual preferences without packaging client texture files or changing schema 5 / transfer format 1.
 - Include opt-in Independent CUI artwork alongside the existing Blizzard Native + Timer path. Independent artwork follows public graphical events and uses the existing native-bound Timer independently of the user's manually muted Blizzard artwork. Its master and per-region artwork switches do not disable Timer.
 - Require manual Blizzard Spell Alert Opacity zero and display zero for live independent artwork. Preserve old modes/styles and pause artwork when either setting is unavailable or nonzero. Disabling Proc/artwork, changing strategy or quarantine never restores the game setting automatically; users must restore opacity manually to see native alerts again.
-- Keep legacy per-region replacement/suppression outside the supported candidate scope. Its retained compatibility code and earlier regression repairs do not establish that the legacy first-SHOW defect is resolved.
+- Disable access to legacy per-region replacement/suppression. Retain its saved preferences without native takeover authority; earlier regression repairs do not establish that its first-SHOW/consumption exposure defect is resolved.
 - Bound Proc resource ownership and diagnostic capture, retain failed cleanup ownership, and quarantine repeated internal failures with explicit Retry/Reload recovery. Policy edits/import/restore/reset clean previous artwork before committing; failure leaves settings unchanged.
-- Record the author's four P1 checks as onsite confirmation for MAGE / 62, Retail build 69933, source `bc91f3fe975e059fda2196cb4b6d75d40e371006`. WARLOCK and final-RC font/SharedMedia, Mobility, Free move and integration checks remain pending; offline tests do not substitute for them.
-- Keep production TOCs and `addon.version` at 1.0.0 during preparation. RC versions belong only to separately named staging packages. Formal 1.0.1 versioning, merge, tag, Release and publication require separate approval. Current source follows the existing ARR cutover; the historical v1.0.0 GPL distribution and the entries below remain unchanged.
+- Retain the author's four P1 onsite confirmations for MAGE / 62, Retail build 69933, source `bc91f3fe975e059fda2196cb4b6d75d40e371006`. The author subsequently confirmed completion of final RC `9bef4c3b654c4a45a705b74cb1b0a46431367ace` checks and authorized formal release. This does not invent per-item measurements or establish all-class acceptance.
+- Treat #15 as a release-admission decision, not a claim that a memory leak has been established or fixed. Credit only the delivered Proc diagnostics/quarantine subset of #16; its broader Reload-required framework is not complete.
+- Deliver version 1.0.1 with unchanged schema 5 and transfer format 1. Current source follows the existing ARR cutover; the historical v1.0.0 GPL distribution, its published artifacts and the entries below remain unchanged. See the 1.0.1 release notes and final installer verification report for scope and artifact evidence.
 
 ## 1.0.0
 

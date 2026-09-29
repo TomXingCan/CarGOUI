@@ -1,8 +1,10 @@
-# CarGOUI 1.0.1 release preparation
+# CarGOUI 1.0.1 release checklist
 
-This checklist prepares a candidate; it does not authorize a merge, version
-change, tag, GitHub Release, asset upload or third-party publication. Production
-versions remain 1.0.0 in this round. Historical v1.0.0 remains unchanged.
+The author confirmed the final RC checks complete and explicitly authorized
+formal 1.0.1 integration and publication in this release task, including the
+version-only closeout. This authorization is not a claim that a merge, tag,
+Release or upload has already succeeded. Record those results after execution.
+Historical v1.0.0 remains unchanged.
 
 ## Frozen candidate scope
 
@@ -23,7 +25,17 @@ versions remain 1.0.0 in this round. Historical v1.0.0 remains unchanged.
 - Keep Class Tools, its logger, research material and standalone observers out
   of the production installer.
 
-## Evidence and remaining acceptance
+## Accepted RC and remaining artifact verification
+
+The author's final confirmation identifies:
+
+- Source: `9bef4c3b654c4a45a705b74cb1b0a46431367ace`.
+- RC: `CarGOUI-1.0.1-RC-closeout-1-9bef4c3b654c.zip`.
+- SHA256: `85264a3ce0f769a2a4a6983f9910274fa15360203927f66c6001a52b2eabb5dc`.
+
+Source of acceptance is **author confirmation**. No new raw diagnostics,
+measurements or video accompany that decision. Do not infer individual
+class/source results or a new memory time series from the overall confirmation.
 
 The author reported the four P1 checks passing onsite on MAGE / 62, Retail
 build 69933, source `bc91f3fe975e059fda2196cb4b6d75d40e371006`. Record this as
@@ -32,14 +44,11 @@ test. The [independent acceptance record](PROC_INDEPENDENT_ACCEPTANCE.md) owns
 the exact four observations and their limits.
 
 - [x] Complete the [scoped #15 readiness review](PROC_MEMORY_RELEASE_REVIEW.md)
-  against its latest evidence and comments. The review retains the P0 gate;
-  the author's final-RC admission decision is still pending.
-- [ ] Record the requested WARLOCK check separately; do not infer it from
-  MAGE/62 or a synthetic Lua fixture.
-- [ ] Check font selection/SharedMedia, Mobility, Free move, native Timer,
-  Options/Preview and settings transfer on the final staged RC. Record the
-  installed RC identity and exact results rather than carrying P1 acceptance
-  forward to different bytes.
+  and record the author's final-RC admission approval. Technical investigation
+  continues; the open issue is not by itself a release blocker.
+- [x] Record the author's completed final-RC review against the exact identity
+  above. Preserve the distinction between this overall acceptance and the
+  separately documented P1 observations; no per-source results were supplied.
 - [x] Retain the agreed focused scope. Do not make a new universal class,
   locale, collector or full historical matrix a prerequisite by implication.
 - [ ] Run actual Lua 5.1, all six static suites and publisher unit tests against
@@ -50,29 +59,29 @@ measure native pixels, taint, event delivery, native duration behavior or
 client CPU/memory. Public-event replay remains evidence about the recorded
 events, not proof for every source or startup condition.
 
-The remaining verification checkboxes are the per-artifact procedure. Exact
-completion results, source SHA and hashes belong in the delivered RC manifest
-and test report; they must not be guessed before that immutable build exists.
+The accepted RC's source and extracted-artifact results remain historical:
+537 actual Lua 5.1 checks, 64 checks across six static suites, and 56 publisher
+unit tests passed. These counts do not pre-fill the formal package report.
+The remaining checkboxes concern the new formal artifact. Its actual source
+SHA, hashes and verification results belong in its own manifest and test report
+after the immutable build exists.
 
 ## Version and history rules
 
-`CarGOUI.toc`, `Modules/CarGOUI_Data/CarGOUI_Data.toc` and `Core/Addon.lua` all
-currently report 1.0.0. This matches the development convention in
-[the roadmap](ROADMAP_1.0.1.md). Leave all three unchanged in this round.
+Synchronize `CarGOUI.toc`, `Modules/CarGOUI_Data/CarGOUI_Data.toc` and
+`Core/Addon.lua` to formal 1.0.1 together, with consistent current user/release
+text. This version-only closeout is explicitly authorized in the current task.
+The official packager enforces that the three versions match. Schema 5 and
+transfer format 1 remain separate, unchanged contracts.
 
-An RC uses a unique staging directory and artifact name. Apply only its
-documented TOC version overlay to staging copies, retain the committed source
-identity, and state the unchanged internal `addon.version` in the delivery
-record. Re-run verification against the final extracted staged artifact.
-Neither an RC name nor this checklist authorizes a formal version bump.
-
-After a separate formal release confirmation, update the two production TOCs
-and `addon.version` together to 1.0.1, and update the current user/release text
-consistently. The official packager enforces that the three versions match.
-Schema 5 and transfer format 1 remain separate, unchanged contracts.
+The accepted RC remains frozen: its staging TOCs used `1.0.1-rc.closeout.1`,
+while its committed version fields and internal `addon.version` were 1.0.0.
+That historical overlay must not be rewritten to represent the formal package.
+Build the formal version from its own clean committed source and verify its
+final extracted bytes.
 
 Keep the existing `CHANGELOG.md` v1.0.0 section, tag, Release and published ZIP
-unchanged. The new Unreleased section describes preparation only. Do not
+unchanged. Record 1.0.1 separately in the current release history. Do not
 overwrite an old ZIP, rename an old release as the new one, or reuse its
 checksum as candidate evidence.
 
@@ -86,12 +95,13 @@ The reviewed stack is:
    `feat/1.0.1-modern-cui-shell` into the PR #12 branch, including independent
    artwork and the subsequent lifecycle/control fixes.
 
-When integration is separately authorized and gates pass, the preferred order
-is **PR #14 into the PR #12 branch, then PR #12 into main**, retaining all
-commits. Recheck both PR heads/bases and the combined diff at that time. Verify
+The authorized integration order is **PR #14 into the PR #12 branch, then
+PR #12 into main**, retaining all commits. Recheck both PR heads/bases and the
+combined diff before each operation. Verify
 the resulting source tree against the accepted candidate, then perform final
 package verification. Merging only PR #12 would omit the modern shell and
-independent strategy. No merge or retarget is performed by this checklist.
+independent strategy. Record actual integration results separately; this
+checklist does not establish that any remote operation has completed.
 
 ## License and third-party gate
 
@@ -115,9 +125,9 @@ Source consistency was checked against the current notices:
   asset catalog. Fonts from other providers remain supplied by those addons.
 - [ ] Recheck the final ZIP includes project/branding notices, all embedded
   library notices, complete LGPL text and the unmodified library sources.
-- [ ] Before a future CurseForge publication, confirm the existing project
+- [ ] Before CurseForge publication, confirm the existing project
   `tools-used: libdatabroker-1-1` relationship required by its retained notice.
-  This preparation does not prove or change remote project configuration.
+  Source notices do not prove or change remote project configuration.
 
 These are consistency/provenance checks against existing terms, not a new
 relicensing authorization. See [the ownership audit](LICENSING_AUDIT_1.0.1.md)
@@ -145,14 +155,13 @@ Research/ctlog, Class Tools research, standalone capture/probe addons, tests,
 tools, source art, development docs, logs, temporary exports and build scripts.
 This checklist stays in the repository; the concise user README is what ships.
 
-For an official version after authorization, `python tools/package.py --output
+For the authorized official version, `python tools/package.py --output
 <new-directory>` reads a clean committed Git tree, builds deterministic bytes,
 checks ZIP CRC/content, extracts, and runs repository tests against that
-extraction. It emits a checksum and test report. For the current staging-only
-RC, preserve the same whitelist and validate the final overlaid extraction;
-the production packager is not a command to publish an RC or change versions.
+extraction. It emits a checksum and test report. Packaging does not itself
+publish the archive; publication uses the verified formal artifact.
 
-- [ ] Record exact source commit/tree and the complete staging overlay.
+- [ ] Record exact formal source commit/tree and any declared staging overlay.
 - [ ] Check final ZIP paths, TOC dependencies/versions, required notices and
   all runtime bytes against that source plus the declared overlay.
 - [ ] Run Lua/static tests against the extracted final ZIP and publisher unit
@@ -160,17 +169,18 @@ the production packager is not a command to publish an RC or change versions.
 - [ ] Emit the exact final ZIP filename, SHA256 and actual verification results
   alongside it. Do not insert an unmeasured checksum or count in this document.
 
-## Future publication boundary
+## Publication sequence and safeguards
 
 The [publisher workflow](CURSEFORGE_PUBLISHING.md) consumes an existing stable
 GitHub Release's exact ZIP and checksum; it never builds or repackages source.
 It requires canonical `vX.Y.Z`, matching TOCs, verified ZIP bytes and complete
 named assets. RC/prerelease tags do not take this stable publishing path.
 
-Publishing a stable GitHub Release can trigger CurseForge automatically. Treat
-that action as publication authorization, not as a harmless packaging step.
-Use the documented validate-only step when separately authorized. The workflow
+Publishing a stable GitHub Release can trigger CurseForge automatically and is
+part of the current authorized publication task. Complete the documented
+validate-only checks before publication. The workflow
 blocks another 1.0.0 upload, duplicate versions and upload reruns; uncertain
-uploads require investigation before recovery. This round does not merge,
-retarget, tag, create a Release, upload assets, dispatch publishing, or alter
-the historical v1.0.0 distribution.
+uploads require investigation before recovery. Record the final tag, Release,
+asset identities and actual publisher outcome separately; do not infer upload
+success from authorization or prepared text. Do not alter the historical
+v1.0.0 distribution.

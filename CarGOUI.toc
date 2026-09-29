@@ -2,7 +2,7 @@
 ## Title: CarGOUI
 ## Notes: Class Mobility, native Proc timers, Time Spiral Free move and separate previews.
 ## Author: CarGOUI
-## Version: 1.0.0
+## Version: 1.0.1
 ## SavedVariables: CarGOUIDB
 ## IconTexture: Interface\AddOns\CarGOUI\Media\Branding\emblem.tga
 ## AddonCompartmentFunc: CarGOUI_OnAddonCompartmentClick

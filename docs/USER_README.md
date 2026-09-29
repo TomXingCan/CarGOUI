@@ -1,6 +1,6 @@
-# CarGOUI — 1.0.1 candidate preparation
+# CarGOUI 1.0.1
 
-Real Mobility depletion reminders, native-bound Proc countdowns and Time Spiral Free move for WoW Retail 12.1 / Interface 120100. Existing skill/API audits target build 69933. This candidate adds SharedMedia font support, Modern CUI controls and opt-in independent artwork. Production source still reports 1.0.0 until a separately approved formal version change; an RC has a separate staging name and checksum. It is not the historical v1.0.0 release.
+Real Mobility depletion reminders, native-bound Proc countdowns and Time Spiral Free move for WoW Retail 12.1 / Interface 120100. Existing skill/API audits target build 69933. Version 1.0.1 adds SharedMedia font support, Modern CUI controls and opt-in independent artwork. Install the formal `CarGOUI-1.0.1.zip`; its adjacent checksum and verification report identify the delivered bytes. The historical v1.0.0 release remains unchanged.
 
 ## Install or upgrade
 
@@ -29,7 +29,7 @@ Saved font choices stay intact. A missing SharedMedia choice keeps its name thro
 
 ## Two Proc paths
 
-**Blizzard Native + Timer** keeps Blizzard artwork with CarGOUI's existing native-bound digits. Old settings do not automatically enable independent artwork. Legacy per-region Custom replacement and Timer Only suppression remain compatibility code outside this candidate's supported scope; the older first-SHOW issue is not declared fixed.
+**Blizzard Native + Timer** keeps Blizzard artwork with CarGOUI's existing native-bound digits. Old settings do not automatically enable independent artwork. Legacy per-region Custom replacement and Timer Only suppression are unavailable in this release; their saved modes are retained without native takeover authority. The older first-SHOW/consumption exposure issue is not declared fixed.
 
 **Independent CUI + Timer** draws CUI-owned artwork from public Spell Alert events and keeps native Aura duration binding for its timer. To opt in:
 
@@ -52,6 +52,6 @@ Only user settings transfer. Class/spec identities are preserved: Mage import on
 
 Mobility shows true next recovery when an admitted skill is depleted, hiding on the first recovered use. Proc keeps native-bound digits for admitted mappings; not every reviewed spec has an eligible timer. Free move is Time Spiral's receiving effect, text-only. Native interfaces retain secret state/timing; no fabricated fallback seconds or manual cast counting.
 
-The author reported four P1 checks passing onsite for MAGE / 62, Retail build 69933, source `bc91f3fe975e059fda2196cb4b6d75d40e371006`. This limited client confirmation is separate from offline tests. WARLOCK and final-RC font/SharedMedia, Mobility, Free move and integration checks remain pending. It does not certify every class/talent/collector/locale, language quality or client CPU/memory. Exact acceptance scope and final extracted-installer results belong to the repository records and this package's adjacent delivery report/checksum.
+The author reported four P1 checks passing onsite for MAGE / 62, Retail build 69933, source `bc91f3fe975e059fda2196cb4b6d75d40e371006`, then confirmed the final RC checks for `9bef4c3b654c4a45a705b74cb1b0a46431367ace` and authorized formal 1.0.1 delivery. These author confirmations are separate from offline tests and do not establish an all-class matrix or unreported measurements. #15 release admission is not a claim of a fixed memory leak. Only the Proc diagnostics/quarantine subset of #16 is included, not the broader Reload-required framework. Exact acceptance scope and final extracted-installer results belong to the repository records and this package's adjacent delivery report/checksum.
 
-[Source and documentation](https://github.com/TomXingCan/CarGOUI). Current project-owned source from the ARR LICENSE cutover is All Rights Reserved; official distributions may be installed and run for personal gameplay. The previously released v1.0.0 remains GPL-3.0-only as originally distributed, and its granted GPL rights are not revoked. The unchanged 1.0.0 development version string does not identify the historical release. Branding artwork remains All Rights Reserved and embedded libraries retain original terms. See LICENSE, NOTICE.md and Media/Branding/LICENSE.txt. The installer contains runtime files; tests and production records stay in the repository.
+[Source and documentation](https://github.com/TomXingCan/CarGOUI). Current project-owned source from the ARR LICENSE cutover, including 1.0.1, is All Rights Reserved; official distributions may be installed and run for personal gameplay. The previously released v1.0.0 remains GPL-3.0-only as originally distributed, and its granted GPL rights are not revoked. Branding artwork remains All Rights Reserved and embedded libraries retain original terms, including the supplied LibSharedMedia LGPL 2.1 terms and notices. See LICENSE, NOTICE.md and Media/Branding/LICENSE.txt. The installer contains runtime files; tests and production records stay in the repository.

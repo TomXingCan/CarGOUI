@@ -1,9 +1,16 @@
 # Proc memory release-admission review for 1.0.1
 
-Issue [#15](https://github.com/TomXingCan/CarGOUI/issues/15) remains open and a
-P0 release-admission gate pending the author's focused final-RC review. This
-is an unresolved admission decision, not a finding of a proven permanent
-leak. Acceptance of independent artwork does not decide memory readiness.
+The author has approved 1.0.1 release admission after confirming the final RC
+review complete. Issue [#15](https://github.com/TomXingCan/CarGOUI/issues/15)
+continues as a technical investigation; its open status does not by itself
+block this authorized release. The decision is not a finding that a permanent
+leak was proven or fixed.
+
+Accepted RC source: `9bef4c3b654c4a45a705b74cb1b0a46431367ace`.
+Archive: `CarGOUI-1.0.1-RC-closeout-1-9bef4c3b654c.zip`.
+SHA256: `85264a3ce0f769a2a4a6983f9910274fa15360203927f66c6001a52b2eabb5dc`.
+The evidence for this admission decision is **author confirmation**; no new
+raw snapshots, measurements or video were supplied with it.
 
 ## Evidence classification
 
@@ -14,6 +21,7 @@ leak. Acceptance of independent artwork does not decide memory readiness.
 | Author memory observations | Reported totals of 3.90 MiB and 7.17 MiB; repeated growth into the twenty-plus MB range followed by return to single digits, on ground and in air with other addons disabled. | The full timestamped paired snapshots were not supplied for these totals. Two values do not establish a time series, total allocation or retained-leak rate. |
 | Retained offline repeated-HIDE audit | In the specified PALADIN/65 two-definition/two-region control, render work dominated measured transient allocation. The proposed hidden-record reuse reduction was about 3%, without demonstrated speedup. | PALADIN control is not an exact replay of the WARLOCK configuration. Offline timings/allocation are not Retail performance. The proposal remains unapplied; no third performance package was made. |
 | Author P1 independent-artwork acceptance | Four scoped functional checks passed on MAGE/62, Retail 69933, P1 `bc91f3fe975e`. | No memory acceptance, WARLOCK acceptance or universal source coverage follows from that report. |
+| Author final-RC confirmation | The exact RC above was checked and admitted for the authorized 1.0.1 release. | No new per-source result, memory time series or measurement was supplied; technical conclusions below remain unchanged. |
 
 A sawtooth curve is compatible with temporary allocation and collection; it
 alone establishes neither a permanent leak nor acceptable processing cost.
@@ -26,11 +34,13 @@ remain unchanged. Documentation is supplemental and does not rewrite logs or
 their diagnostic producers. Shared containers, hidden reuse, automatic GC,
 global GC tuning and the full Reload framework remain outside this release.
 
-## Minimal final-RC review
+## Retained follow-up sampling procedure
 
-Use the newly identified RC once it is delivered; record its commit/checksum,
+The following procedure remains available for technical follow-up if the
+reported trend recurs. It is not an additional admission prerequisite after
+the author's final-RC approval. Record the actual installed commit/checksum,
 client build, class/spec, addon set, Proc strategy, Mobility and Free move
-settings. Keep the agreed known WARLOCK/266 configuration for the previously
+settings. Use the known WARLOCK/266 configuration when investigating that
 reported case. Do not repeat the whole historical experiment matrix.
 
 1. Start a new session with Proc enabled, fixed Mobility/Free move settings and
@@ -67,10 +77,11 @@ No production code automatically collects or changes global GC parameters.
   or acceptable steady-state allocation/processing cost on Retail.
 - Residual risk: unmeasured native work and ongoing normal-path allocation;
   the current release gate does not supply performance measurements.
-- Current decision: keep #15 as a release blocker until the author reviews
-  the focused final-RC evidence and explicitly accepts the residual risk or
-  identifies a concrete failure for a minimal patch. Do not close or downgrade
-  it automatically based on P1 or offline success.
+- Current decision: the author accepted the final RC and permitted 1.0.1
+  release admission. Keep #15's unresolved technical questions visible, but
+  do not treat its open status as a remaining release blocker. Do not claim
+  that P1, offline success or this admission decision establishes a permanent
+  leak repair or measured steady-state performance.
 
 Issue [#16](https://github.com/TomXingCan/CarGOUI/issues/16) still covers the
 undelivered broader Reload-required framework. Only the completed diagnostics
