@@ -60,6 +60,7 @@ function addon:QuarantineProc(phase)
     self:RecordProcDiagnosticError("quarantine", state.reason)
     Diagnostics(self, state)
     Cleanup(self, state)
+    if self.IsProcIndependentPolicy and self:IsProcIndependentPolicy() then self:NotifyProcIndependentArtwork("quarantined") end
     self:Print(self:Text("Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."))
     return true
 end

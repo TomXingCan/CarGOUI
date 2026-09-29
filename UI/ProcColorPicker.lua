@@ -64,7 +64,7 @@ function addon:RefreshProcColorControls()
     local controls = panel.controls
     if controls.procArtColor then
         local appearance = entry and self:GetProcRegionAppearance(entry)
-        local custom = appearance and appearance.mode == "custom"
+        local custom = entry and self:IsProcArtworkEditable(entry)
         controls.procArtColor:SetEnabled(not not custom and not not PickerAvailable())
         controls.procArt_colorMode:SetEnabled(not not custom)
         local editing = self.procColorPickerSession
@@ -137,6 +137,7 @@ function addon:OpenProcColorPicker(entry, target)
     if not panel or not panel:IsShown() or not SameRegion(entry, self:GetSelectedProcColorEntry()) then
         return false, addon:Text("Select a Proc region first.")
     end
+    if target == "artwork" and not self:IsProcArtworkEditable(entry) then return false end
     if not PickerAvailable() then return false, addon:Text("The native color picker is unavailable.") end
     self:CancelProcColorPicker()
     local picker = ColorPickerFrame

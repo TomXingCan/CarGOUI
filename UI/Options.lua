@@ -407,8 +407,11 @@ function addon:RefreshOptions()
     end
     controls.procEnabled:SetEnabled(#procChoices > 0)
     controls.procEnabled:SetChecked(#procChoices > 0 and self:GetProcConfig().enabled or false)
+    local independent = self:GetProcPresentationPolicy() == "independent"
+    controls.procEnabled.label:SetText(independent and addon:Text("Enable Proc") or addon:Text("Enable Proc timers"))
     panel.procStatus:SetText(#procChoices > 0
-        and addon:Text("Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples.")
+        and (independent and addon:Text("Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples.")
+            or addon:Text("Displays countdowns on supported Blizzard Proc graphics. Contextual tests show separate samples."))
         or addon:Text("No verified timed native Proc regions are available for this specialization / talent selection."))
     self:RefreshProcAppearanceOptions()
     self:RefreshProcColorControls()
@@ -768,9 +771,10 @@ function addon:CreateOptions()
         end
         ClearEdits(panel)
         if addon.ClearSettingsTransferPage then addon:ClearSettingsTransferPage() end
-        addon:ResetDatabase()
+        local ok, message = addon:ResetDatabase()
         CancelReset(panel)
-        Feedback(panel, L.resetDone)
+        if not ok then addon:RefreshOptions() end
+        Feedback(panel, ok and L.resetDone or message or L.invalid, not ok)
     end, "ghost")
     panel.controls.close = Button(panel, L.close, panel.shellGrid.width - 140, footerY, 116, function() panel:Hide() end, "ghost")
 

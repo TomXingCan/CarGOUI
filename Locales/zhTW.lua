@@ -438,4 +438,29 @@ addon:RegisterLocale("zhTW", {
     -- Artwork tint guidance.
     ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0% 保留素材原色；100% 去除原色後再染色；中間值保留部分原色。",
     ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "染色受素材明暗和透明細節影響，所選顏色未必呈現為均勻的純色。",
+
+    -- Independent artwork strategy.
+    ["Artwork strategy"] = "圖形策略",
+    ["Legacy region replacement"] = "舊版區域替換",
+    ["Independent CUI"] = "獨立 CUI",
+    ["Enable independent live artwork"] = "啟用獨立實戰圖形",
+    ["Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."] = "請手動將暴雪法術警報不透明度設為 0。獨立 CUI 要求 spellActivationOverlayOpacity=0 且 displaySpellActivationOverlays=0。此總開關只影響實戰圖形。",
+    ["This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."] = "這會隱藏所有暴雪警報，包括未涵蓋的 Proc；不支援單側原生圖形。獨立 CUI 關閉或故障後，請手動恢復暴雪法術警報不透明度。",
+    ["Enable independent artwork for this region"] = "為此區域啟用獨立圖形",
+    ["Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."] = "關閉後會隱藏此區域的 CUI 圖形，不會恢復原生單側。實戰圖形總開關關閉時，已啟用的區域仍可編輯和測試。測試使用獨立樣本。",
+    ["Region artwork"] = "區域圖形",
+    ["Reset artwork settings"] = "重設圖形設定",
+    ["Enable Proc"] = "啟用 Proc",
+    ["Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples."] = "獨立 Proc 使用公開法術警報事件。計時與圖形分別設定；測試使用獨立樣本。",
+    ["Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts."] = "獨立 CUI 圖形已停止或無法使用。暴雪法術警報不透明度未變；請手動恢復以顯示原生警報。",
+    ["Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved."] = "暴雪法術警報的兩項設定並非皆為零，獨立 CUI 圖形已暫停。計時與圖形設定均已保留。",
+    ["Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching."] = "舊圖形尚未清理完成，無法變更 Proc 圖形策略。請先重試或重新載入介面。",
+    ["Unknown Proc presentation strategy."] = "未知的 Proc 圖形策略。",
+    ["Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc."] = "暴雪法術警報不透明度仍需手動設定。切換策略或關閉 Proc 後，若要顯示原生警報，請在遊戲設定中手動恢復。",
+
+    -- Presentation strategy transfer summary.
+    ["Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."] = "包含的區域若無圖形設定，將清除舊圖形覆寫並使用所選策略的預設設定。",
+    ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "包含的 Proc 範圍若未指定策略，將使用舊版區域替換。獨立圖形需要明確啟用區域。",
+    ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "策略：%s；獨立實戰圖形：%s；包含且明確啟用的區域：%d。",
+    ["Enabled"] = "已啟用",
 })

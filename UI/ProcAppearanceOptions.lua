@@ -52,6 +52,16 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     local session = panel.procSession
 
     local function Selected() return addon:GetSelectedProcColorEntry() end
+    local function SaveProc(patch)
+        addon:CancelProcColorPicker()
+        CUI.ClearNumericInteractions(panel)
+        ui.ClearEdits(panel)
+        if panel.procGallery then panel.procGallery:Hide() end
+        local ok, message = addon:UpdateSettings({ proc = patch })
+        -- A rejected cleanup transaction must restore the visible selection.
+        addon:RefreshOptions()
+        ui.Feedback(panel, ok and addon.L.saved or message or addon.L.invalid, not ok)
+    end
     local function Save(patch, numericContext)
         if patch.mode ~= nil then addon:CancelProcColorPicker() end
         local entry = Selected()
@@ -116,7 +126,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     panel.procContextSection, panel.procContext = context, context.title
     controls.procEnabled = ui.CheckBox(panel, selection, addon:Text("Enable Proc timers"), 0, 0,
         function(value) return { proc = { enabled = value } } end)
-    panel.procStatus = Label(selection, "", 0, -42, inner, 38)
+    panel.procStatus = Label(selection, "", 0, -42, inner, 44)
     controls.procSelector = Dropdown(panel, selection, addon:Text("Proc"), 0, -92, {}, nil, function(value)
         addon:CancelProcColorPicker()
         CUI.ClearNumericInteractions(panel)
@@ -139,13 +149,42 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     for _, control in ipairs({ controls.procSelector, controls.procEntry }) do
         if control.label then control.label:SetWidth(half) end
     end
+    local policy, policyContent = Section(addon:Text("Artwork strategy"), 132)
+    panel.procPolicySection = policy
+    controls.procPresentationPolicy = Dropdown(panel, policyContent, addon:Text("Artwork strategy"), 0, 0, {
+        { value = "replacement", label = addon:Text("Legacy region replacement") },
+        { value = "independent", label = addon:Text("Independent CUI") },
+    }, nil, function(value) SaveProc({ presentationPolicy = value }) end)
+    controls.procPresentationPolicy:SetWidth(inner)
+    controls.procIndependentArtworkEnabled = CUI.Toggle(panel, policyContent,
+        addon:Text("Enable independent live artwork"), 0, -76,
+        function(value) SaveProc({ independentArtworkEnabled = value }) end)
+    controls.procIndependentArtworkEnabled.label:SetWidth(inner - 60)
+    panel.procPolicyGuide = Label(policyContent,
+        addon:Text("Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."),
+        0, -120, inner, 76)
+    panel.procPolicyWarning = Label(policyContent,
+        addon:Text("This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."),
+        0, -206, inner, 76)
+
     local display, displayContent = Section(addon:Text("Display mode"), 160)
     panel.procDisplaySection = display
     controls.procArt_mode = CUI.Segmented(panel, displayContent, "", 0, 0, inner, {
         { value = "native", label = addon:Text("Native artwork") },
         { value = "custom", label = addon:Text("Custom artwork") },
         { value = "timer", label = addon:Text("Timer only") },
-    }, function(value) Save({ mode = value }) end)
+    }, function(value)
+        if addon:GetProcPresentationPolicy() == "replacement" then Save({ mode = value }) end
+    end)
+    controls.procIndependentRegion = CUI.Toggle(panel, displayContent,
+        addon:Text("Enable independent artwork for this region"), 0, 0, function(value)
+            local entry = Selected()
+            if entry then SaveProc({ regions = { [entry.id] = { independentArtworkEnabled = value } } }) end
+        end)
+    controls.procIndependentRegion.label:SetWidth(inner - 60)
+    panel.procRegionPolicyHint = Label(displayContent,
+        addon:Text("Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."),
+        0, -42, inner, 66)
     controls.procArtReset = Button(displayContent, addon:Text("Reset artwork to Blizzard default"), 0, -68, inner, function()
         addon:CancelProcColorPicker()
         CUI.ClearNumericInteractions(panel)
@@ -352,10 +391,35 @@ function addon:RefreshProcAppearanceOptions()
     panel.procContext:SetText(spec and self:Format("Current specialization: %s", self:GetLocalizedSpecName(spec)) or self:Text("No defined style context"))
     local entry = self:GetSelectedProcColorEntry()
     local appearance = self:GetProcRegionAppearance(entry)
-    local custom = appearance and appearance.mode == "custom"
+    local policy = self:GetProcPresentationPolicy()
+    local independent = policy == "independent"
+    local config = #entries > 0 and self:GetProcConfig()
+    local region = config and entry and config.regions and config.regions[entry.id]
+    local custom = entry and self:IsProcArtworkEditable(entry)
+    controls.procPresentationPolicy:SelectValue(policy)
+    controls.procPresentationPolicy:SetEnabled(config ~= nil and config ~= false)
+    controls.procIndependentArtworkEnabled:SetChecked(config and config.independentArtworkEnabled ~= false or false)
+    controls.procIndependentArtworkEnabled:SetEnabled(not not config)
+    controls.procIndependentArtworkEnabled:SetShown(independent)
+    controls.procIndependentArtworkEnabled.label:SetShown(independent)
+    panel.procPolicyGuide:SetShown(independent)
+    panel.procPolicyWarning:SetShown(independent)
+    panel.procPolicySection:SetHeight(independent and 350 or 132)
+    controls.procArt_mode:SetShown(not independent)
+    controls.procIndependentRegion:SetShown(independent)
+    controls.procIndependentRegion.label:SetShown(independent)
+    controls.procIndependentRegion:SetEnabled(entry ~= nil)
+    controls.procIndependentRegion:SetChecked(region and region.independentArtworkEnabled == true or false)
+    panel.procRegionPolicyHint:SetShown(independent)
+    panel.procDisplaySection.title:SetText(independent and self:Text("Region artwork") or self:Text("Display mode"))
+    panel.procDisplaySection:SetHeight(independent and 218 or 160)
+    controls.procArtReset:SetText(independent and self:Text("Reset artwork settings") or self:Text("Reset artwork to Blizzard default"))
+    controls.procArtReset:ClearAllPoints()
+    controls.procArtReset:SetPoint("TOPLEFT", panel.procDisplaySection.content, "TOPLEFT", 0, independent and -122 or -68)
     for _, key in ipairs({ "procArt_mode", "procArtReset", "procAppearance", "procPositionX", "procPositionY", "procPositionReset" }) do
         controls[key]:SetEnabled(entry ~= nil)
     end
+    controls.procArt_mode:SetEnabled(entry ~= nil and not independent)
     local position = entry and self:GetReminderPosition(entry)
     for _, axis in ipairs({ "X", "Y" }) do
         local row = controls["procPosition" .. axis]
@@ -390,6 +454,7 @@ function addon:RefreshProcAppearanceOptions()
         y = y - (height or frame:GetHeight()) - addon.DesignSystem.sectionGap
     end
     Place(panel.procContextSection, true)
+    Place(panel.procPolicySection, true)
     Place(panel.procDisplaySection, true)
     Place(panel.procArtworkSection, custom)
     Place(panel.procTransformSection, custom)

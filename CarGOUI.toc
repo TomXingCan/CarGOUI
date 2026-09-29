@@ -34,6 +34,7 @@ Config\Defaults.lua
 Database\ProcAssets.lua
 Core\ProcAppearance.lua
 Core\Database.lua
+Core\ProcPresentation.lua
 Database\SettingsMetadata.lua
 Core\SettingsTransfer.lua
 UI\ReminderStyle.lua

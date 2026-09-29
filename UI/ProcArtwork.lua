@@ -7,6 +7,20 @@ local function Number(value, low, high)
     return Public(value) and type(value) == "number" and value == value and value >= low and value <= high
 end
 
+local function Independent(self)
+    return self.IsProcIndependentPolicy and self:IsProcIndependentPolicy()
+end
+
+local function IndependentOwnershipClear(self, cleaning)
+    local owners = self.procSuppressedOverlays
+    if not owners or not next(owners) then return true end
+    -- A policy transition must finish legacy cleanup before it commits. Never
+    -- drop an unexpected owner or touch its native texture in this policy.
+    self:NotifyProcIndependentArtwork("native-ownership-unresolved")
+    if not cleaning then self:RecordProcFailure("release") end
+    return false
+end
+
 -- SHOW arguments use byte RGB in the audited Retail public lifecycle.
 function addon:ProcPublicColor(r, g, b)
     if Number(r, 0, 255) and Number(g, 0, 255) and Number(b, 0, 255) then
@@ -50,6 +64,7 @@ local function HideArtwork(frame)
 end
 
 local function SuppressNativeOverlay(self, overlay, record)
+    if Independent(self) then error("independent artwork cannot acquire native ownership") end
     self.procSuppressedOverlays = self.procSuppressedOverlays or {}
     -- Ownership records cleanup authority, not the current native alpha. A
     -- public native refresh may write the texture again; never read it back.
@@ -63,6 +78,7 @@ end
 function addon:RestoreProcNativeOverlay(overlay)
     local owned = self.procSuppressedOverlays and self.procSuppressedOverlays[overlay]
     if not owned then return true end
+    if Independent(self) then IndependentOwnershipClear(self); return false end
     -- Never inspect alpha. Keep failed restores owned so release/Stop retries.
     self:ProcDiagnosticAPI("RestoreNativeAlpha", "requested")
     local ok = pcall(owned.texture.SetAlpha, owned.texture, 1)
@@ -87,13 +103,17 @@ function addon:RestoreProcRegionArtwork(id, sourceState)
 end
 
 function addon:StopProcArtwork()
-    local clean = self:RestoreProcRegionArtwork()
+    local independent = Independent(self)
+    local clean
+    if independent then clean = IndependentOwnershipClear(self, true)
+    else clean = self:RestoreProcRegionArtwork() end
     for _, frame in pairs(self.procArtworkFrames or {}) do
         local ok = pcall(HideArtwork, frame)
         clean = ok and clean
         if not ok then self:RecordProcFailure("stop") end
     end
-    self.procNativeOverlays, self.procArtworkDiagnostics = {}, {}
+    if not independent or clean then self.procNativeOverlays = {} end
+    self.procArtworkDiagnostics = {}
     return clean
 end
 
@@ -198,7 +218,9 @@ local function StartEntrance(frame)
             and frame.active and frame.phase == "entrance" then
             local ok = frame.rendererOwner:RunProcSafe("animation", StartActive, frame)
             if not ok then
-                if not frame.previewOwned then frame.rendererOwner:RestoreProcRegionArtwork(frame.entryID) end
+                if Independent(frame.rendererOwner) then
+                    frame.rendererOwner:NotifyProcIndependentArtwork("animation-failed")
+                elseif not frame.previewOwned then frame.rendererOwner:RestoreProcRegionArtwork(frame.entryID) end
                 local clean = pcall(HideArtwork, frame)
                 if not clean then frame.rendererOwner:RecordProcFailure("animation") end
             end
@@ -229,7 +251,10 @@ local function StartExit(self, frame)
     group:SetScript("OnFinished", function()
         if self:IsProcSafetyGenerationCurrent(generation) and frame.playToken == token and frame.phase == "exit" then
             local ok = self:RunProcSafe("animation", HideArtwork, frame)
-            if not ok then self:RestoreProcRegionArtwork(frame.entryID) end
+            if not ok then
+                if Independent(self) then self:NotifyProcIndependentArtwork("animation-failed")
+                else self:RestoreProcRegionArtwork(frame.entryID) end
+            end
         end
     end)
     group:Play()
@@ -323,11 +348,35 @@ local function FailOpen(self, entry, reason, sourceState)
     -- Missing evidence for the new source cannot release a different native
     -- source that is still fading. Mode/visibility changes and faults omit this
     -- filter and retain their full-region cleanup behavior.
-    self:RestoreProcRegionArtwork(entry.id, sourceState)
+    if not Independent(self) then self:RestoreProcRegionArtwork(entry.id, sourceState) end
     local clean = pcall(HideArtwork, self.procArtworkFrames and self.procArtworkFrames[entry.id])
     if not clean then self:RecordProcFailure("artwork") end
     self.procArtworkDiagnostics = self.procArtworkDiagnostics or {}
     self.procArtworkDiagnostics[entry.id] = reason
+    if Independent(self) then self:NotifyProcIndependentArtwork(reason) end
+end
+
+local function RenderIndependent(self, entry, continuous)
+    local allowed, reason = self:GetProcIndependentArtworkStatus(entry)
+    if not allowed then FailOpen(self, entry, reason); return end
+    local appearance = self:GetProcArtworkPresentation(entry)
+    local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
+    if appearance.mode ~= "custom" then FailOpen(self, entry, "region-disabled"); return end
+    local state = self:GetProcRegionOverlayState(entry)
+    if not state or not state.shown then
+        if frame and frame.active then StartExit(self, frame) end
+        self.procArtworkDiagnostics[entry.id] = "awaiting public SHOW"
+        return
+    end
+    -- Public events are the sole graphical lifecycle evidence in this policy.
+    -- There is no stock child, posthook RGB, or suppression handle to await.
+    local publicState = { textureID = state.textureID, scale = state.scale, color = state.color }
+    local resolved, asset, unavailable = self:ResolveProcAppearance(entry, appearance, publicState, false)
+    if not asset then FailOpen(self, entry, unavailable or "artwork resolver unavailable"); return end
+    local rendered, failure = Draw(self, entry, resolved, asset, 1, false, continuous)
+    if not rendered then FailOpen(self, entry, failure); return end
+    rendered.nativeOverlay = nil
+    self.procArtworkDiagnostics[entry.id] = "ready"
 end
 
 local function MatchesCurrent(self, overlay, record, state)
@@ -340,6 +389,7 @@ local function MatchesCurrent(self, overlay, record, state)
 end
 
 local function RenderRegion(self, entry, visible, opacity, continuous)
+    if Independent(self) then return RenderIndependent(self, entry, continuous) end
     local appearance = self:GetProcArtworkPresentation(entry)
     local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
     if appearance.mode == "native" then FailOpen(self, entry, "native mode"); return end
@@ -392,7 +442,10 @@ function addon:RenderProcArtwork(selected, continuous)
     if self:IsProcQuarantined() then return end
     if not self.procTracking then self:StopProcArtwork(); return end
     self.procArtworkDiagnostics = self.procArtworkDiagnostics or {}
-    local preferencesOK, visible, opacity = self:RunProcSafe("preferences", Preferences)
+    local independent = Independent(self)
+    if independent and not IndependentOwnershipClear(self) then self:StopProcArtwork(); return end
+    local preferencesOK, visible, opacity = true, true, 1
+    if not independent then preferencesOK, visible, opacity = self:RunProcSafe("preferences", Preferences) end
     if not preferencesOK or visible == nil then
         self:StopProcArtwork()
         for _, definition in ipairs(self.procDefinitions or {}) do
@@ -408,13 +461,14 @@ function addon:RenderProcArtwork(selected, continuous)
             -- A presentation fault must never leave the native graphic hidden.
             if not selected or entry.id == selected.id then
                 local ok = self:RunProcSafe("artwork", RenderRegion, self, entry, visible, opacity, continuous)
-                if not ok then FailOpen(self, entry, "renderer failure; native retained") end
+                if not ok then FailOpen(self, entry, independent and "renderer-failed" or "renderer failure; native retained") end
             end
         end
     end
 end
 
 local function Observe(self, root, ownerID, textureID, position, scale, r, g, b)
+    if Independent(self) then IndependentOwnershipClear(self); return end
     if root ~= SpellActivationOverlayFrame or self.procArtworkHookRoot ~= root
         or not Number(ownerID, 1, 2147483647) or not Number(textureID, 1, 2147483647)
         or not Number(position, 0, 100) or not Number(scale, 0.001, 10) then return end
@@ -470,6 +524,7 @@ local function Observe(self, root, ownerID, textureID, position, scale, r, g, b)
 end
 
 function addon:InstallProcArtworkHooks()
+    if Independent(self) then return IndependentOwnershipClear(self) end
     if self:IsProcQuarantined() then return false end
     local root = SpellActivationOverlayFrame
     if self.procArtworkHookRoot == root and root then return true end
@@ -487,6 +542,7 @@ function addon:InstallProcArtworkHooks()
             if installed.showAttempted then error("native show hook installation requires reload") end
             installed.showAttempted = true
             hooksecurefunc(root, "ShowOverlay", function(owner, ...)
+            if Independent(self) then IndependentOwnershipClear(self); return end
             if self:IsProcQuarantined() or not self.procTracking then
                 local cleaned = pcall(Observe, self, owner, ...)
                 if not cleaned then self:RecordProcFailure("release") end
@@ -499,6 +555,7 @@ function addon:InstallProcArtworkHooks()
             if installed.releaseAttempted then error("native release hook installation requires reload") end
             installed.releaseAttempted = true
             hooksecurefunc(root, "ReleaseOverlay", function(_, overlay)
+            if Independent(self) then IndependentOwnershipClear(self); return end
             -- Release retains only cleanup authority while Proc is quarantined.
             local released = pcall(function()
                 self:RestoreProcNativeOverlay(overlay)
@@ -544,6 +601,7 @@ function addon:RenderProcArtworkPreview(entry, continuous)
     if not ok or not frame then
         local clean = pcall(HideArtwork, self.procPreviewArtworkFrames and self.procPreviewArtworkFrames[entry.id])
         if not clean then self:RecordProcFailure("preview") end
+        if not ok and Independent(self) then self:NotifyProcIndependentArtwork("preview-failed") end
     end
 end
 
@@ -556,7 +614,11 @@ function addon:RefreshProcContinuousAppearance(entry, keepMotion)
     local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
     if frame and frame.exiting then
         local clean = self:RunProcSafe("artwork", HideArtwork, frame)
-        if not clean then self:RestoreProcRegionArtwork(entry.id); return end
+        if not clean then
+            if Independent(self) then self:NotifyProcIndependentArtwork("renderer-failed")
+            else self:RestoreProcRegionArtwork(entry.id) end
+            return
+        end
     end
     self:RenderProcArtwork(entry, keepMotion ~= false)
     -- Update only an already active sample. Do not stop/recreate the preview
@@ -581,7 +643,7 @@ function addon:RefreshProcAppearance(entry)
             if not ok and self:IsProcQuarantined() then return end
         end
     end
-    self:RestoreProcRegionArtwork(id)
+    if not Independent(self) then self:RestoreProcRegionArtwork(id) end
     self:RenderProcArtwork()
     if self.RefreshPreview then self:RefreshPreview(true) end
 end
@@ -592,6 +654,13 @@ function addon:GetProcArtworkDiagnostic(entry)
     for _, record in pairs(self.procSuppressedOverlays or {}) do if record.regionID == entry.id then owned = true end end
     local reason = self.procArtworkDiagnostics and self.procArtworkDiagnostics[entry.id]
         or self.procArtworkHookReason or "not initialized"
+    if Independent(self) then
+        return "policy=independent; legacy mode=" .. appearance.mode
+            .. "; asset=" .. (appearance.assetKey or "CUI mapped artwork")
+            .. "; renderer=" .. (reason == "ready" and "ready" or "unavailable")
+            .. "; native suppression=" .. (owned and "unexpected retained ownership" or "not acquired")
+            .. "; status=" .. reason
+    end
     return "mode=" .. appearance.mode .. "; asset=" .. (appearance.assetKey or "native mapped artwork")
         .. "; renderer=" .. (reason == "ready" and "ready" or "unavailable")
         .. "; native suppression=" .. (owned and "owned" or "not owned") .. "; fail-open=" .. reason

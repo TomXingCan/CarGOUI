@@ -438,4 +438,29 @@ addon:RegisterLocale("deDE", {
     -- Artwork tint guidance.
     ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0%: behält die Originalfarben; 100%: entfernt sie vor dem Einfärben. Zwischenwerte erhalten einen Teil der Originalfarben.",
     ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "Helligkeit und Transparenz der Grafik beeinflussen die Färbung; die gewählte Farbe erscheint nicht unbedingt als einheitliche Vollfarbe.",
+
+    -- Independent artwork strategy.
+    ["Artwork strategy"] = "Grafikstrategie",
+    ["Legacy region replacement"] = "Bisheriger Regionsersatz",
+    ["Independent CUI"] = "Unabhängige CUI",
+    ["Enable independent live artwork"] = "Unabhängige Live-Grafiken aktivieren",
+    ["Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."] = "Blizzards Zauberwarnungsdeckkraft manuell auf 0 setzen. Unabhängige CUI benötigt spellActivationOverlayOpacity=0 und displaySpellActivationOverlays=0. Der Hauptschalter steuert nur Live-Grafiken.",
+    ["This hides all Blizzard alerts, including uncovered Procs. Per-side Native artwork is unavailable. If Independent CUI is stopped or fails, restore Blizzard Spell Alert Opacity manually."] = "Dies verbirgt alle Blizzard-Warnungen, auch nicht unterstützte Procs. Native Grafiken pro Seite sind nicht verfügbar. Nach Stopp oder Fehler die Blizzard-Zauberwarnungsdeckkraft manuell wiederherstellen.",
+    ["Enable independent artwork for this region"] = "Unabhängige Grafik für diese Region aktivieren",
+    ["Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."] = "Ausschalten verbirgt die CUI-Grafik dieser Region, ohne eine native Seite wiederherzustellen. Aktivierte Regionen bleiben bei ausgeschaltetem Live-Hauptschalter bearbeitbar und testbar. Tests verwenden separate Beispiele.",
+    ["Region artwork"] = "Regionsgrafik",
+    ["Reset artwork settings"] = "Grafikeinstellungen zurücksetzen",
+    ["Enable Proc"] = "Proc aktivieren",
+    ["Independent Proc uses public Spell Alert events. Timers and artwork have separate settings; Test uses separate samples."] = "Unabhängiger Proc nutzt öffentliche Zauberwarnungsereignisse. Timer und Grafiken werden getrennt eingestellt; Tests verwenden separate Beispiele.",
+    ["Independent CUI artwork is stopped or unavailable. Blizzard Spell Alert Opacity is unchanged; restore it manually to see native alerts."] = "Unabhängige CUI-Grafiken sind gestoppt oder nicht verfügbar. Blizzards Zauberwarnungsdeckkraft bleibt unverändert; für native Warnungen manuell wiederherstellen.",
+    ["Independent CUI artwork is paused because Blizzard Spell Alert settings are not both zero. Timer settings and artwork preferences are preserved."] = "Unabhängige CUI-Grafiken pausieren, da nicht beide Blizzard-Zauberwarnungswerte null sind. Timer- und Grafikeinstellungen bleiben erhalten.",
+    ["Proc presentation could not change because old artwork cleanup is incomplete. Retry or reload before switching."] = "Die Proc-Grafikstrategie konnte nicht geändert werden, da alte Grafiken nicht vollständig bereinigt wurden. Vor dem Wechsel erneut versuchen oder die Oberfläche neu laden.",
+    ["Unknown Proc presentation strategy."] = "Unbekannte Proc-Grafikstrategie.",
+    ["Blizzard Spell Alert Opacity is still a manual setting. Restore it in the game settings if you want native alerts after switching or disabling Proc."] = "Blizzards Zauberwarnungsdeckkraft bleibt eine manuelle Einstellung. Nach einem Wechsel oder dem Abschalten von Proc in den Spieleinstellungen wiederherstellen, um native Warnungen zu sehen.",
+
+    -- Presentation strategy transfer summary.
+    ["Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."] = "Enthaltene Regionen ohne Grafikeinstellungen löschen alte Grafiküberschreibungen und verwenden die Standardwerte der gewählten Strategie.",
+    ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "Enthaltene Proc-Bereiche ohne Strategie verwenden den bisherigen Regionsersatz. Unabhängige Grafiken erfordern die ausdrückliche Aktivierung jeder Region.",
+    ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "Strategie: %s; unabhängige Live-Grafiken: %s; enthaltene, ausdrücklich aktivierte Regionen: %d.",
+    ["Enabled"] = "Aktiviert",
 })

@@ -116,6 +116,7 @@ end
 function addon:StopProc()
     self:ProcDiagnosticCount("stopCalls")
     if self.procStopping then return false, "proc-cleanup-in-progress" end
+    local notifyStopped = self.procTracking and self:IsProcIndependentPolicy()
     self.procStopping, self.procTracking = true, false
     self:InvalidateProcSafetyGeneration()
     local clean = true
@@ -140,6 +141,7 @@ function addon:StopProc()
     end
     self.procDefinitions, self.procByOverlay, self.procOverlayStates = nil, nil, nil
     self.procByRegion, self.procOverlaySources, self.procRegionDiagnostics = nil, nil, nil
+    if notifyStopped then Attempt(self.NotifyProcIndependentArtwork, self, "stopped") end
     self.procStopping = nil
     if not clean then self:RecordProcFailure("stop") end
     return clean, not clean and "proc-cleanup-incomplete" or nil
@@ -147,8 +149,9 @@ end
 
 local function RenderProcState(self, changedDefinitions)
     if self:IsProcQuarantined() or not self.procTracking then return end
-    local visible = CVar("displaySpellActivationOverlays", true)
-    local opacity = CVar("spellActivationOverlayOpacity")
+    local independent = self:IsProcIndependentPolicy()
+    local visible = independent or CVar("displaySpellActivationOverlays", true)
+    local opacity = independent and 1 or CVar("spellActivationOverlayOpacity")
     local keep = {}
     self.procRegionDiagnostics = self.procRegionDiagnostics or {}
     self.procStatusReason = "Native aura tracking; Lua does not read aura presence, stacks or time."
@@ -173,7 +176,7 @@ local function RenderProcState(self, changedDefinitions)
                 if not frame.procGeometryReady then self.procStatusReason = frame.procGeometryReason end
                 local enabled = visible and allowed and frame.procGeometryReady
                 self.procRegionDiagnostics[entry.id] = gate
-                    .. "; display CVar=" .. tostring(visible)
+                    .. (independent and "; independent timer gate" or "; display CVar=" .. tostring(visible))
                     .. "; layout=" .. (frame.procGeometryReady and "ready" or (frame.procGeometryReason or "unavailable"))
                     .. "; native slot requested=" .. tostring(not not enabled)
                     .. "; Preview suppresses wrapper=" .. tostring(not not suppressed)
@@ -210,6 +213,12 @@ local function ConfigureProc(self)
         self.procStatusReason = not supported and reason or "Proc is disabled or unavailable for this specialization."
         return
     end
+    local policy = self:GetProcPresentationPolicy(config)
+    if (self.procPresentationPolicy or "replacement") ~= policy then
+        local clean, problem = self:PrepareProcPresentationTransition(policy, true)
+        if not clean then self.procStatusReason = problem; return false end
+        self.procPresentationPolicy = policy
+    else self.procPresentationPolicy = policy end
     if self.procClass ~= class or self.procSpec ~= spec or not self.procTracking then
         local clean = self:StopProc()
         if not clean then return false end
@@ -228,7 +237,7 @@ local function ConfigureProc(self)
     end
     self.procClass, self.procSpec, self.procDefinitions = class, spec, definitions
     self.procTracking, self.procStatusReason = true, "Native aura tracking; Lua does not read aura presence, stacks or time."
-    if self.InstallProcArtworkHooks then self:InstallProcArtworkHooks() end
+    if not self:IsProcIndependentPolicy() and self.InstallProcArtworkHooks then self:InstallProcArtworkHooks() end
     if self:IsProcQuarantined() then return false end
     for _, event in ipairs(events) do self:RegisterEvent(event, OnProcEvent) end
     self:RenderProcState()
@@ -274,9 +283,9 @@ local function DispatchProcEvent(self, event, id, texture, locationType, scale, 
                 self.procOverlayStates[source.stateKey] = state
                 for _, entry in ipairs(source.regions) do
                     local key = entry.nativeLocation or entry.location
-                    -- Stock ignores SHOW with its display CVar off. Merely
-                    -- enabling it later cannot replay this graphical state.
-                    state[key] = { shown = CVar("displaySpellActivationOverlays", true),
+                    -- Replacement follows stock preferences. Independent
+                    -- presentation records the validated public event itself.
+                    state[key] = { shown = self:IsProcIndependentPolicy() or CVar("displaySpellActivationOverlays", true),
                         scale = scale, sequence = self.procEventSequence,
                         ownerID = id, textureID = texture, sourceKey = source.stateKey,
                         color = self.ProcPublicColor and self:ProcPublicColor(r, g, b) }
@@ -362,6 +371,9 @@ function addon:GetProcDiagnostics()
         "Client: version=" .. PublicText(version) .. "; build=" .. PublicText(build)
             .. "; interface=" .. PublicText(interface) .. "; build date=" .. PublicText(date),
         "Proc mapping audit target: 12.1.0.69933; client event receipt does not prove aura exposure.",
+        "Proc presentation: saved=" .. self:GetProcPresentationPolicy()
+            .. "; active=" .. (self.procPresentationPolicy or "replacement")
+            .. "; Blizzard settings are never changed by CarGOUI.",
     }
     for _, definition in ipairs(definitions) do
         local sources = {}

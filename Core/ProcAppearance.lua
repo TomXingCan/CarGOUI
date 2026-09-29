@@ -121,6 +121,11 @@ end
 -- remain unchanged until the shared native picker explicitly confirms a color.
 function addon:GetProcArtworkPresentation(entry)
     local appearance = self:GetProcRegionAppearance(entry)
+    if self.GetProcPresentationPolicy and self:GetProcPresentationPolicy() == "independent" then
+        -- This is a detached rendering snapshot, not a migration of saved mode.
+        -- Explicit Preview can inspect an enabled region while live art is off.
+        appearance.mode = self:IsProcIndependentArtworkRegionEnabled(entry) and "custom" or "timer"
+    end
     local draft = self.procArtworkColorPreview
     if appearance.mode == "custom" and SameRegion(draft, entry) and self:GetCurrentProcRegion(entry) then
         appearance.artColor = Copy(draft.color)
