@@ -849,14 +849,21 @@ local function setup(saved, loggedIn, client)
             function animation:SetDuration(value) self.duration = value end
             function animation:SetStartDelay(value) self.startDelay = value end
             function animation:SetEndDelay(value) self.endDelay = value end
-            function animation:SetFromAlpha(value) self.fromAlpha = value end
-            function animation:SetToAlpha(value) self.toAlpha = value end
             function animation:SetSmoothing(value) self.smoothing = value end
-            function animation:SetOffset(x, y) self.offset = { x, y } end
-            function animation:SetScale(x, y) self.scale = { x, y } end
-            function animation:SetFromScale(x, y) self.fromScale = { x, y } end
-            function animation:SetToScale(x, y) self.toScale = { x, y } end
-            function animation:SetDegrees(value) self.degrees = value end
+            -- Retail 12.1 exposes subtype methods only on the matching kind.
+            -- Scale uses SetScaleFrom/To, not the Alpha-style SetFrom/ToScale.
+            if kind == "Alpha" then
+                function animation:SetFromAlpha(value) self.fromAlpha = value end
+                function animation:SetToAlpha(value) self.toAlpha = value end
+            elseif kind == "Translation" then
+                function animation:SetOffset(x, y) self.offset = { x, y } end
+            elseif kind == "Scale" then
+                function animation:SetScale(x, y) self.scale = { x, y } end
+                function animation:SetScaleFrom(x, y) self.fromScale = { x, y } end
+                function animation:SetScaleTo(x, y) self.toScale = { x, y } end
+            elseif kind == "Rotation" then
+                function animation:SetDegrees(value) self.degrees = value end
+            end
             self.animations[#self.animations + 1] = animation
             return animation
         end
@@ -7856,7 +7863,7 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
 
-for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_appearance_options.lua",
+for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_appearance_options.lua",
     "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua", "proc_native_lifecycle.lua", "proc_safety.lua", "proc_preview_safety.lua", "proc_runtime_lifecycle.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,

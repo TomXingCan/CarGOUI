@@ -49,6 +49,17 @@ local function HideArtwork(frame)
     if not hidden or not stopped then error("owned artwork cleanup unavailable") end
 end
 
+local function SuppressNativeOverlay(self, overlay, record)
+    self.procSuppressedOverlays = self.procSuppressedOverlays or {}
+    -- Ownership records cleanup authority, not the current native alpha. A
+    -- public native refresh may write the texture again; never read it back.
+    self.procSuppressedOverlays[overlay] = record
+    self:ProcDiagnosticAPI("SuppressNativeAlpha", "requested")
+    local ok = pcall(record.texture.SetAlpha, record.texture, 0)
+    self:ProcDiagnosticAPI("SuppressNativeAlpha", ok and "completed" or "failed")
+    if not ok then error("native artwork suppression unavailable") end
+end
+
 function addon:RestoreProcNativeOverlay(overlay)
     local owned = self.procSuppressedOverlays and self.procSuppressedOverlays[overlay]
     if not owned then return true end
@@ -61,10 +72,12 @@ function addon:RestoreProcNativeOverlay(overlay)
     return ok
 end
 
-function addon:RestoreProcRegionArtwork(id)
+function addon:RestoreProcRegionArtwork(id, sourceState)
     local clean = true
     for overlay, owned in pairs(self.procSuppressedOverlays or {}) do
-        if not id or owned.regionID == id then
+        local currentSource = not sourceState or (owned.ownerID == sourceState.ownerID
+            and owned.sourceKey == sourceState.sourceKey)
+        if (not id or owned.regionID == id) and currentSource then
             local ok, restored = pcall(self.RestoreProcNativeOverlay, self, overlay)
             clean = ok and restored and clean
             if not ok then self:RecordProcFailure("release") end
@@ -147,8 +160,8 @@ local function StartActive(frame)
         animation:SetFromAlpha(1); animation:SetToAlpha(1 - settings.intensity * 0.7)
         group:SetLooping("BOUNCE")
     else
-        animation:SetFromScale(1, 1)
-        animation:SetToScale(1 + settings.intensity * 0.25, 1 + settings.intensity * 0.25)
+        animation:SetScaleFrom(1, 1)
+        animation:SetScaleTo(1 + settings.intensity * 0.25, 1 + settings.intensity * 0.25)
         group:SetLooping("BOUNCE")
     end
     group:Play()
@@ -164,7 +177,7 @@ local function StartEntrance(frame)
     if kind == "Alpha" then animation:SetFromAlpha(0); animation:SetToAlpha(1)
     else
         local from = settings.entrance == "pulse" and (1 + settings.intensity * 0.5) or (1 - settings.intensity * 0.75)
-        animation:SetFromScale(from, from); animation:SetToScale(1, 1)
+        animation:SetScaleFrom(from, from); animation:SetScaleTo(1, 1)
     end
     group:SetLooping("NONE")
     local generation, token = frame.rendererOwner:GetProcSafetyGeneration(), frame.playToken
@@ -196,8 +209,8 @@ local function StartExit(self, frame)
     animation:SetDuration(0.2 / settings.speed)
     if kind == "Alpha" then animation:SetFromAlpha(1); animation:SetToAlpha(0)
     else
-        animation:SetFromScale(1, 1)
-        animation:SetToScale(1 - settings.intensity * 0.75, 1 - settings.intensity * 0.75)
+        animation:SetScaleFrom(1, 1)
+        animation:SetScaleTo(1 - settings.intensity * 0.75, 1 - settings.intensity * 0.75)
     end
     group:SetLooping("NONE")
     local generation, token = self:GetProcSafetyGeneration(), frame.playToken
@@ -280,8 +293,11 @@ local function Draw(self, entry, appearance, asset, opacity, preview)
     return frame
 end
 
-local function FailOpen(self, entry, reason)
-    self:RestoreProcRegionArtwork(entry.id)
+local function FailOpen(self, entry, reason, sourceState)
+    -- Missing evidence for the new source cannot release a different native
+    -- source that is still fading. Mode/visibility changes and faults omit this
+    -- filter and retain their full-region cleanup behavior.
+    self:RestoreProcRegionArtwork(entry.id, sourceState)
     local clean = pcall(HideArtwork, self.procArtworkFrames and self.procArtworkFrames[entry.id])
     if not clean then self:RecordProcFailure("artwork") end
     self.procArtworkDiagnostics = self.procArtworkDiagnostics or {}
@@ -315,37 +331,33 @@ local function RenderRegion(self, entry, visible, opacity)
     local matched
     for overlay, record in pairs(self.procNativeOverlays or {}) do
         if record.regionID == entry.id and MatchesCurrent(self, overlay, record, state) then
-            if matched then FailOpen(self, entry, "ambiguous native overlay"); return end
+            if matched then FailOpen(self, entry, "ambiguous native overlay", state); return end
             matched = overlay
         end
     end
-    if not matched then FailOpen(self, entry, self.procArtworkHookReason or "matching native lifecycle unavailable"); return end
+    if not matched then FailOpen(self, entry, self.procArtworkHookReason or "matching native lifecycle unavailable", state); return end
     local record = self.procNativeOverlays[matched]
     if appearance.mode == "custom" then
         -- Both public callbacks must agree. Never use an older hook's RGB as
         -- fallback when a repeated SHOW carries missing/restricted RGB.
         if not appearance.artColor and (not state.color or not record.color
             or state.color.r ~= record.color.r or state.color.g ~= record.color.g or state.color.b ~= record.color.b) then
-            FailOpen(self, entry, "native-color-unavailable"); return
+            FailOpen(self, entry, "native-color-unavailable", state); return
         end
         local publicState = { textureID = state.textureID, scale = state.scale, color = state.color }
         local resolved, asset, reason = self:ResolveProcAppearance(entry, appearance, publicState, false)
-        if not asset then FailOpen(self, entry, reason or "artwork resolver unavailable"); return end
+        if not asset then FailOpen(self, entry, reason or "artwork resolver unavailable", state); return end
         -- Prepare the complete owned graphic before taking native suppression.
         local rendered, unavailable = Draw(self, entry, resolved, asset, opacity, false)
-        if not rendered then FailOpen(self, entry, unavailable); return end
+        if not rendered then FailOpen(self, entry, unavailable, state); return end
         rendered.nativeOverlay = matched
     else HideArtwork(frame) end
-    for overlay, owned in pairs(self.procSuppressedOverlays or {}) do
-        if owned.regionID == entry.id and overlay ~= matched then self:RestoreProcNativeOverlay(overlay) end
-    end
+    -- A superseded source can still be fading on its own native frame. Keep
+    -- its texture suppressed until ReleaseOverlay, mode change or cleanup;
+    -- restoring it here would draw the old native fade over the new artwork.
     if self:IsProcQuarantined() then return end
-    self.procSuppressedOverlays = self.procSuppressedOverlays or {}
-    if not self.procSuppressedOverlays[matched] then
-        self.procSuppressedOverlays[matched] = record
-        self:ProcDiagnosticAPI("SuppressNativeAlpha", "requested")
-        record.texture:SetAlpha(0)
-        self:ProcDiagnosticAPI("SuppressNativeAlpha", "completed")
+    if not (self.procSuppressedOverlays and self.procSuppressedOverlays[matched]) then
+        SuppressNativeOverlay(self, matched, record)
     end
     self.procArtworkDiagnostics[entry.id] = "ready"
 end
@@ -375,7 +387,7 @@ function addon:RenderProcArtwork()
 end
 
 local function Observe(self, root, ownerID, textureID, position, scale, r, g, b)
-    if self:IsProcQuarantined() or not self.procTracking or root ~= SpellActivationOverlayFrame or self.procArtworkHookRoot ~= root
+    if root ~= SpellActivationOverlayFrame or self.procArtworkHookRoot ~= root
         or not Number(ownerID, 1, 2147483647) or not Number(textureID, 1, 2147483647)
         or not Number(position, 0, 100) or not Number(scale, 0.001, 10) then return end
     local lists = root.overlaysInUse
@@ -385,28 +397,47 @@ local function Observe(self, root, ownerID, textureID, position, scale, r, g, b)
     local overlay = list[position]
     if not Public(overlay) or type(overlay) ~= "table" or not Public(overlay.spellID)
         or overlay.spellID ~= ownerID or not Public(overlay.position) or overlay.position ~= position then return end
-    if not self:RestoreProcNativeOverlay(overlay) then return end
+    if self:IsProcQuarantined() or not self.procTracking then
+        -- A failed release can leave cleanup ownership on a pooled texture.
+        -- Retry restoration for its next native SHOW without acquiring anew.
+        self:RestoreProcNativeOverlay(overlay)
+        return
+    end
     local previous = self.procNativeOverlays and self.procNativeOverlays[overlay]
-    if previous then HideArtwork(self.procArtworkFrames and self.procArtworkFrames[previous.regionID]) end
-    if self.procNativeOverlays then self.procNativeOverlays[overlay] = nil end
-    local region, source
+    local region, source, ambiguous
     for _, binding in ipairs(self.procByOverlay and self.procByOverlay[ownerID] or {}) do
         if binding.source.textureID == textureID then
             for _, entry in ipairs(binding.source.regions) do
                 if Enum.ScreenLocationType[entry.nativeLocation or entry.location] == position then
-                    if region then return end
-                    region, source = entry, binding.source
+                    if region then ambiguous = true else region, source = entry, binding.source end
                 end
             end
         end
     end
-    if not region then return end
+    if ambiguous then region, source = nil, nil end
     local texture = overlay.texture
-    if not Public(texture) or not texture or type(texture.SetAlpha) ~= "function" then return end
+    local writable = Public(texture) and texture and type(texture.SetAlpha) == "function"
+    local sameIdentity = region and writable and previous and previous.root == root
+        and previous.regionID == region.id and previous.ownerID == ownerID
+        and previous.textureID == textureID and previous.position == position
+        and previous.sourceKey == source.stateKey and previous.texture == texture
+    if not sameIdentity then
+        if not self:RestoreProcNativeOverlay(overlay) then return end
+        if previous then HideArtwork(self.procArtworkFrames and self.procArtworkFrames[previous.regionID]) end
+        if self.procNativeOverlays then self.procNativeOverlays[overlay] = nil end
+    end
+    if not region or not writable then return end
     self.procNativeOverlays = self.procNativeOverlays or {}
-    self.procNativeOverlays[overlay] = { regionID = region.id, root = root, ownerID = ownerID,
+    local record = sameIdentity and previous or { regionID = region.id, root = root, ownerID = ownerID,
         textureID = textureID, position = position, sourceKey = source.stateKey, texture = texture,
-        scale = scale, color = self:ProcPublicColor(r, g, b) }
+    }
+    record.scale, record.color = scale, self:ProcPublicColor(r, g, b)
+    self.procNativeOverlays[overlay] = record
+    -- Refreshing the same public identity is not a release or a new entrance.
+    -- Preserve suppression even when our HIDE state precedes the next SHOW.
+    if sameIdentity and self.procSuppressedOverlays and self.procSuppressedOverlays[overlay] then
+        SuppressNativeOverlay(self, overlay, record)
+    end
     self:RenderProcArtwork()
 end
 
@@ -428,7 +459,11 @@ function addon:InstallProcArtworkHooks()
             if installed.showAttempted then error("native show hook installation requires reload") end
             installed.showAttempted = true
             hooksecurefunc(root, "ShowOverlay", function(owner, ...)
-            if self:IsProcQuarantined() then return end
+            if self:IsProcQuarantined() or not self.procTracking then
+                local cleaned = pcall(Observe, self, owner, ...)
+                if not cleaned then self:RecordProcFailure("release") end
+                return
+            end
             local observed = self:RunProcSafe("hook", Observe, self, owner, ...)
             if not observed then self:StopProcArtwork(); self.procArtworkHookReason = "native lifecycle unavailable" end
         end); installed.show = true; self:ProcDiagnosticCount("artworkHooksInstalled") end
