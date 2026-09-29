@@ -509,17 +509,21 @@ local function PositionChanges(patch, entries)
     if any then return changes end
 end
 
-local function NumericAppearance(patch)
+local function ContinuousAppearance(patch)
     if type(patch) ~= "table" then return false end
+    local preset = false
     for key, value in pairs(patch) do
         if key == "offset" then
             for axis in pairs(value) do if axis ~= "x" and axis ~= "y" then return false end end
         elseif key == "animation" then
-            for setting in pairs(value) do if setting ~= "speed" and setting ~= "intensity" then return false end end
-        elseif key ~= "alpha" and key ~= "scale" and key ~= "desaturation"
+            for setting in pairs(value) do
+                if setting == "entrance" or setting == "active" or setting == "exit" or setting == "direction" then preset = true
+                elseif setting ~= "speed" and setting ~= "intensity" then return false end
+            end
+        elseif key ~= "artColor" and key ~= "alpha" and key ~= "scale" and key ~= "desaturation"
             and key ~= "rotation" and key ~= "width" and key ~= "height" then return false end
     end
-    return true
+    return true, patch.artColor ~= nil, preset
 end
 
 function addon:UpdateSettings(patch, options)
@@ -630,10 +634,12 @@ function addon:UpdateSettings(patch, options)
         if self.RefreshProcAppearance then
             for id, entry in pairs(changedAppearances) do
                 local appearance = patch.proc.regions[id].appearance
-                -- Only validated numeric presentation edits may retain motion.
-                -- Modes, sources and resets still take the full cleanup path.
-                if options and options.continuousAppearance and NumericAppearance(appearance)
-                    and self.RefreshProcNumericAppearance then self:RefreshProcNumericAppearance(entry)
+                -- Validated presentation edits retain native ownership. Tint
+                -- and numeric edits may retain motion; preset choices still
+                -- restart changed owned animations. Modes/sources/reset restore.
+                local continuous, tint, preset = ContinuousAppearance(appearance)
+                if continuous and (tint or preset or options and options.continuousAppearance)
+                    and self.RefreshProcContinuousAppearance then self:RefreshProcContinuousAppearance(entry, not preset)
                 else self:RefreshProcAppearance(entry) end
             end
         end

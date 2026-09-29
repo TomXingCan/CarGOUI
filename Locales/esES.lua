@@ -434,4 +434,8 @@ addon:RegisterLocale("esES", {
     ["Proc retry completed; current settings remain in effect."] = "El reintento de Proc ha terminado; los ajustes actuales siguen vigentes.",
     ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "El reintento de Proc ha fallado. Copia el diagnóstico con /cui diagnostics copy; puede que debas recargar la interfaz.",
     ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc se ha aislado durante esta sesión tras errores repetidos. Usa /cui diagnostics copy y después /cui proc retry o /reload.",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0%: conserva los colores originales; 100%: los elimina antes de teñir. Los valores intermedios conservan parte del color original.",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "El tinte depende del brillo y la transparencia de la imagen; el color elegido puede no verse como un color plano uniforme.",
 })

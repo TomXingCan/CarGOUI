@@ -139,7 +139,10 @@ function addon:SetProcArtworkColorPreview(entry, color)
         self.procArtworkColorPreview = { kind = "proc", class = entry.class, specID = entry.specID,
             id = entry.id, color = Copy(color) }
     end
-    if self.RefreshProcAppearance then self:RefreshProcAppearance(entry) end
+    -- A tint draft changes only owned pixels. Retired native sources may still
+    -- be fading and must keep their suppression until their release callback.
+    if self.RefreshProcContinuousAppearance then self:RefreshProcContinuousAppearance(entry)
+    elseif self.RefreshProcAppearance then self:RefreshProcAppearance(entry) end
     return true
 end
 

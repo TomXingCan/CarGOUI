@@ -7882,7 +7882,7 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     nativeText = nativeText, procText = procText })
 
 for _, suite in ipairs({ "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_numeric_renderer.lua", "proc_appearance_options.lua",
-    "numeric_controls.lua", "numeric_options.lua", "proc_numeric_options.lua",
+    "numeric_controls.lua", "numeric_options.lua", "proc_numeric_options.lua", "proc_tint_options.lua",
     "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua", "proc_native_lifecycle.lua", "proc_safety.lua", "proc_preview_safety.lua", "proc_runtime_lifecycle.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,

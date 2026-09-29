@@ -453,3 +453,209 @@ test("PROC SUPPRESSION inactive native SHOW restores retained cleanup owner with
         equal(#f.state.errors, 0)
     end
 end)
+
+local tintBase = { r = .25, g = .5, b = .75 }
+local tintBlue = { r = .15, g = .35, b = .95 }
+
+local function TintFixture(eventFirst, draftBeforeOverlap, missingEventColor)
+    local f = Fixture(true)
+    f:Set(f.left, { mode = "custom", artColor = tintBase, desaturation = .4, alpha = .6,
+        animation = { entrance = "fade", active = "breathe", exit = "fade" } })
+    local panel = h.options(f.addon)
+    f.addon:SelectOptionsCategory("proc")
+    panel.selectedProcEntry = f.left; f.addon:RefreshOptions()
+    f.entry = f:Entry(f.left)
+    truthy(f.addon:SetProcRegionColor(f.entry, { r = .7, g = .4, b = .2 }))
+    truthy(f.addon:UpdateSettings({ reminders = { [f.left] = { position = { x = 37, y = -91 } } } }))
+    truthy(f.addon:SetPreview("single", f.left))
+    if draftBeforeOverlap then
+        truthy(f.addon:OpenProcColorPicker(f.entry, "artwork"))
+        f.state:pickerChange(tintBlue.r, tintBlue.g, tintBlue.b)
+    end
+    f.old = f:Show(1277420, 1027131, eventFirst)
+    f:Tick(f.old, 1)
+    f:Hide(1277420, eventFirst)
+    local eventColor
+    if missingEventColor then eventColor = false end
+    f.current, f.sibling = f:Show(1277421, 1027132, eventFirst, eventColor)
+    f:Tick(f.old, 0); f:Tick(f.current, .5); f:Tick(f.sibling, .5)
+    f.live, f.sample = f.addon.procArtworkFrames[f.left], f.addon.procPreviewArtworkFrames[f.left]
+    function f:CheckTintGate(stage, progress)
+        self:Tick(self.old, progress or .5)
+        self:Gate(self.old, 0, stage .. " retired native fade")
+        self:Gate(self.current, 0, stage .. " current native source")
+        self:Gate(self.sibling, 1, stage .. " Native sibling")
+        truthy(self.live:IsShown() and self.live.active, stage .. " owned replacement remains active")
+    end
+    return f
+end
+
+test("PROC SUPPRESSION blue green purple tint drafts and numeric transforms retain fading source ownership", function()
+    for _, eventFirst in ipairs({ true, false }) do
+        local f = TintFixture(eventFirst)
+        local liveGroup, sampleGroup = f.live.groups.entrance_fade, f.sample.groups.entrance_fade
+        local liveFinish, sampleFinish = liveGroup:GetScript("OnFinished"), sampleGroup:GetScript("OnFinished")
+        local livePlays, samplePlays = liveGroup.plays, sampleGroup.plays
+        local frames, textures, groups, slots = #f.state.frames, #f.state.textures, #f.state.animations, #f.state.auraSlots
+        local writes, saved = #f.writes, h.copy(f.addon.db)
+        truthy(f.addon:OpenProcColorPicker(f.entry, "artwork"))
+        f:CheckTintGate("picker opened", 0)
+        same(f.addon.db, saved, "opening the native picker creates only a presentation draft")
+        for index, color in ipairs({ tintBlue, { r = .2, g = .9, b = .35 }, { r = .65, g = .2, b = .9 } }) do
+            local saturation, alpha = ({ 0, .45, 1 })[index], ({ .3, .65, 1 })[index]
+            truthy(f.addon:SetProcRegionAppearance(f.entry, { desaturation = saturation, alpha = alpha,
+                animation = { speed = 1 + index * .2, intensity = index * .2 } },
+                { skipOptionsRefresh = true, continuousAppearance = true }))
+            saved = h.copy(f.addon.db)
+            f.state:pickerChange(color.r, color.g, color.b)
+            f:CheckTintGate("color draft " .. index, index * .2)
+            for _, owned in ipairs({ f.live, f.sample }) do
+                same(owned.texture.vertexColor, { color.r, color.g, color.b })
+                equal(owned.texture.desaturation, saturation); equal(owned.alpha, alpha)
+            end
+            same(f.addon.db, saved, "RGB draft never enters SavedVariables")
+            same(f.addon:GetProcRegionAppearance(f.entry).artColor, tintBase)
+            equal(liveGroup.plays, livePlays); equal(sampleGroup.plays, samplePlays)
+            equal(liveGroup:GetScript("OnFinished"), liveFinish); equal(sampleGroup:GetScript("OnFinished"), sampleFinish)
+        end
+        f.env.ColorPickerFrame.Footer.CancelButton:Click()
+        f:CheckTintGate("cancel restores saved tint", .8)
+        same(f.live.texture.vertexColor, { tintBase.r, tintBase.g, tintBase.b })
+        same(f.addon.db, saved, "Cancel retains committed numeric edits but never commits its tint")
+        same(f.addon:GetProcRegionColor(f.entry), { r = .7, g = .4, b = .2 })
+        same(f.addon:GetReminderPosition(f.entry), { anchor = "CENTER", x = 37, y = -91 })
+        equal(#f.writes, writes, "color and parameter edits do not release or retake native suppression")
+        equal(#f.state.frames, frames); equal(#f.state.textures, textures); equal(#f.state.animations, groups)
+        equal(#f.state.auraSlots, slots); equal(f.state.realReads, 0)
+        f:Tick(f.old, 1); f:Gate(f.old, 1, "retired tint source release")
+        equal(f:Paint(f.old), 0); f:Gate(f.current, 0, "current tint survives old release")
+    end
+end)
+
+for _, action in ipairs({ "Cancel", "Okay" }) do
+    test("PROC SUPPRESSION tint " .. action .. " preserves a native owner that started fading during the picker session", function()
+        for _, eventFirst in ipairs({ true, false }) do
+            local f = TintFixture(eventFirst, true)
+            local before, plays = h.copy(f.addon.db), f.live.groups.entrance_fade.plays
+            f:CheckTintGate("before native " .. action, .25)
+            f.env.ColorPickerFrame.Footer[action .. "Button"]:Click()
+            f:CheckTintGate("after native " .. action, .75)
+            local color = action == "Okay" and tintBlue or tintBase
+            same(f.addon:GetProcRegionAppearance(f.entry).artColor, color)
+            same(f.live.texture.vertexColor, { color.r, color.g, color.b })
+            same(f.sample.texture.vertexColor, { color.r, color.g, color.b })
+            if action == "Cancel" then same(f.addon.db, before) end
+            equal(f.addon.procArtworkColorPreview, nil); equal(f.addon.procColorPickerSession, nil)
+            equal(f.live.groups.entrance_fade.plays, plays, "finishing tint does not replay an entrance")
+            f:Tick(f.old, 1); f:Gate(f.old, 1, "old owner releases after " .. action)
+            f:Gate(f.current, 0, "new owner survives late release")
+        end
+    end)
+end
+
+test("PROC SUPPRESSION all animation preset changes restart owned motion without restoring a retired native fade", function()
+    for _, option in ipairs({ { "entrance", "pulse" }, { "active", "rotate" }, { "exit", "scale" } }) do
+        for _, eventFirst in ipairs({ true, false }) do
+            local f = TintFixture(eventFirst)
+            local oldGroup = f.live.groups.entrance_fade
+            local stale = oldGroup:GetScript("OnFinished")
+            local patch = { animation = { [option[1]] = option[2] }, artColor = tintBlue }
+            truthy(f.addon:SetProcRegionAppearance(f.entry, patch))
+            f:CheckTintGate(option[1] .. " preset changed", .25)
+            local entrance = f.live.appearance.animation.entrance
+            local currentGroup = f.live.groups["entrance_" .. entrance]
+            local plays, token = currentGroup.plays, f.live.playToken
+            truthy(currentGroup:GetScript("OnFinished") ~= stale, "changed preset creates a new owned lifecycle callback")
+            stale(); equal(f.live.phase, "entrance", "previous preset callback cannot advance the new lifecycle")
+            truthy(f.addon:SetProcRegionAppearance(f.entry, patch))
+            equal(currentGroup.plays, plays, "unchanged preset and tint do not replay the entrance")
+            equal(f.live.playToken, token)
+            f:CheckTintGate(option[1] .. " preset unchanged", .75)
+            f:FinishOwned(f.left, "entrance_" .. entrance)
+            equal(f.live.phase, "active")
+            f:Tick(f.old, 1); f:Gate(f.old, 1, "preset old owner release")
+            f:Gate(f.current, 0, "preset current native remains suppressed")
+            truthy(f.addon:SetProcRegionAppearance(f.entry, { mode = "native" }))
+            f:Gate(f.current, 1, "mode change still releases preset ownership")
+            truthy(not f.live:IsShown())
+        end
+    end
+    do
+        local f = TintFixture(true)
+        f:Hide(1277421, true)
+        truthy(f.live.exiting, "HIDE begins the owned exit before its preset changes")
+        local stale = f.live.groups.exit_fade:GetScript("OnFinished")
+        truthy(f.addon:SetProcRegionAppearance(f.entry, { animation = { exit = "scale" } }))
+        truthy(not f.live:IsShown() and not f.live.active, "hidden preset changes settle owned exit motion")
+        f:Tick(f.old, .5); f:Tick(f.current, .5)
+        f:Gate(f.old, 0, "hidden preset retains retired native fade")
+        f:Gate(f.current, 0, "hidden preset retains current native fade")
+        stale(); truthy(not f.live:IsShown() and not f.live.active, "stale exit cannot revive hidden artwork")
+        truthy(f.sample:IsShown(), "hidden live exit does not stop the independent sample")
+        f:Tick(f.old, 1); f:Tick(f.current, 1)
+        f:Gate(f.old, 1, "hidden preset retired release")
+        f:Gate(f.current, 1, "hidden preset current release")
+    end
+end)
+
+test("PROC SUPPRESSION clearing artColor without public event RGB fails open only for its current source", function()
+    local f = TintFixture(true, false, true)
+    truthy(f.addon:SetProcRegionAppearance(f.entry, { artColor = false }))
+    f:Tick(f.old, .25); f:Gate(f.old, 0, "event-color fallback retains retired source")
+    f:Gate(f.current, 1, "missing current public RGB fails open")
+    truthy(not f.live:IsShown()); equal(f.addon:GetProcRegionAppearance(f.entry).artColor, nil)
+    truthy(f.addon:GetProcArtworkDiagnostic(f.entry):find("native%-color%-unavailable"))
+    truthy(f.addon:SetProcArtworkColorPreview(f.entry, tintBlue))
+    f:CheckTintGate("explicit temporary color recovers current source", .5)
+    truthy(f.addon:SetProcArtworkColorPreview(f.entry, nil))
+    f:Tick(f.old, .75); f:Gate(f.old, 0, "cancel restores missing-evidence fallback")
+    f:Gate(f.current, 1, "cancel does not retain stale draft RGB")
+    truthy(f.sample:IsShown(), "the independent TEST sample can still use its public sample color")
+    f:Tick(f.old, 1); f:Gate(f.old, 1, "missing-color retired release")
+end)
+
+test("PROC SUPPRESSION tint hints never bypass source mode or artwork reset cleanup", function()
+    for _, change in ipairs({ "mode", "asset", "reset" }) do
+        local f = TintFixture(true)
+        local patch = change == "mode" and { mode = "native", artColor = tintBlue }
+            or change == "asset" and { assetKey = "blizzard_449493", artColor = tintBlue } or false
+        truthy(f.addon:UpdateSettings({ proc = { regions = { [f.left] = { appearance = patch } } } },
+            { skipOptionsRefresh = true, continuousAppearance = true }))
+        f:Tick(f.old, .5); f:Gate(f.old, 1, change .. " retains full retired-owner restoration")
+        f:Gate(f.current, change == "asset" and 0 or 1, change .. " current-owner cleanup")
+        if change == "asset" then equal(f.live.texture.texture, 449493)
+        else truthy(not f.live:IsShown()) end
+    end
+end)
+
+test("PROC SUPPRESSION tint failures retain failed owners and never resume inactive or quarantined Proc", function()
+    do
+        local f = TintFixture(true)
+        local setter = f.live.texture.SetVertexColor
+        f.live.texture.SetVertexColor = function() error("injected owned tint renderer failure") end
+        f.old.texture.failAlpha = 1
+        truthy(f.addon:SetProcRegionAppearance(f.entry, { artColor = tintBlue }))
+        truthy(not f.live:IsShown(), "tint fault hides the custom renderer")
+        truthy(f.addon.procSuppressedOverlays[f.old], "failed old-owner restoration remains owned")
+        f:Gate(f.old, 0, "failed restore gate remains tracked"); f:Gate(f.current, 1, "genuine tint fault fails open")
+        f.old.texture.failAlpha = nil; f:Tick(f.old, 1)
+        f:Gate(f.old, 1, "release retries failed tint cleanup")
+        equal(f.addon.procSuppressedOverlays[f.old], nil)
+        f.live.texture.SetVertexColor = setter
+    end
+    for _, quarantine in ipairs({ false, true }) do
+        local f = TintFixture(true)
+        if quarantine then f.addon:QuarantineProc("artwork")
+        else f.addon:GetProcConfig().enabled = false; f.addon:ConfigureProc() end
+        local frames, groups = #f.state.frames, #f.state.animations
+        truthy(f.addon:SetProcRegionAppearance(f.entry, { artColor = tintBlue }))
+        truthy(f.addon:SetProcRegionAppearance(f.entry, { animation = { entrance = "pulse", active = "rotate", exit = "scale" } }))
+        f.addon:SetProcArtworkColorPreview(f.entry, tintBlue)
+        f.addon:SetProcArtworkColorPreview(f.entry, nil)
+        f:Gate(f.old, 1, "inactive retired source"); f:Gate(f.current, 1, "inactive current source")
+        truthy(not f.live:IsShown() and not f.sample:IsShown())
+        equal(next(f.addon.procSuppressedOverlays), nil); equal(f.addon.procTracking, false)
+        equal(f.addon:IsProcQuarantined(), quarantine)
+        equal(#f.state.frames, frames); equal(#f.state.animations, groups)
+    end
+end)

@@ -434,4 +434,8 @@ addon:RegisterLocale("ruRU", {
     ["Proc retry completed; current settings remain in effect."] = "Повторный запуск Proc завершён; текущие настройки остаются в силе.",
     ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Повторный запуск Proc не удался. Скопируйте диагностику командой /cui diagnostics copy; может потребоваться перезагрузка интерфейса.",
     ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "После повторяющихся ошибок Proc изолирован до конца сеанса. Выполните /cui diagnostics copy, затем /cui proc retry или /reload.",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0%: сохраняет исходные цвета; 100%: убирает их перед окрашиванием. Промежуточные значения сохраняют часть исходного цвета.",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "Результат зависит от яркости и прозрачности изображения; выбранный цвет может выглядеть неоднородным.",
 })

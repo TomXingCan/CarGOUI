@@ -153,7 +153,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         addon:RefreshOptions()
     end, "ghost")
 
-    local art, artContent = Section(addon:Text("Artwork"), 292)
+    local art, artContent = Section(addon:Text("Artwork"), 432)
     panel.procArtworkSection = art
     panel.procAssetLabel = Label(artContent, "", 0, 0, inner, 36)
     controls.procGallery = Button(artContent, addon:Text("Choose artwork"), 0, -48, half, function()
@@ -181,12 +181,19 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     artSwatch:SetPoint("TOPLEFT", controls.procArtColor, "TOPLEFT", 6, -6)
     artSwatch:SetPoint("BOTTOMRIGHT", controls.procArtColor, "BOTTOMRIGHT", -6, 6)
     controls.procArtColor.swatch = artSwatch
+    Number(artContent, addon:Text("Desaturation"), "desaturation", -176)
+    panel.procTintGuide = Label(artContent,
+        addon:Text("0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."),
+        0, -216, inner, 44)
+    Number(artContent, addon:Text("Artwork opacity"), "alpha", -272)
+    panel.procTintLimit = Label(artContent,
+        addon:Text("Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."),
+        0, -316, inner, 52)
     local third = (inner - gap * 2) / 3
 
-    local transform, transformContent = Section(addon:Text("Transform"), 140)
+    local transform, transformContent = Section(addon:Text("Transform"), 96)
     panel.procTransformSection = transform
-    Number(transformContent, addon:Text("Artwork opacity"), "alpha", 0)
-    Number(transformContent, addon:Text("Artwork scale"), "scale", -44)
+    Number(transformContent, addon:Text("Artwork scale"), "scale", 0)
     local animation, animationContent = Section(addon:Text("Animation"), 120)
     panel.procAnimationSection = animation
     Enum(animationContent, addon:Text("Entrance"), "entrance", 0, {
@@ -202,7 +209,7 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         { value = "scale", label = addon:Text("Scale out") },
     }, function(value) return { animation = { exit = value } } end, (third + gap) * 2, third)
 
-    local advanced, advancedContent = Section(addon:Text("Advanced artwork settings"), 576, {
+    local advanced, advancedContent = Section(addon:Text("Advanced artwork settings"), 532, {
         collapsible = true, collapsed = true,
         onToggle = function(_, collapsed)
             session.advanced = not collapsed
@@ -216,22 +223,21 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     })
     panel.procAdvancedSection = advanced
     controls.procAdvanced = advanced.collapseButton
-    Number(advancedContent, addon:Text("Desaturation"), "desaturation", 0)
-    Number(advancedContent, addon:Text("Rotation (degrees)"), "rotation", -44)
-    Number(advancedContent, addon:Text("Width multiplier"), "width", -88)
-    Number(advancedContent, addon:Text("Height multiplier"), "height", -132)
-    Check(advancedContent, addon:Text("Mirror X"), "mirrorX", 0, -180)
-    Check(advancedContent, addon:Text("Mirror Y"), "mirrorY", right, -180)
-    Number(advancedContent, addon:Text("Artwork X offset"), "offsetX", -228,
+    Number(advancedContent, addon:Text("Rotation (degrees)"), "rotation", 0)
+    Number(advancedContent, addon:Text("Width multiplier"), "width", -44)
+    Number(advancedContent, addon:Text("Height multiplier"), "height", -88)
+    Check(advancedContent, addon:Text("Mirror X"), "mirrorX", 0, -136)
+    Check(advancedContent, addon:Text("Mirror Y"), "mirrorY", right, -136)
+    Number(advancedContent, addon:Text("Artwork X offset"), "offsetX", -184,
         function(value) return { offset = { x = value } } end)
-    Number(advancedContent, addon:Text("Artwork Y offset"), "offsetY", -272,
+    Number(advancedContent, addon:Text("Artwork Y offset"), "offsetY", -228,
         function(value) return { offset = { y = value } } end)
-    Label(advancedContent, addon:Text("Artwork offsets use the native visual center. Timer position is independent."), 0, -316, inner, 38)
-    Number(advancedContent, addon:Text("Animation speed"), "speed", -362,
+    Label(advancedContent, addon:Text("Artwork offsets use the native visual center. Timer position is independent."), 0, -272, inner, 38)
+    Number(advancedContent, addon:Text("Animation speed"), "speed", -318,
         function(value) return { animation = { speed = value } } end)
-    Number(advancedContent, addon:Text("Animation intensity"), "intensity", -406,
+    Number(advancedContent, addon:Text("Animation intensity"), "intensity", -362,
         function(value) return { animation = { intensity = value } } end)
-    Enum(advancedContent, addon:Text("Rotation direction"), "direction", -458, {
+    Enum(advancedContent, addon:Text("Rotation direction"), "direction", -414, {
         { value = "clockwise", label = addon:Text("Clockwise") },
         { value = "counterclockwise", label = addon:Text("Counterclockwise") },
     }, function(value) return { animation = { direction = value } } end)
@@ -374,7 +380,6 @@ function addon:RefreshProcAppearanceOptions()
         end
         local asset = appearance.assetKey and self:GetProcAsset(appearance.assetKey)
         panel.procAssetLabel:SetText(asset and (AssetClassName(asset.class) .. " - " .. AssetLabel(asset)) or self:Text("This Proc's native artwork"))
-        panel.procArtworkSection:SetHeight(224)
     end
     local y = 0
     local function Place(frame, shown, height)

@@ -434,4 +434,8 @@ addon:RegisterLocale("zhCN", {
     ["Proc retry completed; current settings remain in effect."] = "Proc 重试完成，当前设置仍然生效。",
     ["Proc retry failed. Copy diagnostics with /cui diagnostics copy; Reload may be required."] = "Proc 重试失败。请使用 /cui diagnostics copy 复制诊断；可能需要重新加载界面。",
     ["Proc was quarantined for this session after repeated errors. Use /cui diagnostics copy, then /cui proc retry or /reload."] = "Proc 因重复异常已在本次会话中隔离。请先使用 /cui diagnostics copy，再使用 /cui proc retry 或 /reload。",
+
+    -- Artwork tint guidance.
+    ["0% keeps the artwork colors; 100% removes them before tinting. Values in between retain some original color."] = "0% 保留素材原色；100% 去除原色后再染色；中间值保留部分原色。",
+    ["Tint depends on the artwork brightness and transparency; the selected color may not appear as a solid flat color."] = "染色受素材亮暗和透明细节影响，所选颜色未必呈现为均匀的纯色。",
 })

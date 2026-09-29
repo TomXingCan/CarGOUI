@@ -308,7 +308,7 @@ local function Draw(self, entry, appearance, asset, opacity, preview, continuous
     frame:Show()
     if restart then StartEntrance(frame)
     elseif keepMotion then
-        -- A continuous numeric edit updates existing interpolation parameters;
+        -- A continuous numeric/tint edit updates existing interpolation parameters;
         -- it neither allocates callbacks nor replays the entrance every step.
         local phase, settings = frame.phase, appearance.animation
         local choice = phase == "entrance" and settings.entrance or settings.active
@@ -547,19 +547,28 @@ function addon:RenderProcArtworkPreview(entry, continuous)
     end
 end
 
-function addon:RefreshProcNumericAppearance(entry)
-    if self:IsProcQuarantined() or not self:GetCurrentProcRegion(entry) then return end
+function addon:RefreshProcContinuousAppearance(entry, keepMotion)
+    if self:IsProcQuarantined() then return end
+    -- Picker sessions carry compact identities; preview geometry requires the
+    -- complete audited region from the current specialization.
+    entry = self:GetCurrentProcRegion(entry)
+    if not entry then return end
     local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
     if frame and frame.exiting then
         local clean = self:RunProcSafe("artwork", HideArtwork, frame)
         if not clean then self:RestoreProcRegionArtwork(entry.id); return end
     end
-    self:RenderProcArtwork(entry, true)
+    self:RenderProcArtwork(entry, keepMotion ~= false)
     -- Update only an already active sample. Do not stop/recreate the preview
-    -- session, its timer frames, or any other region's artwork while dragging.
+    -- session, its timer frames, or any other region's artwork while dragging
+    -- numeric controls or changing a tint draft/committed tint. Preset changes
+    -- retain native ownership but allow Draw to restart changed owned motion.
     local preview = self.procPreviewArtworkFrames and self.procPreviewArtworkFrames[entry.id]
-    if preview and preview.active then self:RenderProcArtworkPreview(entry, true) end
+    if preview and preview.active then self:RenderProcArtworkPreview(entry, keepMotion ~= false) end
 end
+
+-- Preserve the existing numeric entry point for callers using that API.
+addon.RefreshProcNumericAppearance = addon.RefreshProcContinuousAppearance
 
 function addon:RefreshProcAppearance(entry)
     if self:IsProcQuarantined() then return end
