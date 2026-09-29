@@ -5,7 +5,8 @@ local test, equal, truthy, same = h.test, h.equal, h.truthy, h.same
 local leftID, rightID = "mage_fire_hot_streak_left", "mage_fire_hot_streak_right"
 
 local function Fixture(appearance, legacyHooks)
-    local env, addon, state = h.login(nil, false, { specID = 63, proc = {
+    local login = legacyHooks and h.legacyLogin or h.login
+    local env, addon, state = login(nil, false, { specID = 63, proc = {
         cvars = { displaySpellActivationOverlays = false, spellActivationOverlayOpacity = "0" } } })
     local callbacks = {}
     if legacyHooks then

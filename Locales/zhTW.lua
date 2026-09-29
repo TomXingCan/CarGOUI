@@ -463,4 +463,8 @@ addon:RegisterLocale("zhTW", {
     ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "包含的 Proc 範圍若未指定策略，將使用舊版區域替換。獨立圖形需要明確啟用區域。",
     ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "策略：%s；獨立實戰圖形：%s；包含且明確啟用的區域：%d。",
     ["Enabled"] = "已啟用",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "原生圖形由暴雪控制，CUI 只加入計時。已儲存的自訂和僅計時圖形覆寫設定會保留，但不生效；如需自訂圖形，請選擇獨立 CUI。",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "包含的 Proc 範圍若未指定策略，將使用原生圖形。已儲存的舊覆寫設定不會生效。獨立圖形需要明確啟用區域。",
 })

@@ -486,7 +486,7 @@ local function Summary(incoming, before, context, warnings, restore)
             or addon:Text("Only included scopes are replaced. Other classes, specializations and regions are unchanged."),
         addon:Text("Included regions without RGB use the current class color, clearing any old override."),
         addon:Text("Included regions without artwork settings clear old artwork overrides and use the selected strategy's defaults."),
-        addon:Text("Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."),
+        addon:Text("Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."),
         addon:Text("Mobility and Free move offsets remain independent.") }
     for _, class in ipairs(names) do
         local record = incoming.classes[class]
@@ -502,7 +502,7 @@ local function Summary(incoming, before, context, warnings, restore)
             end
             table.sort(orderedRegions)
             lines[#lines + 1] = addon:Format("%s Proc %d: shared style and enabled setting; %d region record(s).", class, spec, #orderedRegions)
-            local policy = proc.presentationPolicy == "independent" and addon:Text("Independent CUI") or addon:Text("Legacy region replacement")
+            local policy = proc.presentationPolicy == "independent" and addon:Text("Independent CUI") or addon:Text("Native artwork")
             lines[#lines + 1] = addon:Format("Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d.",
                 policy, proc.independentArtworkEnabled ~= false and addon:Text("Enabled") or addon:Text("Disabled"), enabledRegions)
             if #orderedRegions > 0 then lines[#lines + 1] = addon:Format("Regions: %s", table.concat(orderedRegions, ", ")) end

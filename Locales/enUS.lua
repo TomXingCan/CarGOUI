@@ -461,4 +461,8 @@ addon:RegisterLocale("enUS", {
     ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement.",
     ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d.",
     ["Enabled"] = "Enabled",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork.",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement.",
 })

@@ -152,14 +152,22 @@ function addon:CreateProcAppearanceOptions(panel, ui)
     local policy, policyContent = Section(addon:Text("Artwork strategy"), 132)
     panel.procPolicySection = policy
     controls.procPresentationPolicy = Dropdown(panel, policyContent, addon:Text("Artwork strategy"), 0, 0, {
-        { value = "replacement", label = addon:Text("Legacy region replacement") },
+        { value = "replacement", label = addon:IsProcLegacyReplacementAllowed()
+            and addon:Text("Legacy region replacement") or addon:Text("Native artwork") },
         { value = "independent", label = addon:Text("Independent CUI") },
     }, nil, function(value) SaveProc({ presentationPolicy = value }) end)
     controls.procPresentationPolicy:SetWidth(inner)
     controls.procIndependentArtworkEnabled = CUI.Toggle(panel, policyContent,
         addon:Text("Enable independent live artwork"), 0, -76,
-        function(value) SaveProc({ independentArtworkEnabled = value }) end)
+        function(value)
+            if addon:GetProcPresentationPolicy() == "independent" then
+                SaveProc({ independentArtworkEnabled = value })
+            end
+        end)
     controls.procIndependentArtworkEnabled.label:SetWidth(inner - 60)
+    panel.procNativePolicyGuide = Label(policyContent,
+        addon:Text("Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."),
+        0, -76, inner, 76)
     panel.procPolicyGuide = Label(policyContent,
         addon:Text("Set Blizzard Spell Alert Opacity to 0 manually. Independent CUI requires spellActivationOverlayOpacity=0 and displaySpellActivationOverlays=0. The master switch affects live artwork only."),
         0, -120, inner, 76)
@@ -174,18 +182,23 @@ function addon:CreateProcAppearanceOptions(panel, ui)
         { value = "custom", label = addon:Text("Custom artwork") },
         { value = "timer", label = addon:Text("Timer only") },
     }, function(value)
-        if addon:GetProcPresentationPolicy() == "replacement" then Save({ mode = value }) end
+        if addon:IsProcLegacyReplacementAllowed() and addon:GetProcPresentationPolicy() == "replacement" then
+            Save({ mode = value })
+        end
     end)
     controls.procIndependentRegion = CUI.Toggle(panel, displayContent,
         addon:Text("Enable independent artwork for this region"), 0, 0, function(value)
             local entry = Selected()
-            if entry then SaveProc({ regions = { [entry.id] = { independentArtworkEnabled = value } } }) end
+            if entry and addon:GetProcPresentationPolicy() == "independent" then
+                SaveProc({ regions = { [entry.id] = { independentArtworkEnabled = value } } })
+            end
         end)
     controls.procIndependentRegion.label:SetWidth(inner - 60)
     panel.procRegionPolicyHint = Label(displayContent,
         addon:Text("Turning this off hides CUI artwork for this region; it does not restore a Native side. Enabled regions can still be edited and tested when the live master switch is off. Test uses separate samples."),
         0, -42, inner, 66)
     controls.procArtReset = Button(displayContent, addon:Text("Reset artwork to Blizzard default"), 0, -68, inner, function()
+        if addon:GetProcPresentationPolicy() ~= "independent" and not addon:IsProcLegacyReplacementAllowed() then return end
         addon:CancelProcColorPicker()
         CUI.ClearNumericInteractions(panel)
         if addon:ResetProcRegionAppearance(Selected()) then ui.Feedback(panel, addon.L.saved) end
@@ -393,22 +406,24 @@ function addon:RefreshProcAppearanceOptions()
     local appearance = self:GetProcRegionAppearance(entry)
     local policy = self:GetProcPresentationPolicy()
     local independent = policy == "independent"
+    local legacy = self:IsProcLegacyReplacementAllowed() and not independent
     local config = #entries > 0 and self:GetProcConfig()
     local region = config and entry and config.regions and config.regions[entry.id]
     local custom = entry and self:IsProcArtworkEditable(entry)
     controls.procPresentationPolicy:SelectValue(policy)
     controls.procPresentationPolicy:SetEnabled(config ~= nil and config ~= false)
     controls.procIndependentArtworkEnabled:SetChecked(config and config.independentArtworkEnabled ~= false or false)
-    controls.procIndependentArtworkEnabled:SetEnabled(not not config)
+    controls.procIndependentArtworkEnabled:SetEnabled(not not config and independent)
     controls.procIndependentArtworkEnabled:SetShown(independent)
     controls.procIndependentArtworkEnabled.label:SetShown(independent)
     panel.procPolicyGuide:SetShown(independent)
     panel.procPolicyWarning:SetShown(independent)
-    panel.procPolicySection:SetHeight(independent and 350 or 132)
-    controls.procArt_mode:SetShown(not independent)
+    panel.procNativePolicyGuide:SetShown(not independent and not legacy)
+    panel.procPolicySection:SetHeight(independent and 350 or legacy and 132 or 216)
+    controls.procArt_mode:SetShown(legacy)
     controls.procIndependentRegion:SetShown(independent)
     controls.procIndependentRegion.label:SetShown(independent)
-    controls.procIndependentRegion:SetEnabled(entry ~= nil)
+    controls.procIndependentRegion:SetEnabled(entry ~= nil and independent)
     controls.procIndependentRegion:SetChecked(region and region.independentArtworkEnabled == true or false)
     panel.procRegionPolicyHint:SetShown(independent)
     panel.procDisplaySection.title:SetText(independent and self:Text("Region artwork") or self:Text("Display mode"))
@@ -419,7 +434,8 @@ function addon:RefreshProcAppearanceOptions()
     for _, key in ipairs({ "procArt_mode", "procArtReset", "procAppearance", "procPositionX", "procPositionY", "procPositionReset" }) do
         controls[key]:SetEnabled(entry ~= nil)
     end
-    controls.procArt_mode:SetEnabled(entry ~= nil and not independent)
+    controls.procArt_mode:SetEnabled(entry ~= nil and legacy)
+    controls.procArtReset:SetEnabled(entry ~= nil and (independent or legacy))
     local position = entry and self:GetReminderPosition(entry)
     for _, axis in ipairs({ "X", "Y" }) do
         local row = controls["procPosition" .. axis]
@@ -455,7 +471,7 @@ function addon:RefreshProcAppearanceOptions()
     end
     Place(panel.procContextSection, true)
     Place(panel.procPolicySection, true)
-    Place(panel.procDisplaySection, true)
+    Place(panel.procDisplaySection, independent or legacy)
     Place(panel.procArtworkSection, custom)
     Place(panel.procTransformSection, custom)
     Place(panel.procAnimationSection, custom)

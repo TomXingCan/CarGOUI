@@ -463,4 +463,8 @@ addon:RegisterLocale("ruRU", {
     ["Included Proc scopes without a strategy use legacy replacement. Independent artwork requires explicit region enablement."] = "Включённые области настроек Proc без стратегии используют прежнюю замену. Для независимой графики необходимо явно включить каждую область.",
     ["Strategy: %s; independent live artwork: %s; explicitly enabled included regions: %d."] = "Стратегия: %s; независимая графика в игре: %s; включённых в импорт и явно активированных областей: %d.",
     ["Enabled"] = "Включено",
+
+    -- Release presentation choices.
+    ["Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."] = "Штатной графикой управляет Blizzard. CUI добавляет только таймеры. Сохранённые замены «Своя графика» и «Только таймер» остаются в настройках, но не действуют. Для своей графики выберите независимую CUI.",
+    ["Included Proc scopes without a strategy use Native artwork. Saved legacy overrides remain inactive. Independent artwork requires explicit region enablement."] = "Включённые области настроек Proc без стратегии используют штатную графику. Сохранённые старые замены не действуют. Для независимой графики необходимо явно включить каждую область.",
 })

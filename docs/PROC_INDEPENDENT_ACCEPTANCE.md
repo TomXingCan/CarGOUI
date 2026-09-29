@@ -1,9 +1,29 @@
-# Independent Proc artwork prototype
+# Independent Proc artwork: 1.0.1 acceptance
 
-This opt-in prototype continues Draft PR #14 from R1
-`991b5fecf7cb6876be696791cff161e2d4e53e3c`. It does not fix or retire the
-legacy per-region first-SHOW exposure defect. The memory acceptance in #15 and
-the remaining fault framework in #16 remain separate open work.
+The author accepted the P1 initial client screen on
+`bc91f3fe975e059fda2196cb4b6d75d40e371006` and approved independent Proc artwork
+for 1.0.1. Scope is frozen. The four results below are **author onsite
+confirmation**, not automated measurements or video verification. Inherited
+context is Retail 12.1.0 / build 69933, MAGE / 62, P1 independent strategy,
+manually muted Blizzard settings and the selected region opt-ins.
+
+- First real acquisition, consumption, reacquisition and final ending display normally.
+- Master and per-region artwork switches do not break Timer.
+- Saved independent strategy and zero Blizzard settings work on cold startup.
+- Restoring nonzero Blizzard opacity pauses independent artwork with a notice;
+  Timer and saved preferences remain intact.
+
+These four checks are not a sign-off for every class/source or all historic
+acceptance rows. WARLOCK/266 and untested key sources remain separately listed.
+Do not repeat A/B capture, require video, or create another observer to reconfirm
+the established premise. Final-RC gates are in
+[the release checklist](RELEASE_1_0_1_CHECKLIST.md).
+
+The only production paths are Blizzard native artwork plus CUI Timer, and
+explicitly enabled independent CUI artwork plus CUI Timer. Legacy per-region
+suppression is **not available in this release**. Its first-SHOW/consumption
+exposure defects remain historical follow-up, not fixed by this change. The
+memory admission review in #15 and remaining framework in #16 are separate.
 
 ## Evidence and limits
 
@@ -39,11 +59,17 @@ performance, or actual secure timer behavior.
 ## Scope and behavior
 
 The strategy is stored per class/spec as optional
-`proc.presentationPolicy = "independent"`. Missing fields mean legacy
-`"replacement"`. Existing region `appearance.mode`, assets, colors, scale,
+`proc.presentationPolicy = "independent"`. Missing fields and the compatible
+`"replacement"` value mean native artwork with no takeover. Existing region
+`appearance.mode`, assets, colors, scale,
 animation, positions and timer settings are retained. The live artwork master
 defaults to enabled, while every independent region requires explicit opt-in.
-Neither switch disables Proc timers. Native is not a per-side choice in this
+Neither switch disables Proc timers. Saved legacy Custom/Timer Only overrides
+remain inactive in native strategy. The release gate cannot be enabled by a
+saved field, import, slash command or UI control; historical takeover tests use
+an explicit test-only method override outside the installed runtime. New hooks
+are not installed, and any already-existing hook can only clean recorded owners.
+Failed cleanup retains ownership. Native is not a per-side choice in independent
 strategy: the user's global setting has hidden all native artwork.
 
 A validated public SHOW records its own graphical state regardless of the
@@ -75,7 +101,7 @@ cleanup before committing policy changes. A failed native restore or owned
 animation cleanup aborts the transaction and retains cleanup ownership. Active
 and desired policies are distinct until configuration succeeds. Imports stay
 format 1 / schema 5 with strict optional fields; an included legacy scope that
-omits the policy restores replacement. An omitted field in a local patch keeps
+omits the policy restores native artwork. An omitted field in a local patch keeps
 the current policy. Inactive scopes do not clean up or start live work.
 
 Missing public evidence pauses only the affected independent artwork and is not
@@ -96,9 +122,9 @@ permanent OnUpdate, new observer or native-child readback was added.
    disables `displaySpellActivationOverlays`; CUI performs neither write.
 4. Close Options and obtain a real Proc. Test is only an isolated sample and
    cannot demonstrate public event delivery or native duration behavior.
-5. To return to stock artwork, disable independent live artwork or switch back
-   to legacy replacement, then manually restore Blizzard opacity. If retaining
-   legacy Custom selections, those legacy replacement rules apply again.
+5. To return to stock artwork, disable independent live artwork or select
+   **Native artwork**, then manually restore Blizzard opacity. Preserved legacy
+   Custom/Timer Only selections do not regain native takeover authority.
 
 Global zero hides **all** native Proc artwork, including sources CarGOUI does
 not cover. It cannot preserve one genuinely Native side. Disabling artwork,
@@ -110,21 +136,20 @@ diagnostics and use explicit Retry or Reload before changing strategy.
 
 ## Retail acceptance sheet
 
-These are pending author/client checks, not completed offline results. Begin
-each startup case from the stated session condition. Change one listed factor
-at a time and keep unrelated settings/Free Move fixed.
+The four reported P1 checks are accepted above. Remaining rows require only
+focused final-RC checks; do not mechanically repeat the historical matrix.
+Change one listed factor at a time and keep unrelated settings/Free Move fixed.
 
 | Case | Required result | Actual result / diagnostics |
 | --- | --- | --- |
-| MAGE/62, B, 1277420/1027131 first obtain, consume, re-obtain | CUI artwork and native-bound timer follow their separate valid inputs; no native artwork | Pending |
-| MAGE/62, B, 1277009/6160020 first obtain, consume, re-obtain | Same checks for the second observed owner | Pending |
-| Saved B and independent strategy, relog/Reload, no Options | First real SHOW works; bootstrap timer is not a made-up graphical event | Pending |
+| P1 reported MAGE/62 context: first obtain, consume, re-obtain and end | Artwork and timer function normally | Author onsite confirmation; not an all-source census |
+| Saved B and independent strategy, cold startup | First real SHOW works; bootstrap timer is not a made-up graphical event | Author onsite confirmation |
 | Enter independent while buff already exists | No artwork until valid public SHOW; native timer bootstrap follows its existing contract | Pending |
-| Master artwork off/on and one region off/on | Artwork changes only; Timer and opposite region settings stay intact | Pending |
+| Master artwork off/on and one region off/on | Artwork changes only; Timer stays intact | Author onsite confirmation |
 | Original styles; no animation; entrance/active/exit animation; low CUI alpha | CUI style remains independent of stock opacity; no native graphics under B | Pending |
 | Color confirm/cancel, numeric sliders, Preview then close | Preview/live isolated; no timer rebinding caused by artwork switches | Pending |
-| Restore stock opacity while independent remains saved | Independent live artwork pauses with notice; Timer stays available; no automatic CVar write | Pending |
-| Switch to replacement and back; old import/reset/restore | Saved legacy modes preserved; cleanup completes before policy commit | Pending |
+| Restore stock opacity while independent remains saved | Independent live artwork pauses with notice; Timer and saved preferences remain | Author onsite confirmation |
+| Native strategy and independent switch; old import/reset/restore | Saved legacy modes stay inactive; cleanup completes before policy commit | Focused final-RC check pending |
 | Quarantine/Retry, explicit cleanup failure (offline injection only) | No auto-restart; failed owner retained; notice directs manual native setting recovery | Pending |
 | Repeated toggles/spec changes, font/Mobility/Free Move/import/export checks | No persistent resource growth or unrelated regression | Pending |
 
@@ -132,5 +157,5 @@ Use `/cui diagnostics copy` outside Options after each relevant failure or
 boundary. Keep raw snapshots separate from interpretations. Additional audited
 sources, including WARLOCK/266 Demonic Core, still need their own client
 acceptance; the MAGE observer files are not evidence of those client scenarios.
-The prototype must not be labeled a fix for the legacy first-SHOW defect, a
+Independent rendering must not be labeled a fix for the legacy first-SHOW defect, a
 memory fix, or completion of the remaining Reload-required framework.

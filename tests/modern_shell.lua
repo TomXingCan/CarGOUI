@@ -179,9 +179,20 @@ test("MODERN SHELL real Proc Advanced transitions settle immediately at every na
             state.specID = 62; state:fire("PLAYER_SPECIALIZATION_CHANGED", "player"); state:flushTimers()
             addon:SelectOptionsCategory("proc")
             local controls, section = panel.controls, panel.procAdvancedSection
-            for _, choice in ipairs(controls.procArt_mode.choices) do
-                if choice.value == "custom" then choice:Click(); break end
+            -- Exercise the release-facing editor; legacy replacement controls
+            -- remain covered only by the explicit development fixtures.
+            controls.procPresentationPolicy:Click()
+            truthy(controls.procPresentationPolicy.menu:IsShown())
+            for _, choice in ipairs(controls.procPresentationPolicy.choices) do
+                if choice.value == "independent" and choice:IsShown() and choice:IsEnabled() then
+                    choice:Click(); break
+                end
             end
+            equal(addon:GetProcPresentationPolicy(), "independent")
+            truthy(addon:GetSelectedProcColorEntry())
+            truthy(controls.procIndependentRegion:IsShown() and controls.procIndependentRegion:IsEnabled())
+            controls.procIndependentRegion:Click()
+            truthy(controls.procIndependentRegion:GetChecked()); truthy(section:IsShown())
             local before = copy(addon.db)
             controls.procAdvanced:Click()
             if collapsing then

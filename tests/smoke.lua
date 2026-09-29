@@ -1132,6 +1132,11 @@ local function setup(saved, loggedIn, client)
         setfenv(chunk, env)
         chunk("CarGOUI", addon)
     end
+    -- Only explicit development fixtures reopen the historical implementation.
+    -- No shipped setting exposes this override; default fixtures stay release-safe.
+    if client.legacyProcDevelopment then
+        addon.IsProcLegacyReplacementAllowed = function() return true end
+    end
     return env, addon, state
 end
 
@@ -1142,6 +1147,15 @@ local function login(saved, late, client)
     equal(#state.errors, 0, "startup errors")
     return env, addon, state
 end
+
+local function LegacyClient(client)
+    local result = {}
+    for key, value in pairs(client or {}) do result[key] = value end
+    result.legacyProcDevelopment = true
+    return result
+end
+local function legacySetup(saved, late, client) return setup(saved, late, LegacyClient(client)) end
+local function legacyLogin(saved, late, client) return login(saved, late, LegacyClient(client)) end
 
 local function savedPosition(addon, env, x, y)
     equal(addon:GetMobilityConfig().position.x, x, "saved horizontal reminder offset")
@@ -7881,12 +7895,25 @@ assert(loadfile(testRoot .. "/class_tools_research_smoke.lua"))({ test = test, e
     login = login, mobilityLogin = mobilityLogin, putAura = putAura,
     nativeText = nativeText, procText = procText })
 
-for _, suite in ipairs({ "proc_independent_runtime.lua", "proc_independent_artwork.lua", "proc_independent_settings.lua", "proc_policy_options.lua", "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_numeric_renderer.lua", "proc_appearance_options.lua",
+-- Keep historical takeover regressions intact in explicit development fixtures.
+-- Release suites below receive the unmodified production default and no opt-in.
+local legacyProcSuites = {
+    ["proc_appearance_renderer.lua"] = true, ["proc_suppression.lua"] = true,
+    ["proc_animation_contract.lua"] = true, ["proc_numeric_renderer.lua"] = true,
+    ["proc_appearance_options.lua"] = true, ["proc_numeric_options.lua"] = true,
+    ["proc_tint_options.lua"] = true, ["proc_artwork_color_picker.lua"] = true,
+    ["proc_preview_safety.lua"] = true, ["proc_safety.lua"] = true,
+    ["proc_policy_options.lua"] = true,
+    ["modern_pages.lua"] = true,
+}
+for _, suite in ipairs({ "proc_release_renderer.lua", "proc_release_options.lua", "proc_release_runtime.lua", "proc_independent_runtime.lua", "proc_independent_artwork.lua", "proc_independent_settings.lua", "proc_policy_options.lua", "proc_appearance_data.lua", "proc_appearance_renderer.lua", "proc_suppression.lua", "proc_animation_contract.lua", "proc_numeric_renderer.lua", "proc_appearance_options.lua",
     "numeric_controls.lua", "numeric_options.lua", "proc_numeric_options.lua", "proc_tint_options.lua",
     "modern_controls.lua", "modern_shell.lua", "modern_pages.lua", "modern_slider_contract.lua", "contextual_options.lua", "proc_artwork_color_picker.lua", "proc_diagnostics.lua", "proc_native_lifecycle.lua", "proc_safety.lua", "proc_preview_safety.lua", "proc_runtime_lifecycle.lua" }) do
     assert(loadfile(testRoot .. "/" .. suite))(setmetatable({
         test = test, equal = equal, truthy = truthy, same = same, copy = copy, secret = secret,
-        root = root, testRoot = testRoot, metadata = metadata, login = login, setup = setup, options = options,
+        root = root, testRoot = testRoot, metadata = metadata,
+        login = legacyProcSuites[suite] and legacyLogin or login, setup = legacyProcSuites[suite] and legacySetup or setup,
+        productionLogin = login, productionSetup = setup, legacyLogin = legacyLogin, legacySetup = legacySetup, options = options,
         putAura = putAura, showProc = showProc, procFrame = procFrame, procText = procText,
         mobilityLogin = mobilityLogin, currentLive = currentLive, counts = counts,
         transferSeed = transferSeed, transferPage = transferPage, prepareSettings = prepareSettings,

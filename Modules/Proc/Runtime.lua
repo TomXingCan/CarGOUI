@@ -237,7 +237,10 @@ local function ConfigureProc(self)
     end
     self.procClass, self.procSpec, self.procDefinitions = class, spec, definitions
     self.procTracking, self.procStatusReason = true, "Native aura tracking; Lua does not read aura presence, stacks or time."
-    if not self:IsProcIndependentPolicy() and self.InstallProcArtworkHooks then self:InstallProcArtworkHooks() end
+    if not self:IsProcIndependentPolicy() then
+        self:NotifyProcLegacyArtworkDisabled(config)
+        if self:IsProcLegacyReplacementAllowed() and self.InstallProcArtworkHooks then self:InstallProcArtworkHooks() end
+    end
     if self:IsProcQuarantined() then return false end
     for _, event in ipairs(events) do self:RegisterEvent(event, OnProcEvent) end
     self:RenderProcState()

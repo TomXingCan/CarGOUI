@@ -11,6 +11,14 @@ local function Independent(self)
     return self.IsProcIndependentPolicy and self:IsProcIndependentPolicy()
 end
 
+local function LegacyReplacementAllowed(self)
+    return self.IsProcLegacyReplacementAllowed and self:IsProcLegacyReplacementAllowed() == true
+end
+
+local function IndependentPreview(self)
+    return self.GetProcPresentationPolicy and self:GetProcPresentationPolicy() == "independent"
+end
+
 local function IndependentOwnershipClear(self, cleaning)
     local owners = self.procSuppressedOverlays
     if not owners or not next(owners) then return true end
@@ -65,6 +73,7 @@ end
 
 local function SuppressNativeOverlay(self, overlay, record)
     if Independent(self) then error("independent artwork cannot acquire native ownership") end
+    if not LegacyReplacementAllowed(self) then error("legacy native replacement is unavailable in this build") end
     self.procSuppressedOverlays = self.procSuppressedOverlays or {}
     -- Ownership records cleanup authority, not the current native alpha. A
     -- public native refresh may write the texture again; never read it back.
@@ -302,6 +311,12 @@ local function Signature(appearance, asset, opacity)
 end
 
 local function Draw(self, entry, appearance, asset, opacity, preview, continuous)
+    -- This final boundary also protects direct preview/refresh calls from a
+    -- dormant legacy Custom or Timer Only setting. Native samples remain valid.
+    local independent = preview and IndependentPreview(self) or (not preview and Independent(self))
+    if not independent and not LegacyReplacementAllowed(self) and (not preview or appearance.mode ~= "native") then
+        return nil, "native replacement unavailable in this build"
+    end
     local frame = Acquire(self, entry, preview)
     local root = SpellActivationOverlayFrame
     local nativeScale, uiScale = root and root.GetEffectiveScale and root:GetEffectiveScale(), UIParent:GetEffectiveScale()
@@ -390,6 +405,7 @@ end
 
 local function RenderRegion(self, entry, visible, opacity, continuous)
     if Independent(self) then return RenderIndependent(self, entry, continuous) end
+    if not LegacyReplacementAllowed(self) then FailOpen(self, entry, "native artwork retained"); return end
     local appearance = self:GetProcArtworkPresentation(entry)
     local frame = self.procArtworkFrames and self.procArtworkFrames[entry.id]
     if appearance.mode == "native" then FailOpen(self, entry, "native mode"); return end
@@ -445,7 +461,9 @@ function addon:RenderProcArtwork(selected, continuous)
     local independent = Independent(self)
     if independent and not IndependentOwnershipClear(self) then self:StopProcArtwork(); return end
     local preferencesOK, visible, opacity = true, true, 1
-    if not independent then preferencesOK, visible, opacity = self:RunProcSafe("preferences", Preferences) end
+    if not independent and LegacyReplacementAllowed(self) then
+        preferencesOK, visible, opacity = self:RunProcSafe("preferences", Preferences)
+    end
     if not preferencesOK or visible == nil then
         self:StopProcArtwork()
         for _, definition in ipairs(self.procDefinitions or {}) do
@@ -469,6 +487,12 @@ end
 
 local function Observe(self, root, ownerID, textureID, position, scale, r, g, b)
     if Independent(self) then IndependentOwnershipClear(self); return end
+    if not LegacyReplacementAllowed(self) then
+        -- Installed secure hooks cannot be removed. With acquisition closed,
+        -- ignore all native arguments and retry only our known cleanup handles.
+        self:StopProcArtwork()
+        return
+    end
     if root ~= SpellActivationOverlayFrame or self.procArtworkHookRoot ~= root
         or not Number(ownerID, 1, 2147483647) or not Number(textureID, 1, 2147483647)
         or not Number(position, 0, 100) or not Number(scale, 0.001, 10) then return end
@@ -525,6 +549,10 @@ end
 
 function addon:InstallProcArtworkHooks()
     if Independent(self) then return IndependentOwnershipClear(self) end
+    if not LegacyReplacementAllowed(self) then
+        self.procArtworkHookReason = "native replacement unavailable in this build"
+        return false
+    end
     if self:IsProcQuarantined() then return false end
     local root = SpellActivationOverlayFrame
     if self.procArtworkHookRoot == root and root then return true end
@@ -543,7 +571,7 @@ function addon:InstallProcArtworkHooks()
             installed.showAttempted = true
             hooksecurefunc(root, "ShowOverlay", function(owner, ...)
             if Independent(self) then IndependentOwnershipClear(self); return end
-            if self:IsProcQuarantined() or not self.procTracking then
+            if not LegacyReplacementAllowed(self) or self:IsProcQuarantined() or not self.procTracking then
                 local cleaned = pcall(Observe, self, owner, ...)
                 if not cleaned then self:RecordProcFailure("release") end
                 return
@@ -589,7 +617,9 @@ function addon:StopProcArtworkPreview()
 end
 
 local function DrawPreview(self, entry, continuous)
-    local appearance, asset = self:ResolveProcAppearance(entry, nil, nil, true)
+    local requested
+    if not IndependentPreview(self) and not LegacyReplacementAllowed(self) then requested = self:NewProcAppearance() end
+    local appearance, asset = self:ResolveProcAppearance(entry, requested, nil, true)
     if appearance.mode == "timer" or not asset then return end
     return Draw(self, entry, appearance, asset, 1, true, continuous)
 end
@@ -659,6 +689,11 @@ function addon:GetProcArtworkDiagnostic(entry)
             .. "; asset=" .. (appearance.assetKey or "CUI mapped artwork")
             .. "; renderer=" .. (reason == "ready" and "ready" or "unavailable")
             .. "; native suppression=" .. (owned and "unexpected retained ownership" or "not acquired")
+            .. "; status=" .. reason
+    end
+    if not LegacyReplacementAllowed(self) then
+        return "policy=native; saved legacy mode=" .. appearance.mode
+            .. "; native suppression=" .. (owned and "cleanup pending" or "not acquired")
             .. "; status=" .. reason
     end
     return "mode=" .. appearance.mode .. "; asset=" .. (appearance.assetKey or "native mapped artwork")

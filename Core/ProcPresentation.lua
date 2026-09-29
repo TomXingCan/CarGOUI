@@ -1,5 +1,11 @@
 local _, addon = ...
 
+-- Legacy per-region native takeover is retained for development regressions,
+-- but no SavedVariables, import, UI, or slash setting can enable it in 1.0.1.
+function addon:IsProcLegacyReplacementAllowed()
+    return false
+end
+
 -- Explicit policy selection is scoped to the current class/spec. The legacy
 -- region mode is never rewritten to opt a region into independent artwork.
 function addon:GetProcPresentationPolicy(config)
@@ -29,7 +35,23 @@ function addon:IsProcArtworkEditable(entry)
     if self:GetProcPresentationPolicy() == "independent" then
         return self:IsProcIndependentArtworkRegionEnabled(entry)
     end
-    return self:GetProcRegionAppearance(entry).mode == "custom"
+    return self:IsProcLegacyReplacementAllowed() and self:GetProcRegionAppearance(entry).mode == "custom"
+end
+
+function addon:NotifyProcLegacyArtworkDisabled(config)
+    if self.procLegacyArtworkNotice or self:IsProcLegacyReplacementAllowed()
+        or self:GetProcPresentationPolicy(config) == "independent" then return end
+    for _, region in pairs(config and config.regions or {}) do
+        local appearance = type(region) == "table" and region.appearance
+        if type(appearance) == "table" and (appearance.mode == "custom" or appearance.mode == "timer") then
+            self.procLegacyArtworkNotice = true
+            local ok = pcall(function()
+                self:Print(self:Text("Native artwork stays under Blizzard control. CUI adds timers only. Saved Custom and Timer-only overrides are preserved but inactive; use Independent CUI for custom artwork."))
+            end)
+            if not ok then self:RecordProcFailure("preferences") end
+            return
+        end
+    end
 end
 
 local function Public(value)

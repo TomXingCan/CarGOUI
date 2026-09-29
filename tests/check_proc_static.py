@@ -125,9 +125,10 @@ artwork = code((root / "UI/ProcArtwork.lua").read_text(encoding="utf-8"))
 resolver = code((root / "Core/ProcAppearance.lua").read_text(encoding="utf-8"))
 catalog = code((root / "Database/ProcAssets.lua").read_text(encoding="utf-8"))
 editor = code((root / "UI/ProcAppearanceOptions.lua").read_text(encoding="utf-8"))
+presentation = code((root / "Core/ProcPresentation.lua").read_text(encoding="utf-8"))
 for relative in ("UI/ProcArtwork.lua", "Core/ProcAppearance.lua", "Database/ProcAssets.lua", "UI/ProcAppearanceOptions.lua"):
     assert declared.count(relative) == 1, "Presentation source must load exactly once: " + relative
-absent(artwork + resolver + editor, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_AURA", r"C_UnitAuras",
+absent(artwork + resolver + editor + presentation, [r"OnUpdate", r"NewTicker", r"COMBAT_LOG", r"UNIT_AURA", r"C_UnitAuras",
        r"UnitBuff\s*\(", r"UnitAura\s*\(", r"GetVertexColor\s*\(", r"GetAlpha\s*\(",
        r"SetCVar\s*\(", r"SetCVarBool\s*\(", r"GetRemainingDuration\s*\("],
        "Appearance cannot poll, reconstruct triggers, read native opacity/color, query Aura state or write overlay CVars")
@@ -152,5 +153,11 @@ assert 'GetProcAsset(item)' in resolver and 'procAppearanceLimits' in resolver
 assert 'appearance = RegionAppearanceSetting' in database and 'CopyProcAppearance(region.appearance)' in database
 assert 'ResetProcRegionAppearance' in database
 assert 'ProcArtwork' not in (root / 'Modules/Proc/AuraState.lua').read_text(encoding='utf-8')
-print("PASS Separate appearance schema/resolver, bounded artwork pools, lifecycle hooks and native suppression ownership ship without changing Aura slots")
+assert re.search(r"function addon:IsProcLegacyReplacementAllowed\(\)\s+return false\s+end", presentation)
+assert "if self:IsProcLegacyReplacementAllowed() and self.InstallProcArtworkHooks" in proc_runtime
+assert "IsProcLegacyReplacementAllowed" in artwork and "IsProcLegacyReplacementAllowed" in resolver
+assert "IsProcLegacyReplacementAllowed" in editor
+assert "legacyProcDevelopment" not in database + presentation + proc_runtime + artwork
+assert not any("tests/" in name for name in declared)
+print("PASS Release gate disables legacy replacement while retaining cleanup, independent artwork and unchanged Aura slots")
 print("Proc static checks passed; native security, actual matching and combat visuals require Retail acceptance.")

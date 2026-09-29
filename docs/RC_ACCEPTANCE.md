@@ -1,3 +1,25 @@
+# 1.0.1 release closeout status
+
+The author accepted four P1 independent Proc checks on `bc91f3fe975e059fda2196cb4b6d75d40e371006`:
+real acquisition/consumption/reacquisition/end, artwork switches preserving Timer,
+saved-zero cold startup, and stock-opacity restoration pausing independent
+artwork while Timer/preferences remain. Source: **author onsite confirmation**
+in the existing Retail 69933 MAGE/62 context, not automated or video verification.
+See [the scoped record](PROC_INDEPENDENT_ACCEPTANCE.md).
+
+1.0.1 exposes only Native artwork with CUI Timer and opt-in independent CUI
+artwork with CUI Timer. Old per-region Custom/Timer Only suppression is unavailable; stored
+data is retained, with no saved/imported route to reopen takeover. Its old
+first-SHOW and consumption exposure defects are not marked fixed.
+
+Use [the final release checklist](RELEASE_1_0_1_CHECKLIST.md) and
+[#15 admission review](PROC_MEMORY_RELEASE_REVIEW.md) for remaining work. Do not
+repeat all historical experiments or read old v1.0.0 authorization as permission
+to merge, tag or publish 1.0.1. Historical evidence and checklist rows below remain
+as context; untested rows are not silently signed off by the P1 confirmation.
+
+---
+
 # Release acceptance: RC3 baseline and 1.0.0 localization
 
 RC3 was based on RC2 (`b2eeb3a4bd418c5d61f2a3b3ac71e8de9345585a`) and added launchers/minimap preferences. The user subsequently reported RC3 working in their test environment, without a complete per-build/class/manager matrix. Version 1.0.0 preserves that baseline and adds automatic localization. [LAUNCHER_RC3.md](LAUNCHER_RC3.md) and [DRAG_RC2.md](DRAG_RC2.md) retain focused checks and evidence boundaries. Publication is authorized for the new task, but authorization/prepared text is not proof of a remote upload; [1.0.0 release notes](RELEASE_1.0.0.md) record current capability limitations. Automated tests/source declarations cannot establish native dragging, encoding, glyphs, taint or combat behavior.

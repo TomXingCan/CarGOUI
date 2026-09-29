@@ -125,6 +125,10 @@ function addon:GetProcArtworkPresentation(entry)
         -- This is a detached rendering snapshot, not a migration of saved mode.
         -- Explicit Preview can inspect an enabled region while live art is off.
         appearance.mode = self:IsProcIndependentArtworkRegionEnabled(entry) and "custom" or "timer"
+    elseif self.IsProcLegacyReplacementAllowed and not self:IsProcLegacyReplacementAllowed() then
+        -- Keep saved development overrides intact; only the effective snapshot
+        -- becomes native, including isolated Preview and stale picker drafts.
+        appearance = self:NewProcAppearance()
     end
     local draft = self.procArtworkColorPreview
     if appearance.mode == "custom" and SameRegion(draft, entry) and self:GetCurrentProcRegion(entry) then
